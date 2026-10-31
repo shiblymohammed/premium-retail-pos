@@ -1,0 +1,614 @@
+// Premium Retail POS — Prisma Schema
+// Phase 1: Identity, Access Control, Organization & Locations
+//
+// Invariant 11: Backend-Enforced Role & Location Scoping
+// Invariant 10: Super Admin-Exclusive Price Changes
+// ADR-004: Dual-Axis Authorization (RBAC + Location Scope)
+// ADR-008: Immutable Audit Logging
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+/// System-wide user roles enforcing RBAC (ADR-004)
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  CENTRAL_MANAGER
+  SUB_WAREHOUSE_MANAGER
+  STORE_MANAGER
+  CASHIER
+  STAFF
+}
+
+/// Location type within the organizational hierarchy
+enum LocationType {
+  MAIN_WAREHOUSE
+  SUB_WAREHOUSE
+  RETAIL_STORE
+}
+
+/// Types of inventory movements (Invariant 4: Ledger-Driven Stock)
+enum MovementType {
+  OPENING_STOCK
+  SUPPLIER_RECEIPT
+  SALE
+  SALE_CANCELLATION
+  TRANSFER_DISPATCH
+  TRANSFER_RECEIPT
+  STOCK_ADJUSTMENT
+  RETURN_INWARD
+  DAMAGE_WRITEOFF
+}
+
+/// Stock states for inventory segregation
+enum StockState {
+  AVAILABLE
+  IN_TRANSIT
+  RESERVED
+  QUARANTINED
+}
+
+/// Transfer lifecycle states (Phase 5)
+enum TransferStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PARTIALLY_DISPATCHED
+  DISPATCHED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  REJECTED
+  CANCELLED
+}
+
+/// Invoice lifecycle (Invariant 8: No silent deletion)
+enum InvoiceStatus {
+  FINALIZED
+  CANCELLED
+}
+
+/// Audit session status (ADR-010: Location Freeze)
+enum AuditSessionStatus {
+  ACTIVE    // Location is frozen for stock movements
+  SUBMITTED // Counts submitted, pending manager review
+  APPROVED  // Manager approved adjustments
+  CLOSED    // Audit concluded
+  ABORTED   // Audit cancelled without adjustments
+}
+
+/// Loan status tracking
+enum LoanStatus {
+  ACTIVE
+  FULLY_REPAID
+  WRITTEN_OFF
+}
+
+/// Repayment confirmation state (Invariant 12)
+enum RepaymentStatus {
+  PENDING
+  CONFIRMED
+}
+
+// ============================================================
+// IDENTITY & ACCESS (Module 1)
+// ============================================================
+
+/// Core user account for authentication and authorization
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  role          Role
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  // Relations
+  employee       Employee?
+  locationScopes UserLocationScope[]
+  auditEvents    AuditEvent[]        @relation("AuditActor")
+
+  @@map("users")
+}
+
+/// Binds a user to authorized locations (ADR-004: Location axis)
+/// Super Admin has implicit global access; others require explicit scopes
+model UserLocationScope {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  locationId String   @map("location_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, locationId])
+  @@map("user_location_scopes")
+}
+
+// ============================================================
+// ORGANIZATION & LOCATIONS (Module 2)
+// ============================================================
+
+/// Company-wide configuration (currency, timezone, invoice prefix)
+model Company {
+  id              String   @id @default(uuid())
+  name            String
+  currency        String   @default("INR")
+  timezone        String   @default("Asia/Kolkata")
+  invoicePrefix   String   @default("INV") @map("invoice_prefix")
+  gstNumber       String?  @map("gst_number")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  locations Location[]
+
+  @@map("companies")
+}
+
+/// Physical location within the tiered hierarchy
+/// Main Warehouse → Sub-Warehouses → Retail Stores
+model Location {
+  id           String       @id @default(uuid())
+  companyId    String       @map("company_id")
+  name         String
+  type         LocationType
+  address      String?
+  latitude     Decimal?     @db.Decimal(10, 7)
+  longitude    Decimal?     @db.Decimal(10, 7)
+  geofenceRadius Int?       @map("geofence_radius") // meters, for attendance (OD-12)
+  parentId     String?      @map("parent_id")
+  managerId    String?      @map("manager_id")
+  isActive     Boolean      @default(true) @map("is_active")
+  isAuditLocked Boolean     @default(false) @map("is_audit_locked") // ADR-010: Freeze during audit
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  company         Company             @relation(fields: [companyId], references: [id])
+  parent          Location?           @relation("LocationHierarchy", fields: [parentId], references: [id])
+  children        Location[]          @relation("LocationHierarchy")
+  userScopes      UserLocationScope[]
+  employees       Employee[]
+  inventoryMovements InventoryMovement[]
+  transfersFrom   Transfer[]          @relation("TransferSource")
+  transfersTo     Transfer[]          @relation("TransferDestination")
+  invoices        Invoice[]
+  auditSessions   AuditSession[]
+
+  @@map("locations")
+}
+
+// ============================================================
+// EMPLOYEE PROFILES (Module 2 cont.)
+// ============================================================
+
+/// Employee profile linked 1:1 to a User account
+model Employee {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  employeeCode    String   @unique @map("employee_code")
+  firstName       String   @map("first_name")
+  lastName        String   @map("last_name")
+  phone           String?
+  locationId      String   @map("location_id") // Primary workplace
+  reportingToId   String?  @map("reporting_to_id")
+  hireDate        DateTime @map("hire_date")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location      Location   @relation(fields: [locationId], references: [id])
+  reportingTo   Employee?  @relation("ReportingChain", fields: [reportingToId], references: [id])
+  subordinates  Employee[] @relation("ReportingChain")
+  loans         Loan[]
+  attendances   Attendance[]
+
+  @@map("employees")
+}
+
+// ============================================================
+// PRODUCT CATALOGUE & PRICING (Module 3)
+// ============================================================
+
+/// Product master — owns canonical base unit and carton conversion
+/// Invariant 1: Canonical Base Unit per Product
+/// Invariant 2: Configurable Carton-to-Packet Conversion
+/// Invariant 3: Native Packet-Only Products
+model Product {
+  id              String   @id @default(uuid())
+  name            String
+  description     String?
+  baseUnit        String   @default("packet") @map("base_unit") // Invariant 1
+  unitsPerCarton  Int?     @map("units_per_carton") // Invariant 2; null = packet-only (Invariant 3)
+  sellingPrice    Decimal  @db.Decimal(12, 2) @map("selling_price")
+  purchasePrice   Decimal  @db.Decimal(12, 2) @map("purchase_price")
+  reorderLevel    Int?     @map("reorder_level") // Base units threshold for replenishment
+  categoryId      String?  @map("category_id")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  category       Category?        @relation(fields: [categoryId], references: [id])
+  variants       Variant[]
+  priceHistory   PriceChangeLog[]
+
+  @@map("products")
+}
+
+/// Product category for organizational grouping
+model Category {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  products Product[]
+
+  @@map("categories")
+}
+
+/// Stock-distinct product variant (size, colour, style)
+/// Each variant has its own SKU, barcode, and independent stock tracking
+model Variant {
+  id        String  @id @default(uuid())
+  productId String  @map("product_id")
+  sku       String  @unique
+  barcode   String? @unique
+  name      String  // e.g., "Red / Large"
+  size      String?
+  colour    String?
+  style     String?
+  isActive  Boolean @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  product            Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  inventoryMovements InventoryMovement[]
+  saleLines          SaleLine[]
+  transferLines      TransferLine[]
+  auditCountItems    AuditCountItem[]
+
+  @@map("variants")
+}
+
+/// Invariant 10 & ADR-008: Immutable log of every price change
+/// Only Super Admin may create entries
+model PriceChangeLog {
+  id              String   @id @default(uuid())
+  productId       String   @map("product_id")
+  changedByUserId String   @map("changed_by_user_id")
+  fieldChanged    String   @map("field_changed") // "selling_price" or "purchase_price"
+  oldValue        Decimal  @db.Decimal(12, 2) @map("old_value")
+  newValue        Decimal  @db.Decimal(12, 2) @map("new_value")
+  reason          String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("price_change_logs")
+}
+
+// ============================================================
+// INVENTORY LEDGER (Module 4)
+// ============================================================
+
+/// Invariant 4: Append-only immutable inventory movement ledger
+/// ADR-002: Stock balance = SUM(quantityBaseUnits) from movements
+/// ADR-009: Negative balances permitted with warnings (OD-03)
+model InventoryMovement {
+  id               String       @id @default(uuid())
+  variantId        String       @map("variant_id")
+  locationId       String       @map("location_id")
+  type             MovementType
+  stockState       StockState   @default(AVAILABLE) @map("stock_state")
+  quantityBaseUnits Int         @map("quantity_base_units") // positive=inflow, negative=outflow
+  referenceType    String?      @map("reference_type") // "invoice", "transfer", "audit", etc.
+  referenceId      String?      @map("reference_id")   // FK to source document
+  actorId          String       @map("actor_id")
+  notes            String?
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  // Relations
+  variant  Variant  @relation(fields: [variantId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  // This table is append-only: no update/delete in application logic
+  @@index([variantId, locationId])
+  @@index([referenceType, referenceId])
+  @@index([createdAt])
+  @@map("inventory_movements")
+}
+
+// ============================================================
+// TRANSFERS & REPLENISHMENT (Module 6)
+// ============================================================
+
+/// Inter-location stock transfer with lifecycle state machine
+/// Invariant 5: In-transit stock isolation
+/// Invariant 6: Replenishment requests do not move stock
+model Transfer {
+  id                 String         @id @default(uuid())
+  transferNumber     String         @unique @map("transfer_number")
+  sourceLocationId   String         @map("source_location_id")
+  destLocationId     String         @map("dest_location_id")
+  status             TransferStatus @default(DRAFT)
+  requestedByUserId  String         @map("requested_by_user_id")
+  approvedByUserId   String?        @map("approved_by_user_id")
+  dispatchedByUserId String?        @map("dispatched_by_user_id")
+  receivedByUserId   String?        @map("received_by_user_id")
+  approvedAt         DateTime?      @map("approved_at")
+  dispatchedAt       DateTime?      @map("dispatched_at")
+  receivedAt         DateTime?      @map("received_at")
+  notes              String?
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  sourceLocation Location       @relation("TransferSource", fields: [sourceLocationId], references: [id])
+  destLocation   Location       @relation("TransferDestination", fields: [destLocationId], references: [id])
+  lines          TransferLine[]
+
+  @@map("transfers")
+}
+
+/// Individual line item within a transfer
+model TransferLine {
+  id                  String  @id @default(uuid())
+  transferId          String  @map("transfer_id")
+  variantId           String  @map("variant_id")
+  requestedQtyBase    Int     @map("requested_qty_base")  // Canonical base units
+  approvedQtyBase     Int?    @map("approved_qty_base")
+  dispatchedQtyBase   Int?    @map("dispatched_qty_base")
+  receivedQtyBase     Int?    @map("received_qty_base")
+  discrepancyNotes    String? @map("discrepancy_notes")
+
+  // Relations
+  transfer Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  variant  Variant  @relation(fields: [variantId], references: [id])
+
+  @@map("transfer_lines")
+}
+
+// ============================================================
+// POS & SALES (Module 7)
+// ============================================================
+
+/// Finalized sales invoice — immutable once created (Invariant 8)
+/// Invariant 9: Reversal-driven cancellation
+/// Invariant 13: Idempotency via idempotencyKey
+/// Invariant 14: Historical price snapshotting via SaleLines
+model Invoice {
+  id               String        @id @default(uuid())
+  invoiceNumber    String        @unique @map("invoice_number")
+  locationId       String        @map("location_id")
+  cashierUserId    String        @map("cashier_user_id")
+  status           InvoiceStatus @default(FINALIZED)
+  grossTotal       Decimal       @db.Decimal(12, 2) @map("gross_total")
+  discountTotal    Decimal       @db.Decimal(12, 2) @default(0) @map("discount_total")
+  netTotal         Decimal       @db.Decimal(12, 2) @map("net_total")
+  idempotencyKey   String        @unique @map("idempotency_key") // Invariant 13
+  cancelledAt      DateTime?     @map("cancelled_at")
+  cancelledByUserId String?      @map("cancelled_by_user_id")
+  cancellationReason String?     @map("cancellation_reason")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  location  Location   @relation(fields: [locationId], references: [id])
+  lines     SaleLine[]
+
+  // Invoices are never deleted (Invariant 8)
+  @@index([locationId, createdAt])
+  @@map("invoices")
+}
+
+/// Individual line item snapshot within an invoice
+/// Invariant 14: Captures price & conversion at time of sale
+model SaleLine {
+  id                    String  @id @default(uuid())
+  invoiceId             String  @map("invoice_id")
+  variantId             String  @map("variant_id")
+  quantityBaseUnits     Int     @map("quantity_base_units")
+  enteredUnit           String  @map("entered_unit")          // "packet" or "carton"
+  conversionRatioUsed   Int?    @map("conversion_ratio_used") // Snapshot of unitsPerCarton
+  unitPriceAtSale       Decimal @db.Decimal(12, 2) @map("unit_price_at_sale")
+  discountAmount        Decimal @db.Decimal(12, 2) @default(0) @map("discount_amount")
+  discountApprovedBy    String? @map("discount_approved_by")  // Manager userId if over-limit
+  lineTotal             Decimal @db.Decimal(12, 2) @map("line_total")
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  variant Variant @relation(fields: [variantId], references: [id])
+
+  @@map("sale_lines")
+}
+
+/// Audit trail for items removed from active (unfinalized) bills
+model CartDeletionLog {
+  id            String   @id @default(uuid())
+  locationId    String   @map("location_id")
+  cashierUserId String   @map("cashier_user_id")
+  variantId     String   @map("variant_id")
+  quantityRemoved Int    @map("quantity_removed")
+  reason        String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([locationId, createdAt])
+  @@map("cart_deletion_logs")
+}
+
+// ============================================================
+// STOCK AUDIT & RECOUNT (Module 9)
+// ============================================================
+
+/// Weekly physical stock audit session per location
+/// ADR-010: Location is frozen during active audit
+model AuditSession {
+  id              String             @id @default(uuid())
+  locationId      String             @map("location_id")
+  status          AuditSessionStatus @default(ACTIVE)
+  initiatedByUserId String           @map("initiated_by_user_id")
+  approvedByUserId  String?          @map("approved_by_user_id")
+  startedAt       DateTime           @default(now()) @map("started_at")
+  completedAt     DateTime?          @map("completed_at")
+
+  // Relations
+  location   Location         @relation(fields: [locationId], references: [id])
+  countItems AuditCountItem[]
+
+  @@map("audit_sessions")
+}
+
+/// Individual count entry within an audit session
+/// Invariant 7: Counts do not alter stock until approved
+model AuditCountItem {
+  id                 String  @id @default(uuid())
+  auditSessionId     String  @map("audit_session_id")
+  variantId          String  @map("variant_id")
+  expectedQtyBase    Int     @map("expected_qty_base")
+  countedQtyBase     Int?    @map("counted_qty_base")     // First count
+  recountQtyBase     Int?    @map("recount_qty_base")     // Recount if triggered
+  approvedQtyBase    Int?    @map("approved_qty_base")    // Final approved value
+  varianceBase       Int?    @map("variance_base")
+  requiresRecount    Boolean @default(false) @map("requires_recount")
+  adjustmentApproved Boolean @default(false) @map("adjustment_approved")
+  notes              String?
+
+  // Relations
+  auditSession AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade)
+  variant      Variant      @relation(fields: [variantId], references: [id])
+
+  @@unique([auditSessionId, variantId])
+  @@map("audit_count_items")
+}
+
+// ============================================================
+// ATTENDANCE (Module 10)
+// ============================================================
+
+/// Mobile attendance punch record with QR and GPS verification
+model Attendance {
+  id                String   @id @default(uuid())
+  employeeId        String   @map("employee_id")
+  locationId        String   @map("location_id")
+  punchType         String   @map("punch_type") // "IN" or "OUT"
+  punchTimestamp     DateTime @map("punch_timestamp")
+  qrVerified        Boolean  @default(false) @map("qr_verified")
+  gpsLatitude       Decimal? @db.Decimal(10, 7) @map("gps_latitude")
+  gpsLongitude      Decimal? @db.Decimal(10, 7) @map("gps_longitude")
+  gpsWithinFence    Boolean? @map("gps_within_fence")
+  correctedByUserId String?  @map("corrected_by_user_id")
+  correctionReason  String?  @map("correction_reason")
+  originalTimestamp DateTime? @map("original_timestamp") // Preserved if corrected
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId, punchTimestamp])
+  @@map("attendances")
+}
+
+// ============================================================
+// LOANS & ADVANCES (Module 11)
+// ============================================================
+
+/// Employee loan/advance record
+/// Invariant 12: Balance = Issued - Confirmed Repayments
+model Loan {
+  id              String     @id @default(uuid())
+  employeeId      String     @map("employee_id")
+  amount          Decimal    @db.Decimal(12, 2)
+  status          LoanStatus @default(ACTIVE)
+  approvedByUserId String   @map("approved_by_user_id")
+  terms           String?    // Repayment terms description
+  issueDate       DateTime   @map("issue_date")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  employee   Employee    @relation(fields: [employeeId], references: [id])
+  repayments Repayment[]
+
+  @@map("loans")
+}
+
+/// Individual repayment against a loan
+/// Invariant 12: Only CONFIRMED repayments reduce outstanding balance
+model Repayment {
+  id               String          @id @default(uuid())
+  loanId           String          @map("loan_id")
+  amount           Decimal         @db.Decimal(12, 2)
+  status           RepaymentStatus @default(PENDING)
+  confirmedByUserId String?        @map("confirmed_by_user_id")
+  paymentDate      DateTime        @map("payment_date")
+  isPayrollDeduction Boolean       @default(false) @map("is_payroll_deduction")
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  loan Loan @relation(fields: [loanId], references: [id], onDelete: Cascade)
+
+  @@map("repayments")
+}
+
+// ============================================================
+// AUDIT LOG (Module 12)
+// ============================================================
+
+/// Immutable append-only audit event log (ADR-008)
+model AuditEvent {
+  id           String   @id @default(uuid())
+  actorId      String   @map("actor_id")
+  action       String   // e.g., "PRICE_CHANGE", "SALE_CANCELLED", "DISCOUNT_OVERRIDE"
+  targetEntity String   @map("target_entity") // e.g., "Product", "Invoice"
+  targetId     String   @map("target_id")
+  beforeValue  String?  @map("before_value") @db.Text
+  afterValue   String?  @map("after_value")  @db.Text
+  reason       String?
+  ipAddress    String?  @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  actor User @relation("AuditActor", fields: [actorId], references: [id])
+
+  // This table is append-only: no update/delete in application logic
+  @@index([targetEntity, targetId])
+  @@index([actorId, createdAt])
+  @@map("audit_events")
+}
+
+// ============================================================
+// IDEMPOTENCY (ADR-006, Invariant 13)
+// ============================================================
+
+/// Stores processed idempotency keys to prevent duplicate mutations
+model IdempotencyRecord {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique @map("idempotency_key")
+  httpMethod     String   @map("http_method")
+  endpoint       String
+  statusCode     Int      @map("status_code")
+  responseBody   String?  @map("response_body") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at")
+  expiresAt      DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
