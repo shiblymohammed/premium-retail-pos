@@ -9,15 +9,15 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto, UpdateCompanyDto } from './dto';
-import { JwtAuthGuard } from '../auth/strategies/jwt.strategy';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 
 @Controller('companies')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 export class CompanyController {
   constructor(private readonly companyService: CompanyService) {}
 

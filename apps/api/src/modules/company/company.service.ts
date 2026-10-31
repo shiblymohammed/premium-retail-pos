@@ -113,20 +113,6 @@ export class CompanyService {
     // Verify company exists
     await this.findOne(id);
 
-    // If updating name, check for duplicates
-    if (updateCompanyDto.name) {
-      const existingCompany = await this.prisma.company.findFirst({
-        where: {
-          name: updateCompanyDto.name,
-          id: { not: id },
-        },
-      });
-
-      if (existingCompany) {
-        throw new ConflictException(`Company with name "${updateCompanyDto.name}" already exists`);
-      }
-    }
-
     return this.prisma.company.update({
       where: { id },
       data: updateCompanyDto,
