@@ -15,7 +15,7 @@ import { LocationType } from '@prisma/client';
 import { Type } from 'class-transformer';
 
 export class CreateLocationDto {
-  @IsUUID()
+  @IsString()
   @IsNotEmpty()
   companyId: string;
 
@@ -58,7 +58,8 @@ export class CreateLocationDto {
   geofenceRadius?: number;
 
   @IsOptional()
-  @IsUUID()
+  @IsString()
+  @IsNotEmpty()
   @ValidateIf((o) => o.type !== LocationType.MAIN_WAREHOUSE)
   parentId?: string;
 

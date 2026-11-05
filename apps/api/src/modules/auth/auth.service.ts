@@ -1,8 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { UsersService } from '../users/users.service';
+import { AuthRateLimitService } from './auth-rate-limit.service';
 
 export interface JwtPayload {
   sub: string;      // userId
@@ -19,25 +21,31 @@ export interface TokenPair {
 @Injectable()
 export class AuthService {
   private readonly BCRYPT_ROUNDS = 12;
+  private readonly dummyPasswordHash = bcrypt.hash(
+    randomBytes(32).toString('hex'),
+    this.BCRYPT_ROUNDS,
+  );
 
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly authRateLimit: AuthRateLimitService,
   ) {}
 
   /**
    * Authenticate user with email + password.
    * Returns JWT access + refresh tokens on success.
    */
-  async login(email: string, password: string): Promise<TokenPair> {
-    const user = await this.usersService.findByEmail(email);
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('Invalid credentials');
+  async login(email: string, password: string, clientIp: string): Promise<TokenPair> {
+    if (Buffer.byteLength(password, 'utf8') > 72) {
+      throw new BadRequestException('Password exceeds the supported maximum length');
     }
-
-    const passwordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!passwordValid) {
+    await this.authRateLimit.checkLoginAttempt(clientIp, email);
+    const user = await this.usersService.findByEmail(email);
+    const passwordHash = user?.passwordHash ?? await this.dummyPasswordHash;
+    const passwordValid = await bcrypt.compare(password, passwordHash);
+    if (!user || !user.isActive || !passwordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -46,8 +54,9 @@ export class AuthService {
 
     // Fetch user's authorized location IDs for the JWT payload
     const locationIds = await this.usersService.getUserLocationIds(user.id);
+    await this.authRateLimit.clearLoginCombination(clientIp, email);
 
-    return this.generateTokenPair({
+    return this.issueTokenPair({
       sub: user.id,
       email: user.email,
       role: user.role,
@@ -65,14 +74,27 @@ export class AuthService {
   /**
    * Generate access + refresh token pair from JWT payload.
    */
-  private generateTokenPair(payload: JwtPayload): TokenPair {
+  private async issueTokenPair(payload: JwtPayload, rotateFromHash?: string): Promise<TokenPair> {
     const accessToken = this.jwtService.sign(payload);
 
     const refreshToken = this.jwtService.sign(payload, {
       secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
       expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d') as any,
+      algorithm: 'HS256',
+      jwtid: randomUUID(),
     });
 
+    const refreshTokenHash = this.hashToken(refreshToken);
+    if (rotateFromHash) {
+      const result = await this.usersService.rotateRefreshTokenHash(
+        payload.sub,
+        rotateFromHash,
+        refreshTokenHash,
+      );
+      if (result.count !== 1) throw new UnauthorizedException('Refresh token already used');
+    } else {
+      await this.usersService.setRefreshTokenHash(payload.sub, refreshTokenHash);
+    }
     return { accessToken, refreshToken };
   }
 
@@ -83,6 +105,7 @@ export class AuthService {
     try {
       const decoded = this.jwtService.verify<JwtPayload>(refreshToken, {
         secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        algorithms: ['HS256'],
       });
 
       const user = await this.usersService.findById(decoded.sub);
@@ -90,16 +113,25 @@ export class AuthService {
         throw new UnauthorizedException('User account is deactivated');
       }
 
+      const oldHash = this.hashToken(refreshToken);
+      if (!user.refreshTokenHash || user.refreshTokenHash !== oldHash) {
+        throw new UnauthorizedException('Refresh token already used or revoked');
+      }
+
       const locationIds = await this.usersService.getUserLocationIds(user.id);
 
-      return this.generateTokenPair({
+      return this.issueTokenPair({
         sub: user.id,
         email: user.email,
         role: user.role,
         locationIds,
-      });
+      }, oldHash);
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
+  }
+
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 }

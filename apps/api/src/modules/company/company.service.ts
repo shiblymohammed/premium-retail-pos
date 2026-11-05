@@ -67,11 +67,19 @@ export class CompanyService {
    * @param id Company ID
    * @returns Company details
    */
-  async findOne(id: string) {
-    const company = await this.prisma.company.findUnique({
-      where: { id },
+  async findOne(id: string, allowedLocationIds?: string[]) {
+    const company = await this.prisma.company.findFirst({
+      where: {
+        id,
+        ...(allowedLocationIds !== undefined
+          ? { locations: { some: { id: { in: allowedLocationIds } } } }
+          : {}),
+      },
       include: {
         locations: {
+          ...(allowedLocationIds !== undefined
+            ? { where: { id: { in: allowedLocationIds } } }
+            : {}),
           select: {
             id: true,
             name: true,
@@ -86,11 +94,6 @@ export class CompanyService {
           },
           orderBy: {
             type: 'asc',
-          },
-        },
-        _count: {
-          select: {
-            locations: true,
           },
         },
       },
@@ -158,8 +161,12 @@ export class CompanyService {
    * @param id Company ID
    * @returns Company statistics
    */
-  async getStatistics(id: string) {
-    await this.findOne(id);
+  async getStatistics(id: string, allowedLocationIds?: string[]) {
+    await this.findOne(id, allowedLocationIds);
+    const locationWhere = {
+      companyId: id,
+      ...(allowedLocationIds !== undefined ? { id: { in: allowedLocationIds } } : {}),
+    };
 
     const [
       totalLocations,
@@ -168,11 +175,11 @@ export class CompanyService {
       subWarehouses,
       retailStores,
     ] = await Promise.all([
-      this.prisma.location.count({ where: { companyId: id } }),
-      this.prisma.location.count({ where: { companyId: id, isActive: true } }),
-      this.prisma.location.count({ where: { companyId: id, type: 'MAIN_WAREHOUSE' } }),
-      this.prisma.location.count({ where: { companyId: id, type: 'SUB_WAREHOUSE' } }),
-      this.prisma.location.count({ where: { companyId: id, type: 'RETAIL_STORE' } }),
+      this.prisma.location.count({ where: locationWhere }),
+      this.prisma.location.count({ where: { ...locationWhere, isActive: true } }),
+      this.prisma.location.count({ where: { ...locationWhere, type: 'MAIN_WAREHOUSE' } }),
+      this.prisma.location.count({ where: { ...locationWhere, type: 'SUB_WAREHOUSE' } }),
+      this.prisma.location.count({ where: { ...locationWhere, type: 'RETAIL_STORE' } }),
     ]);
 
     return {

@@ -15,6 +15,8 @@ import { CreateCompanyDto, UpdateCompanyDto } from './dto';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequestUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('companies')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -40,12 +42,10 @@ export class CompanyController {
     return this.companyService.findAll();
   }
 
-  /**
-   * Get company by ID (All authenticated users can view)
-   */
+  /** Get a company and only the locations within the caller's authorized scope. */
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.companyService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
+    return this.companyService.findOne(id, actor.role === Role.SUPER_ADMIN ? undefined : actor.locationIds);
   }
 
   /**
@@ -53,8 +53,11 @@ export class CompanyController {
    */
   @Get(':id/statistics')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER)
-  getStatistics(@Param('id') id: string) {
-    return this.companyService.getStatistics(id);
+  getStatistics(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
+    return this.companyService.getStatistics(
+      id,
+      actor.role === Role.SUPER_ADMIN ? undefined : actor.locationIds,
+    );
   }
 
   /**

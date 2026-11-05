@@ -8,29 +8,27 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| Metric | Status / Assessment |
-| :--- | :--- |
-| **Current Baseline** | Phase 1 — Project Foundation & Bootstrap (Builds Verified, DB Connect Pending) |
-| **Implemented Functionality** | `~15%` — Documentation baseline established; monorepo scaffolding, auth, guards, and domain schema implemented |
-| **Partial Functionality** | Phase 1 bootstrap: monorepo structure, NestJS backend, Next.js frontend, Prisma schema, Docker Compose config |
+| **Current Baseline** | Phase 2 — Company, Locations, Users, and Employee Profiles complete |
+| **Implemented Functionality** | Phase 1 foundation and Phase 2 organization and employee-management checklist items implemented |
+| **Partial Functionality** | Web UI remains a foundation screen; operational workflows in later phases remain planned |
 | **Resolved Decisions** | 5 of 20 Open Decisions confirmed: `OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11` (see §5) |
 | **Remaining Blockers** | 15 unresolved business/technical decisions; Phase 6+ modules blocked until `OD-08`, `OD-09`, `OD-10` resolved |
-| **Foundation Status** | Repository structure, framework initialization, builds, and domain schema completed; DB migrations pending |
+| **Foundation Status** | API/web builds pass; local PostgreSQL, initial migration, seed data, and seeded login have been verified by the project owner |
 
 ---
 
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 1: Project Foundation & Architecture Bootstrap — In Progress**
-> Monorepo structure, `@pos/api`, `@pos/web`, `@pos/shared`, and Prisma domain models have been created and verified with zero build errors. Immediate next milestone: running initial database migration and seeding test data.
+> **Phase 2: Company, Locations, Users & Employee Profiles — Complete**
+> Phase 1 and Phase 2 checklist items are complete. API and web production builds pass, and the project owner verified local database connectivity and seeded login. Next work begins with Phase 3: Product Catalogue, Variants, SKU/Barcodes & Unit Conversions.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
 - [x] **P0**: Initialize repository architecture (Next.js frontend, NestJS backend, Prisma ORM, PostgreSQL schema) — ✅ Completed
 - [x] **P0**: Implement secure authentication (bcrypt, JWT, refresh tokens) — ✅ Completed
 - [x] **P0**: Implement dual-axis authorization guards (RBAC + Location Scoping) — ✅ Completed
-- [ ] **P0**: Implement baseline database migrations, seed data, and Docker Compose development environment
+- [x] **P0**: Start the local PostgreSQL service, apply the generated initial Prisma migration, and run the seed script — ✅ Verified by project owner
 
 ---
 
@@ -47,20 +45,20 @@ Each roadmap task is tagged with an industry-standard priority tier:
 ## 4. Planned Development Phases
 
 ### Phase 1: Project Foundation, Environments, Authentication & Access Control
-- [x] `P0` Initialize monorepo / application directory structure with TypeScript, ESLint, Prettier
-- [ ] `P0` Configure local containerized PostgreSQL database and run Prisma migrations
+- [x] `P0` Initialize monorepo / application directory structure with TypeScript and ESLint (Prettier configuration is not part of the current scaffold)
+- [x] `P0` Configure local containerized PostgreSQL database and run Prisma migrations — ✅ Verified by project owner
 - [x] `P0` Design initial Prisma schema for Identity, Locations, Inventory, Sales, HR, and Auditing
-- [x] `P0` Implement secure authentication (bcrypt password hashing, JWT token issuance, refresh token rotation)
-- [x] `P0` Implement dual-axis authorization guards enforcing Role-Based Access Control (RBAC) and Location Scoping on every API endpoint
-- [x] `P0` Implement global request validation, exception handling, and structured audit event logging interceptor
+- [x] `P0` Implement secure authentication (bcrypt password hashing, JWT token issuance, single active refresh-token rotation with reuse rejection)
+- [x] `P0` Implement role authorization for protected controllers and location scoping on location-bound endpoints and collection queries
+- [x] `P0` Implement global request validation, normalized exception handling, and structured audit event logging interceptor
 
 ### Phase 2: Company Locations, Users, Roles & Employee Profiles
-- [ ] `P0` Implement Company entity and global configuration (currency, timezone, invoice numbering prefix)
-- [ ] `P0` Implement Location hierarchy: Main Warehouse, Sub-Warehouses, and Retail Stores
-- [ ] `P0` Implement soft-deactivation/archival for locations (hard deletion prohibited if stock or transfer history exists)
-- [ ] `P1` Implement User management (create, assign roles, assign allowed location scopes, deactivate)
-- [ ] `P1` Implement Employee profiles (employee code, full name, contact, workplace assignment, reporting manager)
-- [ ] `P1` Add Loans & Advances summary section placeholder to Employee profile
+- [x] `P0` Implement Company entity and global configuration (currency, timezone, invoice numbering prefix)
+- [x] `P0` Implement Location hierarchy: Main Warehouse, Sub-Warehouses, and Retail Stores
+- [x] `P0` Implement soft-deactivation/archival for locations (hard deletion prohibited if stock or transfer history exists)
+- [x] `P1` Implement User management (create, assign roles, assign allowed location scopes, deactivate)
+- [x] `P1` Implement Employee profiles (employee code, full name, contact, workplace assignment, reporting manager)
+- [x] `P1` Add Loans & Advances summary section placeholder to Employee profile
 
 ### Phase 3: Product Catalogue, Variants, SKU/Barcodes & Unit Conversions
 - [ ] `P0` Design Product and Variant entities with unique SKU and barcode indexes

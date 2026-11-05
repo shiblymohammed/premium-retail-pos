@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, MinLength, MaxLength, IsOptional, Matches, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, MinLength, MaxLength, IsOptional, Matches, IsIn, IsTimeZone } from 'class-validator';
 
 export class CreateCompanyDto {
   @IsString()
@@ -14,6 +14,7 @@ export class CreateCompanyDto {
 
   @IsString()
   @IsOptional()
+  @IsTimeZone({ message: 'Timezone must be a valid IANA timezone (for example, Asia/Kolkata)' })
   timezone?: string = 'Asia/Kolkata';
 
   @IsString()

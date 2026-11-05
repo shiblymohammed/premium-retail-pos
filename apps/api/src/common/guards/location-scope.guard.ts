@@ -3,8 +3,10 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
 
 /**
  * LocationScopeGuard — ADR-004 Location Axis
@@ -14,8 +16,9 @@ import { Role } from '@prisma/client';
  *
  * Location ID is extracted from:
  *   1. req.params.locationId
- *   2. req.body.locationId
- *   3. req.query.locationId
+ *   2. req.params.id
+ *   3. req.body.locationId
+ *   4. req.query.locationId
  *
  * SUPER_ADMIN has implicit global access and bypasses this check.
  *
@@ -24,7 +27,9 @@ import { Role } from '@prisma/client';
  */
 @Injectable()
 export class LocationScopeGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
@@ -40,12 +45,12 @@ export class LocationScopeGuard implements CanActivate {
     // Extract the target location from the request
     const targetLocationId =
       request.params?.locationId ||
+      request.params?.id ||
       request.body?.locationId ||
       request.query?.locationId;
 
-    // If no location context in the request, allow (module-level checks apply)
     if (!targetLocationId) {
-      return true;
+      throw new ForbiddenException('Location context is required for this endpoint');
     }
 
     // Verify the user's JWT contains the target location
@@ -56,6 +61,13 @@ export class LocationScopeGuard implements CanActivate {
       );
     }
 
+    // Archived locations remain in scope records for history, but cannot be used operationally.
+    const location = await this.prisma.location.findUnique({
+      where: { id: targetLocationId },
+      select: { isActive: true },
+    });
+    if (!location) throw new NotFoundException('Location not found');
+    if (!location.isActive) throw new ForbiddenException('This location is inactive');
     return true;
   }
 }

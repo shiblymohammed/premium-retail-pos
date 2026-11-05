@@ -6,23 +6,38 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
+import { AuthRateLimitService } from './auth-rate-limit.service';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.getOrThrow<string>('JWT_SECRET'),
-        signOptions: {
-          expiresIn: config.get('JWT_EXPIRES_IN', '8h') as any,
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const secret = config.getOrThrow<string>('JWT_SECRET');
+        const refreshSecret = config.getOrThrow<string>('JWT_REFRESH_SECRET');
+        if (secret.length < 32 || refreshSecret.length < 32 || secret === refreshSecret) {
+          throw new Error('JWT secrets must be distinct and at least 32 characters long');
+        }
+        if (
+          config.get('NODE_ENV') === 'production' &&
+          [secret, refreshSecret].some((value) => /your-|change-this|example/i.test(value))
+        ) {
+          throw new Error('Production JWT secrets must not use example placeholder values');
+        }
+        return {
+          secret,
+          signOptions: {
+            algorithm: 'HS256' as const,
+            expiresIn: config.get('JWT_EXPIRES_IN', '8h') as any,
+          },
+        };
+      },
     }),
     UsersModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, AuthRateLimitService],
   exports: [AuthService],
 })
 export class AuthModule {}

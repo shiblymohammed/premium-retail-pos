@@ -4,7 +4,7 @@ import {
   ExecutionContext,
   CallHandler,
 } from '@nestjs/common';
-import { Observable, tap } from 'rxjs';
+import { Observable, mergeMap } from 'rxjs';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
@@ -32,8 +32,9 @@ export class AuditLoggingInterceptor implements NestInterceptor {
       return next.handle();
     }
 
+    const safeBody = redactSensitiveValues(request.body);
     return next.handle().pipe(
-      tap(async (responseBody) => {
+      mergeMap(async (responseBody) => {
         try {
           if (user?.userId) {
             await this.prisma.auditEvent.create({
@@ -41,8 +42,8 @@ export class AuditLoggingInterceptor implements NestInterceptor {
                 actorId: user.userId,
                 action: `${method} ${path}`,
                 targetEntity: context.getClass().name,
-                targetId: request.params?.id || responseBody?.data?.id || 'unknown',
-                afterValue: JSON.stringify(request.body),
+                targetId: request.params?.id || responseBody?.data?.id || responseBody?.id || 'unknown',
+                afterValue: JSON.stringify(safeBody),
                 ipAddress: request.ip || request.connection?.remoteAddress,
               },
             });
@@ -51,7 +52,20 @@ export class AuditLoggingInterceptor implements NestInterceptor {
           // Audit logging must never break the main request
           console.error('[AuditLog] Failed to write audit event:', error);
         }
+        return responseBody;
       }),
     );
   }
+}
+
+function redactSensitiveValues(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSensitiveValues);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) =>
+      /password|token|secret|authorization/i.test(key)
+        ? [key, '[REDACTED]']
+        : [key, redactSensitiveValues(entry)],
+    ),
+  );
 }

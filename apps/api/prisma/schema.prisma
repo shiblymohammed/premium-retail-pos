@@ -113,6 +113,7 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
   lastLoginAt   DateTime? @map("last_login_at")
+  refreshTokenHash String? @map("refresh_token_hash")
 
   // Relations
   employee       Employee?
@@ -611,4 +612,15 @@ model IdempotencyRecord {
 
   @@index([expiresAt])
   @@map("idempotency_records")
+}
+
+/// Shared pre-authentication throttling buckets for login and token refresh
+model AuthRateLimit {
+  key             String   @id @db.VarChar(64)
+  attempts        Int      @default(0)
+  windowStartedAt DateTime @default(now()) @map("window_started_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([windowStartedAt])
+  @@map("auth_rate_limits")
 }

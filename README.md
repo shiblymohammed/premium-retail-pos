@@ -156,7 +156,7 @@ POS/
 │   ├── ARCHITECTURE.md        # System design, data integrity invariants, and ADRs
 │   ├── CHANGELOG.md           # Chronological record of codebase changes
 │   ├── ROADMAP.md             # Implementation phases, task tracker, and open decisions
-│   └── SPRINT-01.md           # Current sprint implementation checklist
+│   └── TESTING-GUIDE.md       # Step-by-step manual testing guide
 ├── scripts/                   # Utility scripts
 │   └── generate-secrets.js    # Cryptographic secret generator
 ├── README.md                  # Project entrance, setup, and overview (this file)
@@ -171,7 +171,7 @@ POS/
 │   ├── ARCHITECTURE.md        # System design and technical specifications
 │   ├── ROADMAP.md             # Development phases and task tracking
 │   ├── CHANGELOG.md           # Version history
-│   └── SPRINT-01.md           # Sprint implementation checklists
+│   └── TESTING-GUIDE.md       # Step-by-step manual testing guide
 ├── scripts/                   # Utility scripts
 │   └── generate-secrets.js    # Secret key generator
 ├── apps/
@@ -201,6 +201,6 @@ All developers, technical contributors, and reviewers must familiarize themselve
 - **[ROADMAP.md](docs/ROADMAP.md)**: Tracks implementation progress across all 12 delivery phases, priority tasks (P0–P3), and the 20 critical Open Decisions (`OD-01` to `OD-20`).
 - **[ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Details the 14 non-negotiable data integrity invariants, domain module boundaries, dual-axis permission model, and Architectural Decision Records (ADRs).
 - **[CHANGELOG.md](docs/CHANGELOG.md)**: Maintained in Keep a Changelog format; tracks all functional changes, security enhancements, and version releases.
-- **[SPRINT-01.md](docs/SPRINT-01.md)**: Current sprint implementation checklist with daily tasks, timelines, and acceptance criteria.
+- **[TESTING-GUIDE.md](docs/TESTING-GUIDE.md)**: Step-by-step testing manual covering health checks, auth, company, location, and permission verification.
 #   p r e m i u m - r e t a i l - p o s  
  

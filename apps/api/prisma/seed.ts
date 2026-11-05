@@ -4,6 +4,10 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.NODE_ENV !== 'development') {
+    throw new Error('The sample seed accounts may only be created with NODE_ENV=development');
+  }
+
   console.log('🌱 Seeding database...');
 
   // 1. Create default company
