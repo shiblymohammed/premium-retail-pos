@@ -10,6 +10,7 @@ import { HealthModule } from './modules/health/health.module';
 import { AuditLoggingInterceptor } from './common/interceptors/audit-logging.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { EmployeesModule } from './modules/employees/employees.module';
+import { ProductsModule } from './modules/products/products.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { EmployeesModule } from './modules/employees/employees.module';
     LocationsModule,
     HealthModule,
     EmployeesModule,
+    ProductsModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditLoggingInterceptor },

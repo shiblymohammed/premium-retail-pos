@@ -119,6 +119,7 @@ model User {
   employee       Employee?
   locationScopes UserLocationScope[]
   auditEvents    AuditEvent[]        @relation("AuditActor")
+  priceChanges   PriceChangeLog[]    @relation("PriceChangeActor")
 
   @@map("users")
 }
@@ -235,8 +236,9 @@ model Product {
   id              String   @id @default(uuid())
   name            String
   description     String?
-  baseUnit        String   @default("packet") @map("base_unit") // Invariant 1
+  baseUnit        String   @map("base_unit") // Required canonical stock unit, e.g. packet or piece
   unitsPerCarton  Int?     @map("units_per_carton") // Invariant 2; null = packet-only (Invariant 3)
+  hasVariants     Boolean  @default(false) @map("has_variants")
   sellingPrice    Decimal  @db.Decimal(12, 2) @map("selling_price")
   purchasePrice   Decimal  @db.Decimal(12, 2) @map("purchase_price")
   reorderLevel    Int?     @map("reorder_level") // Base units threshold for replenishment
@@ -269,6 +271,7 @@ model Category {
 model Variant {
   id        String  @id @default(uuid())
   productId String  @map("product_id")
+  isDefault Boolean @default(false) @map("is_default")
   sku       String  @unique
   barcode   String? @unique
   name      String  // e.g., "Red / Large"
@@ -302,8 +305,11 @@ model PriceChangeLog {
   createdAt       DateTime @default(now()) @map("created_at")
 
   // Relations
-  product Product @relation(fields: [productId], references: [id])
+  product  Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  changedBy User    @relation("PriceChangeActor", fields: [changedByUserId], references: [id], onDelete: Restrict)
 
+  @@index([productId, createdAt])
+  @@index([changedByUserId, createdAt])
   @@map("price_change_logs")
 }
 

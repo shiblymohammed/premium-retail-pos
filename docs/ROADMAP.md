@@ -8,8 +8,8 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| **Current Baseline** | Phase 2 — Company, Locations, Users, and Employee Profiles complete |
-| **Implemented Functionality** | Phase 1 foundation and Phase 2 organization and employee-management checklist items implemented |
+| **Current Baseline** | Phase 3 — Product Catalogue, Variants, SKU/Barcodes & Unit Conversions implemented |
+| **Implemented Functionality** | Phase 1–3 checklist items implemented; Phase 3 API flows manually verified by the project owner |
 | **Partial Functionality** | Web UI remains a foundation screen; operational workflows in later phases remain planned |
 | **Resolved Decisions** | 5 of 20 Open Decisions confirmed: `OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11` (see §5) |
 | **Remaining Blockers** | 15 unresolved business/technical decisions; Phase 6+ modules blocked until `OD-08`, `OD-09`, `OD-10` resolved |
@@ -20,8 +20,8 @@
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 2: Company, Locations, Users & Employee Profiles — Complete**
-> Phase 1 and Phase 2 checklist items are complete. API and web production builds pass, and the project owner verified local database connectivity and seeded login. Next work begins with Phase 3: Product Catalogue, Variants, SKU/Barcodes & Unit Conversions.
+> **Phase 3: Product Catalogue, Variants, SKU/Barcodes & Unit Conversions — Implemented**
+> Phase 1–3 implementation checklist items are complete. API and web production builds pass, all database migrations are applied, and the project owner manually verified Phase 3 product, variant, conversion, price-audit, and authorization flows.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
@@ -61,14 +61,14 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P1` Add Loans & Advances summary section placeholder to Employee profile
 
 ### Phase 3: Product Catalogue, Variants, SKU/Barcodes & Unit Conversions
-- [ ] `P0` Design Product and Variant entities with unique SKU and barcode indexes
-- [ ] `P0` Implement canonical inventory base unit definition per product (e.g., packet)
-- [ ] `P0` Implement configurable carton-to-packet conversion rates per product
-- [ ] `P1` Support products without variants and products with stock-distinct variants (size, colour, style)
-- [ ] `P1` Enforce packet-only tracking for products without carton conversions
-- [ ] `P0` Restrict product selling and purchase price changes strictly to Super Admin role
-- [ ] `P0` Implement price change audit log recording old price, new price, actor, timestamp, and reason
-- [ ] `P1` Implement mixed-unit formatted display utility (e.g., "27 packets = 2 cartons + 7 packets")
+- [x] `P0` Design Product and Variant entities with unique SKU and barcode indexes
+- [x] `P0` Implement canonical inventory base unit definition per product (e.g., packet)
+- [x] `P0` Implement configurable carton-to-packet conversion rates per product
+- [x] `P1` Support products without variants and products with stock-distinct variants (size, colour, style)
+- [x] `P1` Enforce packet-only tracking for products without carton conversions
+- [x] `P0` Restrict product selling and purchase price changes strictly to Super Admin role
+- [x] `P0` Implement price change audit log recording old price, new price, actor, timestamp, and reason
+- [x] `P1` Implement mixed-unit formatted display utility (e.g., "27 packets = 2 cartons + 7 packets")
 
 ### Phase 4: Inventory Ledger, Opening Stock & Supplier Receiving
 - [ ] `P0` Design append-only immutable `InventoryMovement` ledger model

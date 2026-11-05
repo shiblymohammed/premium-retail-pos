@@ -218,18 +218,18 @@ classDiagram
 
 ### Invariant 1: Canonical Base Unit per Product
 - **Rule**: Every product defines one canonical base unit (e.g., packet, piece) for all internal calculations, movements, and ledger storage.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: Database column `Product.baseUnit` (string/enum); all `InventoryMovement.quantityBaseUnits` must be integers in base units.
+- **Implementation Status**: Product-level base-unit requirement and normalization are implemented in Phase 3; ledger enforcement remains part of Phase 4.
+- **Design Enforcement**: Required `Product.baseUnit` with a database non-blank constraint; the product conversion API returns integer base units for downstream stock operations.
 
 ### Invariant 2: Configurable Carton-to-Packet Conversions
 - **Rule**: Products sold or received in cartons must specify an individual conversion ratio (e.g., 1 carton = 10 packets). No global ratio is permitted.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: `Product.unitsPerCarton` integer field. 3 cartons + 4 packets converts deterministically to $(3 \times 10) + 4 = 34$ base units.
+- **Implementation Status**: Product-specific positive conversion ratios and carton/base-unit conversion are implemented in Phase 3.
+- **Design Enforcement**: `Product.unitsPerCarton` is a positive integer or null. 3 cartons + 4 packets converts deterministically to $(3 \times 10) + 4 = 34$ base units.
 
 ### Invariant 3: Native Packet-Only Products
 - **Rule**: Packet-only products do not define or require carton conversions.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: `Product.isPacketOnly = true` allows `unitsPerCarton = null`. Carton operations are rejected at API DTO validation for these items.
+- **Implementation Status**: Implemented in Phase 3.
+- **Design Enforcement**: `unitsPerCarton = null` means the product is tracked in its canonical base unit only. The conversion API rejects carton quantities for these products.
 
 ### Invariant 4: Ledger-Driven Stock Movements
 - **Rule**: Stock balances must never be overwritten via direct update queries (`UPDATE stock_balance SET qty = 100` is forbidden). Every stock modification requires a new movement row.
@@ -263,13 +263,13 @@ classDiagram
 
 ### Invariant 10: Super Admin-Exclusive Price Changes
 - **Rule**: Only users holding the `SUPER_ADMIN` role may modify purchase or selling prices.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: Backend guard `@Roles('SUPER_ADMIN')` on `/api/v1/products/:id/price`; creates an immutable `PriceChangeHistory` entry recording old/new prices, actor ID, timestamp, and reason.
+- **Implementation Status**: Implemented in Phase 3.
+- **Design Enforcement**: Backend `@Roles(SUPER_ADMIN)` protection on product creation and `PATCH /api/v1/products/:id/prices`; each initial or changed selling/purchase price is transactionally recorded in `PriceChangeLog` with old/new values, actor ID, timestamp, and reason.
 
 ### Invariant 11: Backend-Enforced Role & Location Scoping
 - **Rule**: Every protected endpoint must validate user role capabilities and location boundaries on the server. UI-only hiding is strictly insufficient.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: Global `DualAxisAuthGuard` intercepts every incoming request, verifying JWT claims against requested entity location IDs.
+- **Implementation Status**: Implemented for Phase 1–3 endpoints; each later location-bound module must apply the same checks.
+- **Design Enforcement**: Authenticated controllers use `AuthGuard('jwt')` and `RolesGuard`; location-bound controllers/services enforce the caller's current database-backed location scopes. Super Admin has implicit global location access.
 
 ### Invariant 12: Confirmed Loan Repayments Only
 - **Rule**: Outstanding loan balance equals amount issued minus confirmed repayments. Planned or pending payroll deductions must not reduce the balance prematurely.

@@ -16,7 +16,7 @@ export class UsersService {
    * Find a user by email (used during login).
    */
   async findByEmail(email: string) {
-    return this.prisma.user.findUnique({ where: { email } });
+    return this.prisma.user.findUnique({ where: { email: normalizeEmail(email) } });
   }
 
   /**
@@ -82,6 +82,7 @@ export class UsersService {
     role: Role;
     locationIds?: string[];
   }, actor: UserActor) {
+    const email = normalizeEmail(data.email);
     if (Buffer.byteLength(data.password, 'utf8') > 72) {
       throw new BadRequestException('Password exceeds the supported maximum length');
     }
@@ -112,7 +113,7 @@ export class UsersService {
       }
     }
 
-    if (await this.prisma.user.findUnique({ where: { email: data.email }, select: { id: true } })) {
+    if (await this.prisma.user.findUnique({ where: { email }, select: { id: true } })) {
       throw new ConflictException('A user with this email already exists');
     }
 
@@ -121,7 +122,7 @@ export class UsersService {
     try {
       return await this.prisma.user.create({
         data: {
-          email: data.email,
+          email,
           passwordHash,
           role: data.role,
           locationScopes: locationIds.length
@@ -292,4 +293,8 @@ export class UsersService {
       return inactive;
     });
   }
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
 }
