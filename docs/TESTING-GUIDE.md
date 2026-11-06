@@ -954,6 +954,73 @@ curl -X POST http://localhost:4000/api/v1/companies ^
 
 ---
 
+## Phase 10: Test Inventory Ledger, Opening Stock & Supplier Receiving
+
+Use a test location and a test product variant. Ledger records are append-only, so these operations intentionally create permanent test history; do not use a production location/product for smoke tests.
+
+```powershell
+$base = "http://localhost:4000/api/v1"
+$loginBody = @{ email = "admin@premiumretail.com"; password = "YOUR_ADMIN_PASSWORD" } | ConvertTo-Json
+$login = Invoke-RestMethod "$base/auth/login" -Method Post -ContentType "application/json" -Body $loginBody
+$locationId = "YOUR_TEST_LOCATION_ID"
+$variantId = "YOUR_TEST_VARIANT_ID"
+```
+
+### Test 10.1: Import Opening Stock
+
+```powershell
+$key = "opening-smoke-$([guid]::NewGuid())"
+$headers = @{ Authorization = "Bearer $($login.data.accessToken)"; "Idempotency-Key" = $key }
+$body = @{
+  locationId = $locationId
+  lines = @(@{ variantId = $variantId; quantityBaseUnits = 25 })
+  notes = "Phase 4 opening stock smoke test"
+} | ConvertTo-Json -Depth 5
+$opening = Invoke-RestMethod "$base/inventory/opening-stock/import" -Method Post -Headers $headers -ContentType "application/json" -Body $body
+$opening.data.movements | Select-Object type, quantityBaseUnits, actorId, referenceType, referenceId
+```
+
+Expected: one `OPENING_STOCK` movement for 25 units, linked to the import batch and the logged-in user.
+
+### Test 10.2: Confirm Supplier Receipt in Cartons and Loose Units
+
+```powershell
+$key = "receipt-smoke-$([guid]::NewGuid())"
+$headers = @{ Authorization = "Bearer $($login.data.accessToken)"; "Idempotency-Key" = $key }
+$body = @{
+  locationId = $locationId
+  receiptNumber = "TEST-$([guid]::NewGuid())"
+  supplierName = "Phase 4 Test Supplier"
+  lines = @(@{ variantId = $variantId; cartons = 2; looseBaseUnits = 3 })
+  notes = "Expected total is 2 x product carton ratio + 3 loose units"
+} | ConvertTo-Json -Depth 5
+$receipt = Invoke-RestMethod "$base/receiving/receipts" -Method Post -Headers $headers -ContentType "application/json" -Body $body
+$receipt.data | Select-Object receiptNumber, supplierName, receivedByUserId, confirmedAt
+$receipt.data.lines | Select-Object variantId, cartons, looseBaseUnits, unitsPerCarton, quantityBaseUnits
+$receipt.data.movements | Select-Object quantityBaseUnits, actorId, referenceType, referenceId
+```
+
+Expected: the receipt line quantity equals `2 * unitsPerCarton + 3`; both the receipt and movement identify the receiving user, and the movement references the confirmed receipt.
+
+### Test 10.3: Verify Idempotency and Ledger Balance
+
+Repeat the exact preceding receipt request with the same `$headers`, `$body`, and `Idempotency-Key`. It should return `replayed = true` and must not add another movement:
+
+```powershell
+$receiptReplay = Invoke-RestMethod "$base/receiving/receipts" -Method Post -Headers $headers -ContentType "application/json" -Body $body
+$receiptReplay.data.replayed
+```
+
+Then query the location balance:
+
+```powershell
+$headers = @{ Authorization = "Bearer $($login.data.accessToken)" }
+$balances = Invoke-RestMethod "$base/inventory/balances?locationId=$locationId&variantId=$variantId" -Headers $headers
+$balances.data | Select-Object sku, stockState, quantityBaseUnits, formattedQuantity, negativeAvailable, warning
+```
+
+Expected: the Available balance is the sum of the opening-stock and supplier-receipt movements. The other three stock states are returned separately. A negative Available balance includes `negativeAvailable = true` and a warning; cashier display is part of the Phase 6 POS interface.
+
 ## ✅ Test Results Summary
 
 Create a checklist as you complete each phase:
@@ -971,7 +1038,7 @@ Create a checklist as you complete each phase:
 
 ### API Server
 - [ ] Server starts without errors
-- [ ] All modules loaded (Auth, Users, Company, Locations, Health)
+- [ ] All modules loaded (Auth, Users, Company, Locations, Products, Inventory, Supplier Receiving, Health)
 - [ ] Health check returns "ok"
 
 ### Authentication
@@ -1003,6 +1070,10 @@ Create a checklist as you complete each phase:
 
 ### Validation
 - [ ] Email validation works
+- [ ] Opening stock import creates one idempotent ledger batch
+- [ ] Supplier receipt converts cartons and loose units correctly
+- [ ] Supplier receipt and movement retain receiver identity and receipt reference
+- [ ] Inventory balances equal ledger totals for each stock state
 - [ ] Required field validation works
 - [ ] GST number format validation works
 

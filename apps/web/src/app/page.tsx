@@ -1,4 +1,6 @@
 export default function Home() {
+  const apiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+
   return (
     <main style={{
       display: 'flex',
@@ -36,9 +38,9 @@ export default function Home() {
           gap: '0.75rem',
           textAlign: 'left',
         }}>
-          <StatusItem label="API Server" endpoint="/api/v1/health/liveness" />
-          <StatusItem label="Database" endpoint="/api/v1/health/readiness" />
-          <StatusItem label="Authentication" endpoint="/api/v1/auth/login" />
+          <StatusItem label="API Server" endpoint={`${apiBaseUrl}/health/liveness`} method="GET" href={`${apiBaseUrl}/health/liveness`} />
+          <StatusItem label="Database" endpoint={`${apiBaseUrl}/health/readiness`} method="GET" href={`${apiBaseUrl}/health/readiness`} />
+          <StatusItem label="Authentication" endpoint={`${apiBaseUrl}/auth/login`} method="POST" />
         </div>
 
         <p style={{
@@ -46,14 +48,14 @@ export default function Home() {
           fontSize: '0.875rem',
           color: 'var(--color-text-muted)',
         }}>
-          Phase 1 — Foundation & Authentication Bootstrap
+          Login uses POST; product catalogue management is currently available through the API rather than this web screen.
         </p>
       </div>
     </main>
   );
 }
 
-function StatusItem({ label, endpoint }: { label: string; endpoint: string }) {
+function StatusItem({ label, endpoint, method, href }: { label: string; endpoint: string; method: string; href?: string }) {
   return (
     <div style={{
       display: 'flex',
@@ -68,7 +70,9 @@ function StatusItem({ label, endpoint }: { label: string; endpoint: string }) {
       <code style={{
         color: 'var(--color-text-muted)',
         fontSize: '0.75rem',
-      }}>{endpoint}</code>
+      }}>
+        {method} {href ? <a href={href} target="_blank" rel="noreferrer">{endpoint}</a> : endpoint}
+      </code>
     </div>
   );
 }

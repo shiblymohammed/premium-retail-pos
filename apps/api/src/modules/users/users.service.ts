@@ -159,7 +159,10 @@ export class UsersService {
               role: filters?.role && filters.role !== Role.SUPER_ADMIN && filters.role !== Role.ADMIN
                 ? filters.role
                 : { notIn: [Role.SUPER_ADMIN, Role.ADMIN] },
-              locationScopes: { some: { locationId: { in: actor.locationIds } } },
+              locationScopes: {
+                some: { locationId: { in: actor.locationIds } },
+                every: { locationId: { in: actor.locationIds } },
+              },
             }
           : {}),
       },
@@ -182,11 +185,14 @@ export class UsersService {
   }
 
   async updateUser(userId: string, data: UpdateUserDto, actor: UserActor) {
-    const current = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { locationScopes: { select: { locationId: true } } },
-    });
-    if (!current) throw new NotFoundException('User not found');
+    return this.prisma.$transaction(async (tx) => {
+      // Serialize authorization against concurrent role/scope changes.
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        include: { locationScopes: { select: { locationId: true } } },
+      });
+      if (!current) throw new NotFoundException('User not found');
 
     const nextRole = data.role ?? current.role;
     const existingLocationIds = current.locationScopes.map((scope) => scope.locationId);
@@ -218,13 +224,12 @@ export class UsersService {
     }
 
     const activeLocationCount = locationIds.length
-      ? await this.prisma.location.count({ where: { id: { in: locationIds }, isActive: true } })
+      ? await tx.location.count({ where: { id: { in: locationIds }, isActive: true } })
       : 0;
     if (activeLocationCount !== locationIds.length) {
       throw new BadRequestException('Every assigned location must exist and be active');
     }
 
-    return this.prisma.$transaction(async (tx) => {
       if (data.locationIds !== undefined || nextRole === Role.SUPER_ADMIN) {
         await tx.userLocationScope.deleteMany({ where: { userId } });
         if (locationIds.length) {
@@ -262,24 +267,25 @@ export class UsersService {
       throw new BadRequestException('You cannot deactivate your own account');
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        locationScopes: { select: { locationId: true } },
-        employee: { select: { id: true } },
-      },
-    });
-    if (!user) throw new NotFoundException('User not found');
-    if (
-      actor.role !== Role.SUPER_ADMIN &&
-      ((user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN) ||
-        user.locationScopes.length === 0 ||
-        user.locationScopes.some((scope) => !actor.locationIds.includes(scope.locationId)))
-    ) {
-      throw new ForbiddenException('You are not authorized to deactivate this user');
-    }
-
     return this.prisma.$transaction(async (tx) => {
+      // Match updateUser's lock order so role/scope authorization cannot go stale.
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        include: {
+          locationScopes: { select: { locationId: true } },
+          employee: { select: { id: true } },
+        },
+      });
+      if (!user) throw new NotFoundException('User not found');
+      if (
+        actor.role !== Role.SUPER_ADMIN &&
+        ((user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN) ||
+          user.locationScopes.length === 0 ||
+          user.locationScopes.some((scope) => !actor.locationIds.includes(scope.locationId)))
+      ) {
+        throw new ForbiddenException('You are not authorized to deactivate this user');
+      }
       const inactive = await tx.user.update({
         where: { id: userId },
         data: { isActive: false, refreshTokenHash: null },

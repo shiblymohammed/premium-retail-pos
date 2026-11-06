@@ -50,7 +50,9 @@ export class AuditLoggingInterceptor implements NestInterceptor {
           }
         } catch (error) {
           // Audit logging must never break the main request
-          console.error('[AuditLog] Failed to write audit event:', error);
+          console.error('[AuditLog] Failed to write audit event', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
         }
         return responseBody;
       }),

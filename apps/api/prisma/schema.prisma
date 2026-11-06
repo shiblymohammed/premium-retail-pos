@@ -120,6 +120,9 @@ model User {
   locationScopes UserLocationScope[]
   auditEvents    AuditEvent[]        @relation("AuditActor")
   priceChanges   PriceChangeLog[]    @relation("PriceChangeActor")
+  inventoryMovements InventoryMovement[] @relation("InventoryMovementActor")
+  openingStockImports OpeningStockImport[]
+  supplierReceipts SupplierReceipt[]
 
   @@map("users")
 }
@@ -186,6 +189,8 @@ model Location {
   userScopes      UserLocationScope[]
   employees       Employee[]
   inventoryMovements InventoryMovement[]
+  openingStockImports OpeningStockImport[]
+  supplierReceipts SupplierReceipt[]
   transfersFrom   Transfer[]          @relation("TransferSource")
   transfersTo     Transfer[]          @relation("TransferDestination")
   invoices        Invoice[]
@@ -288,6 +293,7 @@ model Variant {
   saleLines          SaleLine[]
   transferLines      TransferLine[]
   auditCountItems    AuditCountItem[]
+  supplierReceiptLines SupplierReceiptLine[]
 
   @@map("variants")
 }
@@ -334,14 +340,70 @@ model InventoryMovement {
   createdAt        DateTime     @default(now()) @map("created_at")
 
   // Relations
-  variant  Variant  @relation(fields: [variantId], references: [id])
-  location Location @relation(fields: [locationId], references: [id])
+  variant  Variant  @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  actor    User     @relation("InventoryMovementActor", fields: [actorId], references: [id], onDelete: Restrict)
 
-  // This table is append-only: no update/delete in application logic
-  @@index([variantId, locationId])
+  // Database triggers make this ledger append-only; every row names its actor.
+  @@index([variantId, locationId, stockState])
   @@index([referenceType, referenceId])
+  @@index([actorId, createdAt])
   @@index([createdAt])
   @@map("inventory_movements")
+}
+
+/// Idempotent opening-balance import batch; quantities are ledger movements, not stored balances.
+model OpeningStockImport {
+  id               String   @id @default(uuid())
+  locationId       String   @map("location_id")
+  importedByUserId String   @map("imported_by_user_id")
+  idempotencyKey   String   @unique @map("idempotency_key")
+  payloadHash      String   @map("payload_hash")
+  notes            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  importedBy User     @relation(fields: [importedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([locationId, createdAt])
+  @@map("opening_stock_imports")
+}
+
+/// Confirmed supplier receipt header; lines and movements commit atomically.
+model SupplierReceipt {
+  id               String   @id @default(uuid())
+  receiptNumber    String   @unique @map("receipt_number")
+  supplierName     String   @map("supplier_name")
+  locationId       String   @map("location_id")
+  receivedByUserId String   @map("received_by_user_id")
+  idempotencyKey   String   @unique @map("idempotency_key")
+  payloadHash      String   @map("payload_hash")
+  notes            String?
+  confirmedAt      DateTime @default(now()) @map("confirmed_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  location   Location             @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  receivedBy User                 @relation(fields: [receivedByUserId], references: [id], onDelete: Restrict)
+  lines      SupplierReceiptLine[]
+
+  @@index([locationId, confirmedAt])
+  @@map("supplier_receipts")
+}
+
+model SupplierReceiptLine {
+  id                String @id @default(uuid())
+  receiptId         String @map("receipt_id")
+  variantId         String @map("variant_id")
+  cartons           Int    @default(0)
+  looseBaseUnits    Int    @map("loose_base_units")
+  unitsPerCarton    Int?   @map("units_per_carton")
+  quantityBaseUnits Int    @map("quantity_base_units")
+
+  receipt SupplierReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  variant Variant         @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([receiptId, variantId])
+  @@map("supplier_receipt_lines")
 }
 
 // ============================================================

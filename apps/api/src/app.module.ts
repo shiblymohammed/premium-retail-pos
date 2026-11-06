@@ -11,6 +11,7 @@ import { AuditLoggingInterceptor } from './common/interceptors/audit-logging.int
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { ProductsModule } from './modules/products/products.module';
+import { InventoryModule } from './modules/inventory/inventory.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ProductsModule } from './modules/products/products.module';
     HealthModule,
     EmployeesModule,
     ProductsModule,
+    InventoryModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditLoggingInterceptor },

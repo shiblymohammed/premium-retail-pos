@@ -159,7 +159,7 @@ The system is partitioned into twelve modular domains. Each module enforces stri
 | **2. Organization & Locations** | Company settings, warehouse and store records, manager assignments. | Tiered hierarchy (`Main Warehouse` &rarr; `Sub-Warehouse` &rarr; `Retail Store`); active history prevents hard deletion. |
 | **3. Product Catalogue & Pricing** | Products, variants (size/colour), SKU/barcodes, unit conversion ratios, pricing. | **Super Admin only** may alter purchase/selling prices; price edits require logged reason; variants have distinct SKU identities. |
 | **4. Inventory Ledger** | Canonical base unit stock tracking, stock state segregation, ledger reconciliation. | All stock changes create append-only ledger movements; stock balance is a pure function of historical movements; negative stock is permitted with prominent UI warnings and negative balance display (`OD-03`). |
-| **5. Supplier Receiving** | Supplier stock-in recording, carton/loose packet receipt validation. | Stock posted only upon receipt confirmation; receipt creates `SUPPLIER_RECEIPT` movements. |
+| **5. Supplier Receiving** | Supplier stock-in recording, carton/loose packet receipt validation. | Confirmed receipts, line conversion snapshots, receiving actor, and `SUPPLIER_RECEIPT` movements commit atomically; receipt documents are immutable and idempotent. |
 | **6. Transfers & Replenishment** | Auto-replenishment calculation, transfer lifecycle state machine, transit tracking. | In-transit stock cannot be sold at destination; cancelled transfers reversed via ledger; transfers support full cartons as well as opened cartons and loose packets across warehouses (`OD-01`). |
 | **7. POS & Sales** | Terminal binding, cart management, checkout, receipt numbering, invoice creation. | Invoices are immutable once finalized; sale cancellations create balancing reversal movements; active bill removals generate audit logs; POS continues operating offline, caching sales locally with automatic sync once online (`OD-11`). |
 | **8. Discounts & Approvals** | Operator discount limit enforcement, manager override approval tracking. | Super Admin uncapped; Admin, Manager, Cashier have configured percentage thresholds enforced at both line-item AND bill level; discount stacking prohibited (`OD-07`). |
@@ -218,8 +218,8 @@ classDiagram
 
 ### Invariant 1: Canonical Base Unit per Product
 - **Rule**: Every product defines one canonical base unit (e.g., packet, piece) for all internal calculations, movements, and ledger storage.
-- **Implementation Status**: Product-level base-unit requirement and normalization are implemented in Phase 3; ledger enforcement remains part of Phase 4.
-- **Design Enforcement**: Required `Product.baseUnit` with a database non-blank constraint; the product conversion API returns integer base units for downstream stock operations.
+- **Implementation Status**: Product-level base-unit requirement and normalization are implemented in Phase 3; Phase 4 inventory writes convert carton and loose-unit receipt quantities to canonical base units before inserting ledger movements.
+- **Design Enforcement**: Required `Product.baseUnit` with a database non-blank constraint. The application and a database trigger prohibit changing it once movements exist; inventory APIs convert receipt quantities to integer base units before posting.
 
 ### Invariant 2: Configurable Carton-to-Packet Conversions
 - **Rule**: Products sold or received in cartons must specify an individual conversion ratio (e.g., 1 carton = 10 packets). No global ratio is permitted.
@@ -233,8 +233,8 @@ classDiagram
 
 ### Invariant 4: Ledger-Driven Stock Movements
 - **Rule**: Stock balances must never be overwritten via direct update queries (`UPDATE stock_balance SET qty = 100` is forbidden). Every stock modification requires a new movement row.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: Stock balances are calculated as $\sum \text{quantityBaseUnits}$ from `InventoryMovement` or maintained via transactional append-only trigger/service tables.
+- **Implementation Status**: The append-only movement model is enforced by database triggers. The location-scoped `GET /api/v1/inventory/balances` endpoint aggregates signed base-unit movements from the ledger for each stock state and product variant; no balance is stored separately.
+- **Design Enforcement**: Every movement requires a valid variant, location, and user actor; zero-quantity movements are rejected. Database triggers reject row updates, deletes, and table truncation. `InventoryService.recordMovement` locks the location row, reads the ledger total, inserts the movement, and returns the resulting balance in the same transaction. The location lock also serializes the audit-freeze check with writes. Negative available balances are allowed and carry a warning signal.
 
 ### Invariant 5: In-Transit Stock Isolation
 - **Rule**: Dispatched transfers must move stock into an `IN_TRANSIT` state and must not increment destination available stock until formal receipt confirmation.

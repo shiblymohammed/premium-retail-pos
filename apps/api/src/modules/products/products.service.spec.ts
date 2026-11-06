@@ -23,6 +23,26 @@ describe('ProductsService security and price history', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('prevents changing the canonical base unit after stock movements exist', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'product-id' }]),
+      product: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'product-id', baseUnit: 'packet' }),
+        update: jest.fn(),
+      },
+      inventoryMovement: { count: jest.fn().mockResolvedValue(1) },
+    };
+    const prisma = { $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)) };
+    const service = new ProductsService(prisma as any);
+
+    await expect(service.update('product-id', { baseUnit: 'piece' } as any))
+      .rejects.toThrow('Cannot change a product base unit after inventory movements have been recorded');
+    expect(tx.inventoryMovement.count).toHaveBeenCalledWith({
+      where: { variant: { is: { productId: 'product-id' } } },
+    });
+    expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
   it('locks the product before reading prices and writes the prior value to the audit log', async () => {
     const current = {
       id: 'product-id',

@@ -18,13 +18,16 @@ export class EmployeesService {
   async create(data: CreateEmployeeDto, actor: EmployeeActor) {
     this.assertLocationScope(actor, data.locationId);
     await this.assertActiveLocation(data.locationId);
-    await this.assertActiveUser(data.userId, data.locationId);
-    await this.assertManager(data.reportingToId, data.locationId);
 
     try {
-      const employee = await this.prisma.employee.create({
-        data: { ...data, hireDate: new Date(data.hireDate) },
-        include: employeeInclude,
+      const employee = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${data.userId} FOR UPDATE`;
+        await this.assertActiveUser(data.userId, data.locationId, actor.role, tx);
+        await this.assertManager(data.reportingToId, data.locationId, undefined, tx);
+        return tx.employee.create({
+          data: { ...data, hireDate: new Date(data.hireDate) },
+          include: employeeInclude,
+        });
       });
       return withLoansPlaceholder(employee);
     } catch (error) {
@@ -67,29 +70,36 @@ export class EmployeesService {
   }
 
   async update(id: string, data: UpdateEmployeeDto, actor: EmployeeActor) {
-    const current = await this.prisma.employee.findUnique({ where: { id } });
-    if (!current) throw new NotFoundException('Employee profile not found');
-    this.assertLocationScope(actor, current.locationId);
-
-    const locationId = data.locationId ?? current.locationId;
-    this.assertLocationScope(actor, locationId);
-    if (data.locationId) {
-      await this.assertActiveLocation(data.locationId);
-      await this.assertUserLocationScope(current.userId, data.locationId);
-    }
-    const managerId = data.reportingToId !== undefined
-      ? data.reportingToId ?? undefined
-      : current.reportingToId ?? undefined;
-    await this.assertManager(managerId, locationId, current.id);
-
     try {
-      const employee = await this.prisma.employee.update({
-        where: { id },
-        data: {
-          ...data,
-          ...(data.hireDate ? { hireDate: new Date(data.hireDate) } : {}),
-        },
-        include: employeeInclude,
+      const employee = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT u."id" FROM "users" u JOIN "employees" e ON e."user_id" = u."id" WHERE e."id" = ${id} FOR UPDATE OF u, e`;
+        const current = await tx.employee.findUnique({
+          where: { id },
+          include: { user: { select: { role: true } } },
+        });
+        if (!current) throw new NotFoundException('Employee profile not found');
+        this.assertManageableAccountRole(actor, current.user.role);
+        this.assertLocationScope(actor, current.locationId);
+
+        const locationId = data.locationId ?? current.locationId;
+        this.assertLocationScope(actor, locationId);
+        if (data.locationId) {
+          await this.assertActiveLocation(data.locationId);
+          await this.assertUserLocationScope(current.userId, data.locationId, tx);
+        }
+        const managerId = data.reportingToId !== undefined
+          ? data.reportingToId ?? undefined
+          : current.reportingToId ?? undefined;
+        await this.assertManager(managerId, locationId, current.id, tx);
+
+        return tx.employee.update({
+          where: { id },
+          data: {
+            ...data,
+            ...(data.hireDate ? { hireDate: new Date(data.hireDate) } : {}),
+          },
+          include: employeeInclude,
+        });
       });
       return withLoansPlaceholder(employee);
     } catch (error) {
@@ -101,13 +111,18 @@ export class EmployeesService {
   }
 
   async deactivate(id: string, actor: EmployeeActor) {
-    const employee = await this.prisma.employee.findUnique({ where: { id } });
-    if (!employee) throw new NotFoundException('Employee profile not found');
-    if (employee.userId === actor.userId) {
-      throw new BadRequestException('You cannot deactivate your own employee profile');
-    }
-    this.assertLocationScope(actor, employee.locationId);
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT u."id" FROM "users" u JOIN "employees" e ON e."user_id" = u."id" WHERE e."id" = ${id} FOR UPDATE OF u, e`;
+      const employee = await tx.employee.findUnique({
+        where: { id },
+        include: { user: { select: { role: true } } },
+      });
+      if (!employee) throw new NotFoundException('Employee profile not found');
+      if (employee.userId === actor.userId) {
+        throw new BadRequestException('You cannot deactivate your own employee profile');
+      }
+      this.assertManageableAccountRole(actor, employee.user.role);
+      this.assertLocationScope(actor, employee.locationId);
       const inactive = await tx.employee.update({
         where: { id },
         data: { isActive: false },
@@ -137,8 +152,8 @@ export class EmployeesService {
     if (!location.isActive) throw new BadRequestException('Employee workplace must be active');
   }
 
-  private async assertActiveUser(userId: string, locationId: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
+  private async assertActiveUser(userId: string, locationId: string, actorRole: string, client: Prisma.TransactionClient | PrismaService = this.prisma): Promise<void> {
+    const user = await client.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
@@ -150,14 +165,24 @@ export class EmployeesService {
     });
     if (!user) throw new NotFoundException('User account not found');
     if (!user.isActive) throw new BadRequestException('Employee user account must be active');
+    this.assertManageableAccountRole({ role: actorRole }, user.role);
     if (user.employee) throw new ConflictException('This user already has an employee profile');
     if (user.role !== Role.SUPER_ADMIN && !user.locationScopes.some((scope) => scope.locationId === locationId)) {
       throw new BadRequestException('Employee user account must be authorized for its workplace');
     }
   }
 
-  private async assertUserLocationScope(userId: string, locationId: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
+  private assertManageableAccountRole(actor: { role: string }, targetRole: Role): void {
+    if (
+      actor.role !== Role.SUPER_ADMIN &&
+      (targetRole === Role.SUPER_ADMIN || targetRole === Role.ADMIN)
+    ) {
+      throw new ForbiddenException('Only a Super Admin can manage employee profiles for administrative accounts');
+    }
+  }
+
+  private async assertUserLocationScope(userId: string, locationId: string, client: Prisma.TransactionClient | PrismaService = this.prisma): Promise<void> {
+    const user = await client.user.findUnique({
       where: { id: userId },
       select: {
         role: true,
@@ -173,13 +198,13 @@ export class EmployeesService {
     }
   }
 
-  private async assertManager(managerId: string | undefined, locationId: string, employeeId?: string): Promise<void> {
+  private async assertManager(managerId: string | undefined, locationId: string, employeeId?: string, client: Prisma.TransactionClient | PrismaService = this.prisma): Promise<void> {
     if (!managerId) return;
     if (employeeId && managerId === employeeId) {
       throw new BadRequestException('An employee cannot report to themselves');
     }
 
-    const manager = await this.prisma.employee.findUnique({
+    const manager = await client.employee.findUnique({
       where: { id: managerId },
       select: { id: true, locationId: true, isActive: true, reportingToId: true },
     });
@@ -194,7 +219,7 @@ export class EmployeesService {
       if (seen.has(cursor.id)) throw new BadRequestException('Reporting assignment would create a management cycle');
       seen.add(cursor.id);
       cursor = cursor.reportingToId
-        ? await this.prisma.employee.findUnique({
+        ? await client.employee.findUnique({
             where: { id: cursor.reportingToId },
             select: { id: true, locationId: true, isActive: true, reportingToId: true },
           })

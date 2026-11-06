@@ -117,7 +117,6 @@ export class ProductsService {
     if (Object.values(dto).every((value) => value === undefined)) {
       throw new BadRequestException('Provide at least one product field to update');
     }
-    await this.findById(id);
     await this.ensureCategoryExists(dto.categoryId);
 
     const data: Prisma.ProductUpdateInput = {};
@@ -131,6 +130,25 @@ export class ProductsService {
         : { connect: { id: dto.categoryId } };
     }
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
+
+    if (dto.baseUnit !== undefined) {
+      return this.prisma.$transaction(async (tx) => {
+        // Serialize unit changes with inventory writers, which take a shared product-row lock.
+        await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "products" WHERE "id" = ${id} FOR UPDATE`;
+        const current = await tx.product.findUnique({ where: { id }, select: { id: true, baseUnit: true } });
+        if (!current) throw new NotFoundException('Product not found');
+        const nextBaseUnit = data.baseUnit as string;
+        if (nextBaseUnit !== current.baseUnit) {
+          const historicalMovements = await tx.inventoryMovement.count({
+            where: { variant: { is: { productId: id } } },
+          });
+          if (historicalMovements > 0) {
+            throw new BadRequestException('Cannot change a product base unit after inventory movements have been recorded');
+          }
+        }
+        return tx.product.update({ where: { id }, data, include: productInclude });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    }
 
     return this.prisma.product.update({ where: { id }, data, include: productInclude });
   }

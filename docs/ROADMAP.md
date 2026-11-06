@@ -8,8 +8,8 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| **Current Baseline** | Phase 3 — Product Catalogue, Variants, SKU/Barcodes & Unit Conversions implemented |
-| **Implemented Functionality** | Phase 1–3 checklist items implemented; Phase 3 API flows manually verified by the project owner |
+| **Current Baseline** | Phase 4 — Inventory Ledger, Opening Stock & Supplier Receiving complete |
+| **Implemented Functionality** | Phase 1–4 checklist complete; Phase 4 includes immutable movements, ledger balances, transactional stock writes, opening imports, and supplier receiving |
 | **Partial Functionality** | Web UI remains a foundation screen; operational workflows in later phases remain planned |
 | **Resolved Decisions** | 5 of 20 Open Decisions confirmed: `OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11` (see §5) |
 | **Remaining Blockers** | 15 unresolved business/technical decisions; Phase 6+ modules blocked until `OD-08`, `OD-09`, `OD-10` resolved |
@@ -20,8 +20,8 @@
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 3: Product Catalogue, Variants, SKU/Barcodes & Unit Conversions — Implemented**
-> Phase 1–3 implementation checklist items are complete. API and web production builds pass, all database migrations are applied, and the project owner manually verified Phase 3 product, variant, conversion, price-audit, and authorization flows.
+> **Phase 4: Inventory Ledger, Opening Stock & Supplier Receiving — Complete**
+> Phase 4 inventory APIs and database migrations are implemented. Cashier-facing negative-stock warning presentation is part of the Phase 6 POS interface.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
@@ -62,7 +62,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 
 ### Phase 3: Product Catalogue, Variants, SKU/Barcodes & Unit Conversions
 - [x] `P0` Design Product and Variant entities with unique SKU and barcode indexes
-- [x] `P0` Implement canonical inventory base unit definition per product (e.g., packet)
+- [x] `P0` Implement canonical inventory base unit definition per product (e.g., packet); prevent changing it after ledger movements exist
 - [x] `P0` Implement configurable carton-to-packet conversion rates per product
 - [x] `P1` Support products without variants and products with stock-distinct variants (size, colour, style)
 - [x] `P1` Enforce packet-only tracking for products without carton conversions
@@ -71,14 +71,14 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P1` Implement mixed-unit formatted display utility (e.g., "27 packets = 2 cartons + 7 packets")
 
 ### Phase 4: Inventory Ledger, Opening Stock & Supplier Receiving
-- [ ] `P0` Design append-only immutable `InventoryMovement` ledger model
-- [ ] `P0` Implement stock balance queries aggregated strictly from the ledger
-- [ ] `P0` Model four distinct stock states: `Available`, `In transit`, `Reserved`, `Quarantined`
-- [ ] `P0` Implement ACID database transactions with concurrency locks to prevent double-deduction
-- [ ] `P0` Implement Negative Stock Policy (Confirmed `OD-03`): Allow transactions to proceed beyond zero, trigger prominent UI warning to cashier, and display/record balance as negative
-- [ ] `P1` Implement opening stock balance import utility
-- [ ] `P1` Implement Supplier Receiving module supporting full cartons and loose packets
-- [ ] `P1` Link confirmed supplier receipts to movement ledger and receiving user
+- [x] `P0` Design append-only immutable `InventoryMovement` ledger model
+- [x] `P0` Implement stock balance queries aggregated strictly from the ledger
+- [x] `P0` Model four distinct stock states: `Available`, `In transit`, `Reserved`, `Quarantined`
+- [x] `P0` Implement ACID database transactions with location-row locks to serialize stock balance reads and ledger writes
+- [x] `P0` Implement Negative Stock Policy backend (Confirmed `OD-03`): allow signed movements below zero, return negative balances, and include a prominent warning signal; cashier UI presentation is in Phase 6
+- [x] `P1` Implement idempotent opening stock balance batch import utility
+- [x] `P1` Implement Supplier Receiving module supporting full cartons and loose packets
+- [x] `P1` Link confirmed supplier receipts to immutable movement ledger entries and the receiving user
 
 ### Phase 5: Warehouse Transfers & Replenishment Approvals
 - [ ] `P1` Implement automated draft replenishment request generation based on reorder thresholds

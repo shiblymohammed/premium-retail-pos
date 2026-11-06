@@ -25,6 +25,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - Added product and stock-distinct variant API management, including a designated default stock identity for products without selectable variants and case-insensitive unique SKU/barcode enforcement.
   - Required a canonical base-unit label per product, validated positive carton conversion ratios, and added conversion/formatting that refuses carton quantities when no conversion is configured.
   - Restricted product creation and all selling/purchase price changes to Super Admins; serialized concurrent price edits and recorded initial/changed prices transactionally with old/new values, actor, timestamp, and reason. Purchase prices are omitted from non-Super-Admin product responses.
+- **Phase 4 Inventory Ledger Foundation**:
+  - Enforced append-only inventory movements with database triggers that reject update, delete, and truncate operations; required an existing user actor and rejected zero-quantity entries.
+  - Added location-scoped stock balance queries aggregated from signed ledger movements across Available, In Transit, Reserved, and Quarantined states, with mixed-unit and negative-balance formatting.
+  - Added transaction-scoped stock movement writes serialized by a location row lock, with audit-freeze enforcement, negative-balance warning signals, and overflow protection.
+  - Added idempotent opening-stock batches and supplier receipt confirmation for cartons and loose base units; receipt lines snapshot carton conversion, receiver identity is retained, and documents/movements commit atomically with immutable database enforcement.
+  - Preserved Phase 3/4 stock meaning across catalog archival: balances include inactive product variants, and the canonical base unit cannot be changed after movements exist (enforced by the API and database).
 - **Development Setup Reliability**: Fixed API TypeScript output caching so Nest watch mode recreates its entry point after cleaning the build directory; aligned the example database URL with Docker Compose defaults.
 - **Core Documentation Suite**: Initialized the four foundational project architecture and operational governance files at the repository root:
   - `README.md`: System overview, functional module summary, verified repository baseline status, prerequisite guidelines, environment variable reference, and development onboarding guide.

@@ -36,8 +36,8 @@ export function formatMixedUnitQuantity(quantity: number, baseUnit: string, unit
   const remainder = absolute % unitsPerCarton;
   const cartonLabel = cartonCount === 1 ? 'carton' : 'cartons';
   const mixed = [
-    cartonCount > 0 ? `${cartonCount} ${cartonLabel}` : '',
-    remainder > 0 || cartonCount === 0 ? `${remainder} ${remainder === 1 ? unit : pluralUnit}` : '',
+    cartonCount > 0 ? `${sign}${cartonCount} ${cartonLabel}` : '',
+    remainder > 0 || cartonCount === 0 ? `${sign}${remainder} ${remainder === 1 ? unit : pluralUnit}` : '',
   ].filter(Boolean).join(' + ');
   return `${sign}${absolute} ${absolute === 1 ? unit : pluralUnit} = ${mixed}`;
 }
