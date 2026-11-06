@@ -19,10 +19,8 @@ import { AuthRateLimitService } from './auth-rate-limit.service';
         if (secret.length < 32 || refreshSecret.length < 32 || secret === refreshSecret) {
           throw new Error('JWT secrets must be distinct and at least 32 characters long');
         }
-        if (
-          config.get('NODE_ENV') === 'production' &&
-          [secret, refreshSecret].some((value) => /your-|change-this|example/i.test(value))
-        ) {
+        const placeholderPattern = /your-|change[-_ ]?this|example|generate(?:[-_ ]|$)|replace[-_ ]?me|placeholder|<[^>]+>/i;
+        if (config.get('NODE_ENV') === 'production' && [secret, refreshSecret].some((value) => placeholderPattern.test(value))) {
           throw new Error('Production JWT secrets must not use example placeholder values');
         }
         return {

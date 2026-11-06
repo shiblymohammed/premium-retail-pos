@@ -12,6 +12,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { ProductsModule } from './modules/products/products.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { TransfersModule } from './modules/transfers/transfers.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     EmployeesModule,
     ProductsModule,
     InventoryModule,
+    TransfersModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditLoggingInterceptor },

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LocationType, Role } from '@prisma/client';
+import { LocationType, Prisma, Role, TransferStatus } from '@prisma/client';
 
 @Injectable()
 export class LocationsService {
@@ -136,22 +136,54 @@ export class LocationsService {
    * Hard deletion is prohibited if stock or transfer history exists.
    */
   async deactivate(id: string) {
-    const location = await this.prisma.location.findUnique({ where: { id } });
-    if (!location) throw new NotFoundException('Location not found');
+    return this.prisma.$transaction(async (tx) => {
+      // Serialize deactivation against stock writes and transfer creation/dispatch.
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "locations" WHERE "id" = ${id} FOR UPDATE
+      `);
+      if (rows.length === 0) throw new NotFoundException('Location not found');
 
-    // Check for active children
-    const activeChildren = await this.prisma.location.count({
-      where: { parentId: id, isActive: true },
-    });
-    if (activeChildren > 0) {
-      throw new BadRequestException(
-        'Cannot deactivate location with active child locations. Deactivate children first.',
-      );
-    }
+      const location = await tx.location.findUnique({ where: { id } });
+      if (!location) throw new NotFoundException('Location not found');
+      if (!location.isActive) return location;
 
-    return this.prisma.location.update({
-      where: { id },
-      data: { isActive: false },
+      const activeChildren = await tx.location.count({ where: { parentId: id, isActive: true } });
+      if (activeChildren > 0) {
+        throw new BadRequestException(
+          'Cannot deactivate location with active child locations. Deactivate children first.',
+        );
+      }
+
+      const activeTransfers = await tx.transfer.count({
+        where: {
+          status: { in: [
+            TransferStatus.DRAFT,
+            TransferStatus.PENDING_APPROVAL,
+            TransferStatus.APPROVED,
+            TransferStatus.PARTIALLY_DISPATCHED,
+            TransferStatus.DISPATCHED,
+            TransferStatus.PARTIALLY_RECEIVED,
+          ] },
+          OR: [{ sourceLocationId: id }, { destLocationId: id }],
+        },
+      });
+      if (activeTransfers > 0) {
+        throw new BadRequestException('Cannot deactivate a location while it has active transfers');
+      }
+
+      const nonZeroBalances = await tx.$queryRaw<Array<{ variantId: string }>>(Prisma.sql`
+        SELECT "variant_id" AS "variantId"
+        FROM "inventory_movements"
+        WHERE "location_id" = ${id}
+        GROUP BY "variant_id", "stock_state"
+        HAVING SUM("quantity_base_units") <> 0
+        LIMIT 1
+      `);
+      if (nonZeroBalances.length > 0) {
+        throw new BadRequestException('Cannot deactivate a location while it has non-zero inventory balances');
+      }
+
+      return tx.location.update({ where: { id }, data: { isActive: false } });
     });
   }
 

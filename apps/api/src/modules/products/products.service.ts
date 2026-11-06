@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role } from '@prisma/client';
+import { Prisma, ReplenishmentStatus, Role, TransferStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { convertToBaseUnits, formatMixedUnitQuantity } from './unit-conversion';
 import { ConvertQuantityDto } from './dto/convert-quantity.dto';
@@ -49,6 +49,7 @@ export class ProductsService {
             description: dto.description?.trim() || null,
             baseUnit: this.normalizeBaseUnit(dto.baseUnit),
             unitsPerCarton: dto.unitsPerCarton ?? null,
+            reorderLevel: dto.reorderLevel ?? null,
             hasVariants: dto.hasVariants === true,
             categoryId: dto.categoryId,
             sellingPrice: new Prisma.Decimal(dto.sellingPrice),
@@ -124,6 +125,7 @@ export class ProductsService {
     if (dto.description !== undefined) data.description = dto.description?.trim() || null;
     if (dto.baseUnit !== undefined) data.baseUnit = this.normalizeBaseUnit(dto.baseUnit);
     if (dto.unitsPerCarton !== undefined) data.unitsPerCarton = dto.unitsPerCarton;
+    if (dto.reorderLevel !== undefined) data.reorderLevel = dto.reorderLevel;
     if (dto.categoryId !== undefined) {
       data.category = dto.categoryId === null
         ? { disconnect: true }
@@ -131,19 +133,53 @@ export class ProductsService {
     }
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
 
-    if (dto.baseUnit !== undefined) {
+    if (dto.baseUnit !== undefined || dto.isActive === false || dto.reorderLevel !== undefined) {
       return this.prisma.$transaction(async (tx) => {
-        // Serialize unit changes with inventory writers, which take a shared product-row lock.
+        // Serialize catalog changes with inventory and transfer writers, which take a shared product-row lock.
         await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "products" WHERE "id" = ${id} FOR UPDATE`;
-        const current = await tx.product.findUnique({ where: { id }, select: { id: true, baseUnit: true } });
+        const current = await tx.product.findUnique({ where: { id }, select: { id: true, baseUnit: true, isActive: true } });
         if (!current) throw new NotFoundException('Product not found');
-        const nextBaseUnit = data.baseUnit as string;
-        if (nextBaseUnit !== current.baseUnit) {
+        const nextBaseUnit = data.baseUnit as string | undefined;
+        if (nextBaseUnit !== undefined && nextBaseUnit !== current.baseUnit) {
           const historicalMovements = await tx.inventoryMovement.count({
             where: { variant: { is: { productId: id } } },
           });
           if (historicalMovements > 0) {
             throw new BadRequestException('Cannot change a product base unit after inventory movements have been recorded');
+          }
+          const transferHistory = await tx.transferLine.count({ where: { variant: { productId: id } } });
+          const replenishmentHistory = await tx.replenishmentRequestLine.count({ where: { variant: { productId: id } } });
+          if (transferHistory > 0 || replenishmentHistory > 0) {
+            throw new BadRequestException('Cannot change a product base unit after transfer or replenishment history has been recorded');
+          }
+        }
+        if (current.isActive && dto.isActive === false) {
+          const nonZeroBalances = await tx.$queryRaw<Array<{ variantId: string }>>(Prisma.sql`
+            SELECT im."variant_id" AS "variantId"
+            FROM "inventory_movements" im
+            JOIN "variants" v ON v."id" = im."variant_id"
+            WHERE v."product_id" = ${id}
+            GROUP BY im."variant_id", im."stock_state"
+            HAVING SUM(im."quantity_base_units") <> 0
+            LIMIT 1
+          `);
+          if (nonZeroBalances.length > 0) {
+            throw new BadRequestException('Cannot deactivate a product while it has non-zero inventory balances');
+          }
+          const activeTransfers = await tx.transferLine.count({
+            where: {
+              variant: { is: { productId: id } },
+              transfer: { is: { status: { notIn: [TransferStatus.RECEIVED, TransferStatus.REJECTED, TransferStatus.CANCELLED] } } },
+            },
+          });
+          const activeReplenishments = await tx.replenishmentRequestLine.count({
+            where: {
+              variant: { is: { productId: id } },
+              request: { is: { status: ReplenishmentStatus.DRAFT } },
+            },
+          });
+          if (activeTransfers > 0 || activeReplenishments > 0) {
+            throw new BadRequestException('Resolve active transfers and replenishment drafts before deactivating this product');
           }
         }
         return tx.product.update({ where: { id }, data, include: productInclude });
@@ -251,6 +287,40 @@ export class ProductsService {
     }
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     try {
+      if (existing.isActive && dto.isActive === false) {
+        return await this.prisma.$transaction(async (tx) => {
+          await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT p."id" FROM "products" p
+            JOIN "variants" v ON v."product_id" = p."id"
+            WHERE p."id" = ${productId} AND v."id" = ${variantId}
+            FOR UPDATE OF p, v
+          `);
+          const nonZeroBalances = await tx.$queryRaw<Array<{ variantId: string }>>(Prisma.sql`
+            SELECT "variant_id" AS "variantId"
+            FROM "inventory_movements"
+            WHERE "variant_id" = ${variantId}
+            GROUP BY "stock_state"
+            HAVING SUM("quantity_base_units") <> 0
+            LIMIT 1
+          `);
+          if (nonZeroBalances.length > 0) {
+            throw new BadRequestException('Cannot deactivate a variant while it has non-zero inventory balances');
+          }
+          const activeTransfers = await tx.transferLine.count({
+            where: {
+              variantId,
+              transfer: { is: { status: { notIn: [TransferStatus.RECEIVED, TransferStatus.REJECTED, TransferStatus.CANCELLED] } } },
+            },
+          });
+          const activeReplenishments = await tx.replenishmentRequestLine.count({
+            where: { variantId, request: { is: { status: ReplenishmentStatus.DRAFT } } },
+          });
+          if (activeTransfers > 0 || activeReplenishments > 0) {
+            throw new BadRequestException('Resolve active transfers and replenishment drafts before deactivating this variant');
+          }
+          return tx.variant.update({ where: { id: variantId }, data });
+        });
+      }
       return await this.prisma.variant.update({ where: { id: variantId }, data });
     } catch (error) {
       this.rethrowUniqueConflict(error);

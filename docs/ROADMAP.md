@@ -8,11 +8,11 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| **Current Baseline** | Phase 4 — Inventory Ledger, Opening Stock & Supplier Receiving complete |
-| **Implemented Functionality** | Phase 1–4 checklist complete; Phase 4 includes immutable movements, ledger balances, transactional stock writes, opening imports, and supplier receiving |
+| **Current Baseline** | Phase 5 — Warehouse Transfers & Replenishment Approvals complete |
+| **Implemented Functionality** | Phase 1–5 checklist complete; Phase 4 provides immutable movements and ledger balances, while Phase 5 adds replenishment drafts, transfer lifecycle, transit, receipt reconciliation, and cancellation reversals |
 | **Partial Functionality** | Web UI remains a foundation screen; operational workflows in later phases remain planned |
-| **Resolved Decisions** | 5 of 20 Open Decisions confirmed: `OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11` (see §5) |
-| **Remaining Blockers** | 15 unresolved business/technical decisions; Phase 6+ modules blocked until `OD-08`, `OD-09`, `OD-10` resolved |
+| **Resolved Decisions** | 6 of 20 Open Decisions confirmed: `OD-01`, `OD-02`, `OD-03`, `OD-04`, `OD-07`, `OD-11` (see §5) |
+| **Remaining Blockers** | 14 unresolved business/technical decisions; Phase 6+ modules blocked until `OD-08`, `OD-09`, `OD-10` resolved |
 | **Foundation Status** | API/web builds pass; local PostgreSQL, initial migration, seed data, and seeded login have been verified by the project owner |
 
 ---
@@ -20,8 +20,8 @@
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 4: Inventory Ledger, Opening Stock & Supplier Receiving — Complete**
-> Phase 4 inventory APIs and database migrations are implemented. Cashier-facing negative-stock warning presentation is part of the Phase 6 POS interface.
+> **Phase 5: Warehouse Transfers & Replenishment Approvals — Complete**
+> Phase 5 transfer/replenishment APIs and database migrations are implemented. Cashier-facing negative-stock warning presentation remains part of the Phase 6 POS interface.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
@@ -55,7 +55,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 ### Phase 2: Company Locations, Users, Roles & Employee Profiles
 - [x] `P0` Implement Company entity and global configuration (currency, timezone, invoice numbering prefix)
 - [x] `P0` Implement Location hierarchy: Main Warehouse, Sub-Warehouses, and Retail Stores
-- [x] `P0` Implement soft-deactivation/archival for locations (hard deletion prohibited if stock or transfer history exists)
+- [x] `P0` Implement soft-deactivation/archival for locations (cannot deactivate with active children, active transfers, or non-zero ledger balances; history remains preserved)
 - [x] `P1` Implement User management (create, assign roles, assign allowed location scopes, deactivate)
 - [x] `P1` Implement Employee profiles (employee code, full name, contact, workplace assignment, reporting manager)
 - [x] `P1` Add Loans & Advances summary section placeholder to Employee profile
@@ -81,14 +81,14 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P1` Link confirmed supplier receipts to immutable movement ledger entries and the receiving user
 
 ### Phase 5: Warehouse Transfers & Replenishment Approvals
-- [ ] `P1` Implement automated draft replenishment request generation based on reorder thresholds
-- [ ] `P1` Store system-suggested quantity separately from manager-approved quantity
-- [ ] `P0` Implement loose-packet and opened-carton warehouse transfer support (Confirmed `OD-01`: cartons can be opened and loose packets transferred between warehouses)
-- [ ] `P0` Implement transfer lifecycle state machine:
+- [x] `P1` Implement automated draft replenishment request generation based on reorder thresholds (suggests enough base units to reach the configured reorder level; does not move or reserve stock)
+- [x] `P1` Store system-suggested quantity separately from manager-approved quantity
+- [x] `P0` Implement loose-packet and opened-carton warehouse transfer support (Confirmed `OD-01`: cartons can be opened and loose packets transferred between warehouses)
+- [x] `P0` Implement transfer lifecycle state machine:
   - `Draft` &rarr; `Pending Approval` &rarr; `Approved` &rarr; `Partially Dispatched` / `Dispatched-In Transit` &rarr; `Partially Received` &rarr; `Received/Completed` (or `Rejected`/`Cancelled`)
-- [ ] `P0` Ensure dispatched transfer stock moves to `In transit` and is strictly excluded from destination available stock until confirmed receipt
-- [ ] `P0` Implement transfer cancellation reversal workflow (prohibit hard deletion of dispatched transfers)
-- [ ] `P1` Implement transfer receipt discrepancy recording (short/excess/damaged)
+- [x] `P0` Ensure dispatched transfer stock moves to `In transit` and is strictly excluded from destination available stock until confirmed receipt
+- [x] `P0` Implement transfer cancellation reversal workflow (prohibit hard deletion of dispatched transfers)
+- [x] `P1` Implement transfer receipt discrepancy recording (short/excess/damaged; damaged and excess quantities are quarantined)
 
 ### Phase 6: POS Billing, Invoices, Discounts & Sale Controls
 - [ ] `P0` Implement cashier terminal binding to authorized retail store location
@@ -170,7 +170,7 @@ The following 20 open decisions (`OD-01` through `OD-20`) originate from Section
 | Decision ID | Area | Open Question / Decision Description | Agreed Policy / Default Note | Status / Blocker Level |
 | :--- | :--- | :--- | :--- | :--- |
 | **OD-01** | Inventory | Can cartons be opened and loose packets transferred between warehouses? | **CONFIRMED: Yes.** Cartons can be opened and loose packets transferred between warehouses, as well as between warehouses and stores. | **RESOLVED** (Unblocks Transfer schema) |
-| **OD-02** | Locations | Exact initial location hierarchy, branch counts, and direct replenishment routes. | Confirm Main Warehouse &rarr; Sub-Warehouses &rarr; Stores routing rules. | Open / Medium (Blocks Seeding) |
+| **OD-02** | Locations | Exact initial location hierarchy, branch counts, and direct replenishment routes. | Manual transfers may connect any two distinct active Main Warehouses, Sub-Warehouses, or Stores in the same company, including sibling and non-adjacent locations. Automated replenishment suggestions use the destination's configured parent as the proposed source. | **RESOLVED** (Same-company transfers across all location tiers) |
 | **OD-03** | Stock Policy | Is negative stock ever permitted? | **CONFIRMED: Warning & Negative Display.** Sales are permitted to proceed; system displays a prominent cashier warning and records the balance as a negative value. | **RESOLVED** (Unblocks Ledger logic) |
 | **OD-04** | Stock Audit | How are sales/transfers during an ongoing physical audit handled? | **CONFIRMED: Location Freeze (After Hours).** Audits occur when the store is closed; stock movements are frozen for the location until counting completes. | **RESOLVED** (Unblocks Audit flow) |
 | **OD-05** | Audit Thresholds | Specific quantity and percentage variance thresholds triggering recount. | Set default thresholds per category (e.g., > 2% variance or > 5 units triggers mandatory recount). | Open / Medium (Blocks Audit config) |

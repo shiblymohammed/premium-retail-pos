@@ -409,6 +409,40 @@ curl -X POST http://localhost:4000/api/v1/auth/login ^
 
 **💾 Save this token!** You'll need it for all subsequent requests.
 
+## Phase 5: Transfers and Replenishment
+
+These workflows are API based. Use two different manager accounts with access to the relevant source and destination locations. A manager who requested a transfer cannot approve that same transfer. Manual transfers may connect any two distinct active locations within one company, including locations on different branches of the hierarchy. Replenishment suggestions use the destination's configured parent as the proposed source. Every mutating transfer endpoint requires a fresh `Idempotency-Key`; reuse the same key only when retrying the exact same request as the same user.
+
+Set `$base` to `http://localhost:4000/api/v1`; set `$sourceHeaders` and `$destinationHeaders` to `@{ Authorization = "Bearer <manager-token>" }` for the two managers. Choose an active variant that has an `AVAILABLE` balance at the source.
+
+### Replenishment draft
+
+```powershell
+$key = [guid]::NewGuid().ToString()
+$headersWithKey = @{ Authorization = $destinationHeaders.Authorization; "Idempotency-Key" = $key }
+$draft = Invoke-RestMethod "$base/transfers/replenishment/generate" `
+  -Method Post -Headers $headersWithKey `
+  -ContentType "application/json" `
+  -Body (@{ destLocationId = "<destination-location-id>" } | ConvertTo-Json)
+$draft.data.lines | Select-Object variantId, availableQtyBase, reorderLevelBase, systemSuggestedQtyBase
+```
+
+The suggested quantity should be `reorderLevelBase - availableQtyBase` for each under-threshold variant. Generating the request must not change inventory balances. Approve with a different source-scoped manager using `POST /transfers/replenishment/<request-id>/approve` and a body containing one `{ variantId, approvedQtyBase }` for every suggested line. Approval creates a transfer draft; it does not dispatch stock.
+
+For the approval request, create a new header using the source manager's token and a new key, for example: `$approvalHeaders = @{ Authorization = $sourceHeaders.Authorization; "Idempotency-Key" = [guid]::NewGuid().ToString() }`.
+
+### Manual transfer lifecycle
+
+1. Create a draft with `POST /transfers`, passing `sourceLocationId`, `destLocationId`, and line items such as `{ variantId, cartons: 1, looseBaseUnits: 2 }`. Cartons are converted using the product's current carton size; loose units remain in base units. Include a fresh `Idempotency-Key` header.
+2. Submit with `POST /transfers/<id>/submit` and a new key.
+3. Approve with a different source-scoped manager using `POST /transfers/<id>/approve`, a new key, and body `{ "lines": [{ "variantId": "<variant-id>", "approvedQtyBase": 12 }] }`.
+4. Dispatch from the source using `POST /transfers/<id>/dispatch`, a new key, and body `{ "lines": [{ "variantId": "<variant-id>", "looseBaseUnits": 12 }] }`. Dispatch must fail if source available stock is insufficient. Verify that source `IN_TRANSIT` rises and destination `AVAILABLE` stays unchanged.
+5. Receive at the destination using `POST /transfers/<id>/receive`, a new key, and body `{ "lines": [{ "variantId": "<variant-id>", "receivedQtyBase": 12 }] }`. Verify source `IN_TRANSIT` falls and destination `AVAILABLE` rises.
+
+For discrepancy checks, receive damaged units using `damagedQtyBase` and a `discrepancyNotes` explanation; those units must appear in destination `QUARANTINED`. Test excess by reporting more than dispatched; excess is quarantined. A short shipment must be finalized with `finalizeLine: true`, `shortQtyBase`, and a discrepancy note. To cancel a transfer with stock still in transit, call `PATCH /transfers/<id>/cancel` with `{ "reason": "<reason>" }`; verify the remaining in-transit stock returns to source available through ledger movements. Fully received or terminal transfers cannot be cancelled.
+
+Check `GET /transfers` and `GET /transfers/<id>` after each step for status and audit fields. Use `GET /inventory/balances?locationId=<id>&variantId=<id>` before and after each operation; stock changes should appear as movements, not edits to a stored balance.
+
 **Using Postman/Thunder Client:**
 
 1. Create new request: `POST http://localhost:4000/api/v1/auth/login`

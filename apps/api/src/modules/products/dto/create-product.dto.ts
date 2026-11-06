@@ -39,6 +39,14 @@ export class CreateProductDto {
   @Max(1000000)
   unitsPerCarton?: number;
 
+  /** Replenishment threshold in canonical base units. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  reorderLevel?: number;
+
   @IsOptional()
   @IsBoolean()
   hasVariants?: boolean;

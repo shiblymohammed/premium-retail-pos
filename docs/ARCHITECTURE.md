@@ -160,7 +160,7 @@ The system is partitioned into twelve modular domains. Each module enforces stri
 | **3. Product Catalogue & Pricing** | Products, variants (size/colour), SKU/barcodes, unit conversion ratios, pricing. | **Super Admin only** may alter purchase/selling prices; price edits require logged reason; variants have distinct SKU identities. |
 | **4. Inventory Ledger** | Canonical base unit stock tracking, stock state segregation, ledger reconciliation. | All stock changes create append-only ledger movements; stock balance is a pure function of historical movements; negative stock is permitted with prominent UI warnings and negative balance display (`OD-03`). |
 | **5. Supplier Receiving** | Supplier stock-in recording, carton/loose packet receipt validation. | Confirmed receipts, line conversion snapshots, receiving actor, and `SUPPLIER_RECEIPT` movements commit atomically; receipt documents are immutable and idempotent. |
-| **6. Transfers & Replenishment** | Auto-replenishment calculation, transfer lifecycle state machine, transit tracking. | In-transit stock cannot be sold at destination; cancelled transfers reversed via ledger; transfers support full cartons as well as opened cartons and loose packets across warehouses (`OD-01`). |
+| **6. Transfers & Replenishment** | Auto-replenishment calculation, transfer lifecycle state machine, transit tracking. | In-transit stock cannot be sold at destination; cancelled transfers reversed via ledger; transfers support full cartons and loose packets between any locations in the same company (`OD-01`, `OD-02`). |
 | **7. POS & Sales** | Terminal binding, cart management, checkout, receipt numbering, invoice creation. | Invoices are immutable once finalized; sale cancellations create balancing reversal movements; active bill removals generate audit logs; POS continues operating offline, caching sales locally with automatic sync once online (`OD-11`). |
 | **8. Discounts & Approvals** | Operator discount limit enforcement, manager override approval tracking. | Super Admin uncapped; Admin, Manager, Cashier have configured percentage thresholds enforced at both line-item AND bill level; discount stacking prohibited (`OD-07`). |
 | **9. Stock Audit & Recount** | Weekly audit sessions, physical counts, variance detection, recount approvals. | Conducted after closing hours; freezes location stock movements during active audit session (`OD-04`); physical counts never alter stock directly without manager approval. |
@@ -238,12 +238,12 @@ classDiagram
 
 ### Invariant 5: In-Transit Stock Isolation
 - **Rule**: Dispatched transfers must move stock into an `IN_TRANSIT` state and must not increment destination available stock until formal receipt confirmation.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: Dispatched transfer creates a negative movement at source (`-qty`, `TRANSFER_DISPATCH`) and a positive movement into virtual transit location. Destination available stock remains unchanged until `TRANSFER_RECEIPT` is posted.
+- **Implementation Status**: Implemented by the transfer lifecycle service and append-only movement ledger.
+- **Design Enforcement**: Dispatch records a negative `AVAILABLE` movement and a positive `IN_TRANSIT` movement at the source location, after checking source availability. Receipt removes reconciled units from source `IN_TRANSIT` and records good units as destination `AVAILABLE`; damaged or excess units enter destination `QUARANTINED`. Destination available stock is unchanged before receipt.
 
 ### Invariant 6: Replenishment Requests Do Not Move Stock
 - **Rule**: Auto-suggested or manager-initiated replenishment requests are purely informational drafts. They do not reserve, allocate, or move stock.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
+- **Implementation Status**: Implemented. Suggestions calculate the quantity required to bring destination available stock up to its configured reorder level. The manager-approved quantity is stored separately and creates a transfer draft; only dispatch writes movements.
 - **Design Enforcement**: `ReplenishmentRequest` entity has no direct relationship with `InventoryMovement`. Movements only occur when a formal `Transfer` is dispatched.
 
 ### Invariant 7: Physical Counts Do Not Alter Stock Until Approved
@@ -279,7 +279,7 @@ classDiagram
 ### Invariant 13: Distributed Idempotency on Mutating Actions
 - **Rule**: Retried requests (due to network drops or cashier double-clicks) must never duplicate invoices, stock deductions, or loan payments.
 - **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
-- **Design Enforcement**: Client passes `Idempotency-Key` header; backend caches response in Redis/DB using a unique constraint; duplicate requests return the cached original response.
+- **Design Enforcement**: Mutating inventory and transfer requests require an `Idempotency-Key`. The backend serializes first use of each key in PostgreSQL, binds the request hash to the actor, role, scope, endpoint, and payload, and replays the original response for exact retries for 24 hours. Reuse with a different actor or request is rejected.
 
 ### Invariant 14: Historical Price and Conversion Snapshotting
 - **Rule**: Future price updates or conversion ratio adjustments must never alter the financial totals or stock deductions of past transactions.

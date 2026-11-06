@@ -31,6 +31,8 @@ describe('ProductsService security and price history', () => {
         update: jest.fn(),
       },
       inventoryMovement: { count: jest.fn().mockResolvedValue(1) },
+      transferLine: { count: jest.fn().mockResolvedValue(0) },
+      replenishmentRequestLine: { count: jest.fn().mockResolvedValue(0) },
     };
     const prisma = { $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)) };
     const service = new ProductsService(prisma as any);
@@ -41,6 +43,45 @@ describe('ProductsService security and price history', () => {
       where: { variant: { is: { productId: 'product-id' } } },
     });
     expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it('prevents changing the base unit after a transfer has recorded a quantity snapshot', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'product-id' }]),
+      product: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'product-id', baseUnit: 'packet' }),
+        update: jest.fn(),
+      },
+      inventoryMovement: { count: jest.fn().mockResolvedValue(0) },
+      transferLine: { count: jest.fn().mockResolvedValue(1) },
+      replenishmentRequestLine: { count: jest.fn().mockResolvedValue(0) },
+    };
+    const prisma = { $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)) };
+    const service = new ProductsService(prisma as any);
+
+    await expect(service.update('product-id', { baseUnit: 'piece' } as any))
+      .rejects.toThrow('Cannot change a product base unit after transfer or replenishment history has been recorded');
+    expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it('updates reorder thresholds under the same product lock used by replenishment generation', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'product-id' }]),
+      product: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'product-id', baseUnit: 'packet', isActive: true }),
+        update: jest.fn().mockResolvedValue({ id: 'product-id', reorderLevel: 50 }),
+      },
+    };
+    const prisma = { $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)) };
+    const service = new ProductsService(prisma as any);
+
+    await service.update('product-id', { reorderLevel: 50 } as any);
+
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.product.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'product-id' },
+      data: { reorderLevel: 50 },
+    }));
   });
 
   it('locks the product before reading prices and writes the prior value to the audit log', async () => {

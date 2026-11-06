@@ -36,6 +36,14 @@ export class UpdateProductDto {
   @Max(1000000)
   unitsPerCarton?: number | null;
 
+  /** Set or clear the replenishment threshold in canonical base units. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  reorderLevel?: number | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(100)

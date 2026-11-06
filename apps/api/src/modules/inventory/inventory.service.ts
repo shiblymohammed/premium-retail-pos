@@ -41,6 +41,7 @@ export class InventoryService {
     })).sort((a, b) => a.variantId.localeCompare(b.variantId));
     this.assertUniqueVariants(lines.map((line) => line.variantId));
     const payloadHash = this.hashPayload({
+      actorId: actor.userId,
       locationId: dto.locationId,
       notes: dto.notes?.trim() || null,
       lines,
@@ -103,6 +104,7 @@ export class InventoryService {
     })).sort((a, b) => a.variantId.localeCompare(b.variantId));
     this.assertUniqueVariants(inputLines.map((line) => line.variantId));
     const payloadHash = this.hashPayload({
+      actorId: actor.userId,
       locationId: dto.locationId,
       receiptNumber,
       supplierName,
