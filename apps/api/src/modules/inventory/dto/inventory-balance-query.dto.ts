@@ -14,6 +14,11 @@ export class InventoryBalanceQueryDto {
   variantId?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  variantIds?: string;
+
+  @IsOptional()
   @IsEnum(StockState)
   stockState?: StockState;
 }

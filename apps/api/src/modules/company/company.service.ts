@@ -12,6 +12,8 @@ export class CompanyService {
    * @returns Created company
    */
   async create(createCompanyDto: CreateCompanyDto) {
+    const invoicePrefix = createCompanyDto.invoicePrefix ?? 'INV';
+    await this.assertInvoicePrefixAvailable(invoicePrefix);
     // Check if company with same name already exists
     const existingCompany = await this.prisma.company.findFirst({
       where: { name: createCompanyDto.name },
@@ -21,18 +23,24 @@ export class CompanyService {
       throw new ConflictException(`Company with name "${createCompanyDto.name}" already exists`);
     }
 
-    return this.prisma.company.create({
-      data: createCompanyDto,
-      include: {
-        locations: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
+    try {
+      const company = await this.prisma.company.create({
+        data: { ...createCompanyDto, invoicePrefix },
+        include: {
+          locations: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+            },
           },
         },
-      },
-    });
+      });
+      return this.withoutReservedTaxConfig(company);
+    } catch (error) {
+      if (this.isUniqueConflict(error)) throw new ConflictException('Company name or invoice prefix is already in use');
+      throw error;
+    }
   }
 
   /**
@@ -40,7 +48,7 @@ export class CompanyService {
    * @returns List of all companies
    */
   async findAll() {
-    return this.prisma.company.findMany({
+    const companies = await this.prisma.company.findMany({
       include: {
         locations: {
           select: {
@@ -60,6 +68,7 @@ export class CompanyService {
         createdAt: 'desc',
       },
     });
+    return companies.map((company) => this.withoutReservedTaxConfig(company));
   }
 
   /**
@@ -103,7 +112,7 @@ export class CompanyService {
       throw new NotFoundException(`Company with ID "${id}" not found`);
     }
 
-    return company;
+    return this.withoutReservedTaxConfig(company);
   }
 
   /**
@@ -116,19 +125,29 @@ export class CompanyService {
     // Verify company exists
     await this.findOne(id);
 
-    return this.prisma.company.update({
-      where: { id },
-      data: updateCompanyDto,
-      include: {
-        locations: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
+    if (updateCompanyDto.invoicePrefix !== undefined) {
+      await this.assertInvoicePrefixAvailable(updateCompanyDto.invoicePrefix, id);
+    }
+
+    try {
+      const company = await this.prisma.company.update({
+        where: { id },
+        data: updateCompanyDto,
+        include: {
+          locations: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+            },
           },
         },
-      },
-    });
+      });
+      return this.withoutReservedTaxConfig(company);
+    } catch (error) {
+      if (this.isUniqueConflict(error)) throw new ConflictException('Company name or invoice prefix is already in use');
+      throw error;
+    }
   }
 
   /**
@@ -150,10 +169,18 @@ export class CompanyService {
       throw new ConflictException('Invoice prefix cannot exceed 10 characters');
     }
 
-    return this.prisma.company.update({
-      where: { id },
-      data: { invoicePrefix: prefix },
-    });
+    await this.assertInvoicePrefixAvailable(prefix, id);
+
+    try {
+      const company = await this.prisma.company.update({
+        where: { id },
+        data: { invoicePrefix: prefix },
+      });
+      return this.withoutReservedTaxConfig(company);
+    } catch (error) {
+      if (this.isUniqueConflict(error)) throw new ConflictException('Invoice prefix is already assigned to another company');
+      throw error;
+    }
   }
 
   /**
@@ -192,5 +219,23 @@ export class CompanyService {
         retailStores,
       },
     };
+  }
+
+  /** Keep dormant future tax storage out of the current company setup and API responses. */
+  private withoutReservedTaxConfig<T extends { gstNumber?: unknown }>(company: T) {
+    const { gstNumber: _reservedForFutureTax, ...currentReleaseCompany } = company;
+    return currentReleaseCompany;
+  }
+
+  private async assertInvoicePrefixAvailable(prefix: string, excludingCompanyId?: string) {
+    const existing = await this.prisma.company.findFirst({
+      where: { invoicePrefix: prefix, ...(excludingCompanyId ? { id: { not: excludingCompanyId } } : {}) },
+      select: { id: true },
+    });
+    if (existing) throw new ConflictException('Invoice prefix is already assigned to another company; choose a unique prefix');
+  }
+
+  private isUniqueConflict(error: unknown) {
+    return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
   }
 }

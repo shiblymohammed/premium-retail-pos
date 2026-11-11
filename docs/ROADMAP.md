@@ -8,11 +8,11 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| **Current Baseline** | Phase 5 — Warehouse Transfers & Replenishment Approvals complete |
-| **Implemented Functionality** | Phase 1–5 checklist complete; Phase 4 provides immutable movements and ledger balances, while Phase 5 adds replenishment drafts, transfer lifecycle, transit, receipt reconciliation, and cancellation reversals |
-| **Partial Functionality** | Web UI remains a foundation screen; operational workflows in later phases remain planned |
-| **Resolved Decisions** | 6 of 20 Open Decisions confirmed: `OD-01`, `OD-02`, `OD-03`, `OD-04`, `OD-07`, `OD-11` (see §5) |
-| **Remaining Blockers** | 14 unresolved business/technical decisions; Phase 6+ modules blocked until `OD-08`, `OD-09`, `OD-10` resolved |
+| **Current Baseline** | Phase 6 — POS Billing, Invoices, Discounts & Sale Controls in progress |
+| **Implemented Functionality** | Phases 1–5 complete; Phase 6 terminal binding, cart/barcode/stock display, deletion auditing, assigned discount enforcement, online checkout, offline queue/sync, invoice cancellation, returns, manual refund records, and receipt printing are implemented |
+| **Partial Functionality** | Targeted Phase 6 API and browser checks passed, including offline queue/sync. Final client UAT and thermal printer hardware verification remain; a stale stock-refresh alert can persist after reconnect. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
+| **Resolved Decisions** | 9 of 20 Open Decisions confirmed: `OD-01`, `OD-02`, `OD-03`, `OD-04`, `OD-07`, `OD-08`, `OD-09`, `OD-10`, `OD-11` (see §5) |
+| **Remaining Blockers** | 11 unresolved business/technical decisions outside the completed Phase 6 policy set |
 | **Foundation Status** | API/web builds pass; local PostgreSQL, initial migration, seed data, and seeded login have been verified by the project owner |
 
 ---
@@ -20,8 +20,8 @@
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 5: Warehouse Transfers & Replenishment Approvals — Complete**
-> Phase 5 transfer/replenishment APIs and database migrations are implemented. Cashier-facing negative-stock warning presentation remains part of the Phase 6 POS interface.
+> **Phase 6: POS Billing, Invoices, Discounts & Sale Controls — In Progress**
+> Phase 6 functionality is implemented, including offline synchronization and permission-controlled cancellation/returns. Targeted API and browser acceptance checks passed. Final client UAT, thermal printer hardware verification, and clearing a stale stock-refresh alert after reconnect remain.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
@@ -53,7 +53,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P0` Implement global request validation, normalized exception handling, and structured audit event logging interceptor
 
 ### Phase 2: Company Locations, Users, Roles & Employee Profiles
-- [x] `P0` Implement Company entity and global configuration (currency, timezone, invoice numbering prefix)
+- [x] `P0` Implement Company entity and global configuration (currency, timezone, invoice numbering prefix unique across companies so the global invoice-number index cannot collide)
 - [x] `P0` Implement Location hierarchy: Main Warehouse, Sub-Warehouses, and Retail Stores
 - [x] `P0` Implement soft-deactivation/archival for locations (cannot deactivate with active children, active transfers, or non-zero ledger balances; history remains preserved)
 - [x] `P1` Implement User management (create, assign roles, assign allowed location scopes, deactivate)
@@ -91,22 +91,33 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P1` Implement transfer receipt discrepancy recording (short/excess/damaged; damaged and excess quantities are quarantined)
 
 ### Phase 6: POS Billing, Invoices, Discounts & Sale Controls
-- [ ] `P0` Implement cashier terminal binding to authorized retail store location
-- [ ] `P0` Build high-speed POS cart interface supporting barcode scanning and variant lookup
-- [ ] `P0` Display real-time location-scoped available stock (with negative value indicator and warning when below zero)
-- [ ] `P0` Implement offline POS resilient queueing (Confirmed `OD-11`): POS keeps running without internet, caches transactions locally with idempotency keys, and automatically syncs to backend once connection is restored
-- [ ] `P0` Implement active unfinalized bill item deletion auditing (log item, variant, quantity, cashier, time, optional staff popup)
-- [ ] `P0` Implement dual-tier discount authorization engine (Confirmed `OD-07`):
-  - Enforce limits at both line-item level AND overall bill level
-  - Prohibit discount stacking to circumvent manager approval thresholds
-  - Super Admin: Uncapped; Admin: Predefined threshold; Manager / Cashier: Strict assigned limit
-  - Over-limit discount requires manager authorization popup, logging approver and reason
-- [ ] `P0` Implement idempotent sale finalization generating unique sequential invoice numbers and atomic inventory deductions
-- [ ] `P0` Implement completed-sale cancellation workflow:
-  - Require explicit permission and documented reason
+- [x] `P0` Implement cashier terminal binding to authorized retail store location (cashier is scoped to one active retail store; runtime context verified)
+- [x] `P0` Build high-speed POS cart interface supporting barcode scanning and variant lookup
+- [x] `P0` Display real-time location-scoped available stock (with negative value indicator and warning when below zero; refreshes every 15 seconds)
+- [x] `P0` Implement offline POS resilient queueing (Confirmed `OD-11`): POS keeps running without internet, caches transactions locally with idempotency keys, and automatically syncs to backend once connection is restored; changed prices/limits require manual payment reconciliation using a current server quote
+- [x] `P0` Implement active unfinalized bill item deletion auditing (log item, variant, quantity, cashier, time; optional reason)
+- [x] `P0` Implement dual-tier discount authorization engine (Confirmed `OD-07`):
+  - Admin/Super Admin discount-limit assignment API and screen are implemented; sale-time enforcement rejects discounts over the assigned limit
+  - Enforce limits at both line-item level AND overall bill level (line and bill discounts cannot be combined)
+  - Prohibit combining line and bill discounts to exceed assigned limits
+  - Super Admin: Uncapped; Admin, Manager, and Cashier: percentage limits assigned per user by a Super Admin or Admin
+  - Admin may assign only within their user/location scope and may not grant a higher limit than their own
+  - New users default to a 0% discount limit; limit changes require a reason and are audited
+  - Discounts above the assigned limit are rejected; there is no override or approval request
+- [x] `P0` Implement idempotent sale finalization generating unique sequential invoice numbers and atomic inventory deductions (API and cashier checkout UI implemented; targeted API and browser checks passed)
+  - Record exactly one full payment per sale: Cash, Card, or Online; split payments and gateway/terminal integrations are excluded
+  - Retain payment method, amount, recording time, and cashier; cash also retains tendered amount and change, while Card/Online may retain a non-sensitive transaction reference
+- [x] `P0` Implement completed-sale cancellation workflow:
+  - Require assigned permission, documented reason, and confirmation all goods are physically back at the store
   - Preserve original invoice and line items intact
+  - Record a full manual refund (method and optional safe reference); the POS does not initiate payment
   - Generate corresponding financial and inventory movement reversal records
-- [ ] `P1` Implement receipt layout printing support (thermal printer format)
+  - Cancellation/return permissions are assigned per user by Admin/Super Admin and enforced by the endpoints
+- [x] `P0` Implement permission-controlled invoice returns:
+  - Require the original invoice; no return time limit is configured
+  - Record returned quantities, reason, inspection notes, disposition, and any manual refund; never initiate payment
+  - Restock approved goods to available inventory or quarantine goods that are not saleable
+- [x] `P1` Implement receipt layout printing support (browser print layout sized for 76 mm thermal paper; printer hardware acceptance pending)
 
 ### Phase 7: Stock Audits, Recounts & Approved Adjustments
 - [ ] `P1` Implement location-level stock movement freeze during audit session (Confirmed `OD-04`: audits take place after store closing hours; system locks sales and transfers for the location during counting)
@@ -175,10 +186,10 @@ The following 20 open decisions (`OD-01` through `OD-20`) originate from Section
 | **OD-04** | Stock Audit | How are sales/transfers during an ongoing physical audit handled? | **CONFIRMED: Location Freeze (After Hours).** Audits occur when the store is closed; stock movements are frozen for the location until counting completes. | **RESOLVED** (Unblocks Audit flow) |
 | **OD-05** | Audit Thresholds | Specific quantity and percentage variance thresholds triggering recount. | Set default thresholds per category (e.g., > 2% variance or > 5 units triggers mandatory recount). | Open / Medium (Blocks Audit config) |
 | **OD-06** | Audit UX | Should physical stock audits be blind counts? | Decide whether counters can view expected stock quantities on screen. | Open / Medium (Blocks Audit UI) |
-| **OD-07** | Discounts | Do discount limits apply per line item, per bill, or both? How is stacking handled? | **CONFIRMED: Both Line and Bill Limits.** Thresholds apply at both line-item level and overall cart level; discount stacking to bypass approval is strictly prohibited. | **RESOLVED** (Unblocks POS logic) |
-| **OD-08** | Returns | Business rules for customer returns, refunds, and exchanges. | Define return windows, receipt verification, refund payment method, and restocking inspection. | Open / High (Blocks POS returns) |
-| **OD-09** | Billing & Tax | Specific GST/tax calculations, tax breakdown display, legal invoice headers, and customer info. | Confirm legal tax requirements, GSTIN display, and sequential numbering rules. | Open / High (Blocks Invoice template) |
-| **OD-10** | Payments | Supported payment modes (Cash, Card, UPI, Split) and payment gateway integration. | Support Cash, Card, UPI manual tracking initially; confirm if EDC card machine integration is required. | Open / High (Blocks Checkout flow) |
+| **OD-07** | Discounts | How are discount limits assigned, where do they apply, and how is stacking handled? | **CONFIRMED:** Super Admin is uncapped. A Super Admin or Admin assigns each other user a percentage limit. Limits apply per line and across the whole bill; line and bill discounts cannot be combined. Admin assignment is scoped and cannot exceed their own limit. Any discount above the assigned limit is rejected; there is no override request. | **RESOLVED** (Unblocks POS logic) |
+| **OD-08** | Returns | Business rules for customer returns, refunds, and exchanges. | **CONFIRMED:** Admin/Super Admin assign per-user permissions. Returns require the original invoice, have no time limit, record any refund manually (amount, method, time, operator, optional safe reference), and never initiate a payment. Returned items require inspection notes and are either restocked as saleable or placed in quarantine. Full cancellation is a reasoned, permission-controlled void with a full manual refund record and inventory reversal. | **RESOLVED** (Unblocks cancellation and returns) |
+| **OD-09** | Tax & Invoice Details | Does this release need tax setup, customer details, e-invoicing, or e-way bills? | **CONFIRMED: None are required for the current client release.** Do not collect customer details or implement tax/e-invoice/e-way-bill flows now; add them later only through approved extensions. | **RESOLVED for current release / Future extension** |
+| **OD-10** | Payments | Which payment methods are supported, and is gateway/terminal integration needed? | **CONFIRMED:** Cash, Card, and Online, one full payment per sale; split payments and card-terminal/payment-gateway integrations are not required. Retain method, amount, time, cashier, optional non-sensitive transaction reference, and cash tender/change values for cash reconciliation. Never store card number, CVV, PIN, or track data. | **RESOLVED** (Unblocks payment workflow) |
 | **OD-11** | Offline Mode | Scope of offline-first operation vs. online-only operation. | **CONFIRMED: Online-First with Offline POS Resilient Queueing.** POS keeps running without internet, caches transactions locally with idempotency keys, and syncs automatically once online. | **RESOLVED** (Unblocks Client architecture) |
 | **OD-12** | Attendance | Specific shift schedules, grace periods, break tracking, overtime rules, and geofence radius. | Set default 50-meter geofence, 15-minute grace period; confirm workplace coordinates. | Open / Medium (Blocks Attendance logic) |
 | **OD-13** | Verification | Is facial recognition or liveness verification required for mobile attendance? | **Optional / Excluded from baseline**; conduct privacy, security, and hardware cost review first. | Deferred / Low |
@@ -196,7 +207,7 @@ The following 20 open decisions (`OD-01` through `OD-20`) originate from Section
 
 As defined in Section 2.2 of the specification, the following capabilities are **explicitly out-of-scope** for the initial ₹70,000 commercial package and must not be assumed without separate approved change orders:
 
-- **Full Accounting / General Ledger**: Balance sheets, P&L generation, tax filing, e-invoicing, e-way bills.
+- **Full Accounting / General Ledger**: Balance sheets, P&L generation, tax filing, e-invoicing, e-way bills. The current POS release excludes tax setup/calculations, customer detail collection, e-invoicing, and e-way bills; future support requires explicit client approval and dedicated extensions.
 - **Customer Facing Applications**: Consumer mobile app, e-commerce web storefront, loyalty points, marketing campaigns.
 - **Supplier Portal & Purchase Orders**: Supplier self-service portal, formal purchase order approvals, and accounts payable.
 - **Automated Bank Reconciliation**: Direct API banking feeds and automated chargeback handling.

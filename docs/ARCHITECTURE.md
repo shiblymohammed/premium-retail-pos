@@ -7,9 +7,9 @@
 ## 1. System Overview
 
 ### 1.1 Current Repository Implementation State
-- **Status**: Greenfield / Inception Phase.
-- **Repository Contents**: Core architectural and operational documentation ([README.md](file:///c:/Users/shibi/Documents/dev/POS/README.md), [ROADMAP.md](file:///c:/Users/shibi/Documents/dev/POS/ROADMAP.md), [ARCHITECTURE.md](file:///c:/Users/shibi/Documents/dev/POS/ARCHITECTURE.md), [CHANGELOG.md](file:///c:/Users/shibi/Documents/dev/POS/CHANGELOG.md)).
-- **Implemented Services**: None currently running or committed.
+- **Status**: Phases 1–5 implemented; Phase 6 implementation is in place and acceptance testing is pending. See the [roadmap](ROADMAP.md) for the current task state.
+- **Repository Contents**: A TypeScript monorepo with a Next.js web application, a NestJS API, Prisma schema/migrations, shared packages, and project documentation ([README](../README.md), [roadmap](ROADMAP.md), [changelog](CHANGELOG.md)).
+- **Implemented Services**: Authentication, organization and user access, product catalogue, inventory ledger and receiving, transfers/replenishment, POS billing, discounts, invoice cancellation, returns, and manual refund records. Stock audits, attendance, loans, reports, and deployment/UAT work remain in later phases.
 
 ### 1.2 Proposed Technical Architecture
 In accordance with Section 21 of the specification document, the proposed enterprise architecture adopts a modular multi-tier structure designed for transactional consistency, horizontal scalability, and strict security isolation:
@@ -59,17 +59,20 @@ flowchart TD
 ## 2. Directory Layout: Actual vs. Proposed
 
 ### 2.1 Actual Directory Structure
-The repository root currently consists exclusively of the baseline documentation suite:
+The current repository includes the implemented application workspaces and the remaining planned domains:
 ```text
-POS/
-├── ARCHITECTURE.md     # System design, data integrity invariants, and ADRs (this file)
-├── CHANGELOG.md        # Chronological version notes
-├── README.md           # Project overview and developer onboarding
-└── ROADMAP.md          # Implementation phases and open decisions tracker
+premium-retail-pos/
+├── apps/
+│   ├── api/             # NestJS modules, Prisma schema, migrations, and seed data
+│   └── web/             # Next.js POS and administration interfaces
+├── packages/shared/     # Shared TypeScript package
+├── docs/                # Roadmap, architecture, changelog, and testing guide
+├── docker-compose.yml   # Local PostgreSQL service
+└── package.json         # npm workspace scripts
 ```
 
-### 2.2 Proposed Directory Structure (Phase 1 Target)
-The planned monorepo/modular layout organizes domain logic into clean vertical slices:
+### 2.2 Target Directory Structure
+The intended end-state keeps domain logic in vertical slices. Attendance, loans, audit sessions, and reporting are later-phase targets and are not claimed as implemented yet:
 ```text
 POS/
 ├── apps/
@@ -162,7 +165,7 @@ The system is partitioned into twelve modular domains. Each module enforces stri
 | **5. Supplier Receiving** | Supplier stock-in recording, carton/loose packet receipt validation. | Confirmed receipts, line conversion snapshots, receiving actor, and `SUPPLIER_RECEIPT` movements commit atomically; receipt documents are immutable and idempotent. |
 | **6. Transfers & Replenishment** | Auto-replenishment calculation, transfer lifecycle state machine, transit tracking. | In-transit stock cannot be sold at destination; cancelled transfers reversed via ledger; transfers support full cartons and loose packets between any locations in the same company (`OD-01`, `OD-02`). |
 | **7. POS & Sales** | Terminal binding, cart management, checkout, receipt numbering, invoice creation. | Invoices are immutable once finalized; sale cancellations create balancing reversal movements; active bill removals generate audit logs; POS continues operating offline, caching sales locally with automatic sync once online (`OD-11`). |
-| **8. Discounts & Approvals** | Operator discount limit enforcement, manager override approval tracking. | Super Admin uncapped; Admin, Manager, Cashier have configured percentage thresholds enforced at both line-item AND bill level; discount stacking prohibited (`OD-07`). |
+| **8. Discount Authorization** | Operator discount limit assignment and enforcement. | Super Admin uncapped; other user limits assigned by Super Admin/Admin and enforced at line and bill level; line and bill discounts cannot be combined and over-limit discounts are rejected (`OD-07`). |
 | **9. Stock Audit & Recount** | Weekly audit sessions, physical counts, variance detection, recount approvals. | Conducted after closing hours; freezes location stock movements during active audit session (`OD-04`); physical counts never alter stock directly without manager approval. |
 | **10. Attendance** | Mobile check-in/out, rotating QR codes, GPS geofencing, manager punch corrections. | Geofence verification against store coordinates; punches immutable to staff; manager corrections preserve original values and reason. |
 | **11. Loans & Advances** | Disbursal records, repayment tracking, balance computations, payroll linkage. | $\text{Outstanding} = \text{Issued} - \text{Repayments}$; planned payroll deductions do not reduce balance until officially confirmed. |
@@ -362,10 +365,38 @@ classDiagram
 
 ### ADR-011: Dual-Tier Discount Authorization & Anti-Stacking Policy
 - **Status**: Accepted (Confirmed `OD-07`)
-- **Context**: Operators could attempt to evade discount approval caps by dividing discounts across line items or applying cascading cart-level discounts.
-- **Decision**: Enforce discount authorization caps at both the line-item level AND the overall bill total. Furthermore, discount stacking (combining multiple promotions or overriding item discounts on top of bill discounts) is strictly blocked unless verified by an authorized manager.
+- **Context**: Operators could attempt to evade discount approval caps by dividing discounts across line items or applying cascading cart-level discounts. The client has delegated limit assignment to Admin and Super Admin roles.
+- **Decision**: Super Admin is uncapped. Super Admin or Admin assigns each other user a percentage limit. A limit is enforced at both line-item level and overall bill level. Line and bill discounts cannot be combined; any discount above the assigned cap is rejected without an override path. Admins may assign only to users within their location scope and may not grant a limit above their own. New users default to 0%; every changed assignment requires a reason and an immutable audit event.
 - **Rationale**: Protects retail margins and ensures complete transparency in cashier discount auditing.
-- **Consequences**: Cart calculation engine must validate both line-by-line and aggregated totals against the cashier's authorized threshold before completing the sale.
+- **Consequences**: The assignment API and Admin/Super Admin screen provide audited per-user percentages. Sale finalization must validate per-line discounts and cumulative bill discounts against the assigned user's threshold; client-side checks alone are insufficient.
+
+### ADR-012: Tax and Customer Invoice Details Deferred for Current Client Release
+- **Status**: Accepted (Confirmed `OD-09` by client)
+- **Context**: The client confirmed that tax setup/calculations, customer detail collection, e-invoicing, and e-way bills are not required in the current release, while future scope may add them.
+- **Decision**: Do not expose company tax setup, tax calculations, tax breakdowns, customer details, e-invoicing, or e-way-bill flows in the current POS API or checkout. Keep existing nullable GST storage dormant and preserve it from destructive removal. If tax is later approved, add it behind a dedicated `TaxProvider` in sale finalization, with explicit company configuration and immutable rate/tax snapshots on finalized sales. Add customer and government invoice flows as separate, opt-in capabilities.
+- **Rationale**: Keeps current checkout simple while preserving clean extension seams and avoiding tax-specific logic in product, cart, and inventory code.
+- **Consequences**: Current release does not claim tax calculation or tax-invoice compliance. Adding these capabilities later requires client approval, agreed rules, migration/API work, and dedicated tests.
+
+### ADR-013: Single Manual Payment Recording
+- **Status**: Accepted (Confirmed `OD-10` by client)
+- **Context**: The client requires Cash, Card, and Online payment choices, with no split tender and no card-terminal or payment-gateway integration.
+- **Decision**: Record one payment equal to the finalized sale amount. Store payment method, amount, recording timestamp, and cashier. For Cash, also store amount tendered and change given. For Card and Online, allow an optional non-sensitive transaction reference. Do not store card numbers, CVV, PIN, or track data.
+- **Rationale**: Provides method-level and cashier-level reconciliation while keeping payment processing manual and avoiding sensitive cardholder data.
+- **Consequences**: Database uniqueness enforces one payment per invoice; sale finalization validates exact amount and cash change. Split tender and electronic integrations require a separately approved extension.
+
+### ADR-014: Assigned Sale Cancellation and Return Permissions
+- **Status**: Accepted (Confirmed by client; `OD-08` resolved)
+- **Context**: The client requires administrators to decide which users may cancel finalized sales and process returns.
+- **Decision**: Store separate `canCancelSales` and `canProcessReturns` permissions per user. Both default to false. Super Admin inherits both permissions; Super Admin or Admin may assign or revoke them with a reason. Admin assignments are limited to users fully inside the Admin's location scope. Every change is recorded as an immutable audit event. A cancellation is a full, reasoned void only after all sale goods are confirmed physically back at the store; it preserves the invoice, records a full manual refund and reverses its stock movement. A return references the original invoice, has no time limit, records the actual manual refund method/amount/operator/time, and does not initiate a payment. Each returned line requires inspection notes and is either placed in AVAILABLE after inspection or QUARANTINED. No customer profile is required.
+- **Rationale**: Makes authority explicit, revocable, location-aware, and traceable without coupling it to broad role labels.
+- **Consequences**: Cancellation and return endpoints check the assigned permission server-side. Partial return refunds use the sale-time line net amount, including a deterministic allocation of bill discounts, and cannot exceed the quantity/value originally sold. Refund references reject card-number-like values. The recorded refund method is informational only; no payment integration is present.
+
+### ADR-015: Atomic POS Sale Finalization and Manual Payment Recording
+- **Status**: Accepted (Phase 6 implementation; acceptance testing pending)
+- **Context**: Checkout must use server-authoritative catalogue prices, the configured base-unit/carton ratio, assigned discount limits, and a single payment record while keeping inventory and financial records aligned.
+- **Decision**: Require an idempotency key for checkout. In one database transaction, lock and validate the cashier and active store, read active variant prices, calculate discounts and totals, allocate the company's sequential invoice number, create the immutable invoice and one full payment record, append signed sale inventory movements, and record the audit event. Cash tender/change are reconciled server-side. The cashier UI retries the identical payload/key after an ambiguous server or network failure.
+- **Rationale**: A retry cannot silently create another invoice, and checkout cannot persist an invoice without its payment and inventory ledger entries.
+- **Consequences**: Offline synchronization rechecks current server prices and discount limits and compares the current net total with the saved payment amount. If policy or price changes, the queued transaction pauses for a fresh quote and explicit manual payment reconciliation; no mismatched invoice or payment is committed. Discounts over an assigned limit are rejected without an override path.
 
 ---
 

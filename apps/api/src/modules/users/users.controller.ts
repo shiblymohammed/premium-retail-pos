@@ -18,6 +18,8 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { AssignDiscountLimitDto } from './dto/assign-discount-limit.dto';
+import { AssignSalesPermissionsDto } from './dto/assign-sales-permissions.dto';
 
 @Controller('users')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -54,6 +56,16 @@ export class UsersController {
     return { data: users };
   }
 
+  @Get('me/discount-limit')
+  async getMyDiscountAuthority(@CurrentUser() actor: RequestUser) {
+    return { data: await this.usersService.getDiscountAuthority(actor.userId) };
+  }
+
+  @Get('me/sales-permissions')
+  async getMySalesPermissions(@CurrentUser() actor: RequestUser) {
+    return { data: await this.usersService.getSalesPermissions(actor.userId) };
+  }
+
   @Patch(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async update(
@@ -70,5 +82,27 @@ export class UsersController {
   async deactivate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.deactivateUser(id, actor);
     return { message: 'User deactivated', data: { id: user.id } };
+  }
+
+  @Patch(':id/discount-limit')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async assignDiscountLimit(
+    @Param('id') id: string,
+    @Body() dto: AssignDiscountLimitDto,
+    @CurrentUser() actor: RequestUser,
+  ) {
+    const user = await this.usersService.assignDiscountLimit(id, dto, actor);
+    return { message: 'Discount limit assigned', data: user };
+  }
+
+  @Patch(':id/sales-permissions')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async assignSalesPermissions(
+    @Param('id') id: string,
+    @Body() dto: AssignSalesPermissionsDto,
+    @CurrentUser() actor: RequestUser,
+  ) {
+    const user = await this.usersService.assignSalesPermissions(id, dto, actor);
+    return { message: 'Sales permissions assigned', data: user };
   }
 }

@@ -84,6 +84,30 @@ enum InvoiceStatus {
   CANCELLED
 }
 
+/// Payment methods accepted for a single POS sale (Phase 6)
+enum PaymentMethod {
+  CASH
+  CARD
+  ONLINE
+}
+
+enum RefundMethod {
+  CASH
+  CARD
+  ONLINE
+  OTHER
+}
+
+enum RefundType {
+  SALE_CANCELLATION
+  SALE_RETURN
+}
+
+enum ReturnDisposition {
+  RESTOCKED
+  QUARANTINED
+}
+
 /// Audit session status (ADR-010: Location Freeze)
 enum AuditSessionStatus {
   ACTIVE // Location is frozen for stock movements
@@ -112,15 +136,18 @@ enum RepaymentStatus {
 
 /// Core user account for authentication and authorization
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  passwordHash     String    @map("password_hash")
-  role             Role
-  isActive         Boolean   @default(true) @map("is_active")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
-  lastLoginAt      DateTime? @map("last_login_at")
-  refreshTokenHash String?   @map("refresh_token_hash")
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  passwordHash         String    @map("password_hash")
+  role                 Role
+  discountLimitPercent Decimal   @default(0) @map("discount_limit_percent") @db.Decimal(5, 2)
+  canCancelSales       Boolean   @default(false) @map("can_cancel_sales")
+  canProcessReturns    Boolean   @default(false) @map("can_process_returns")
+  isActive             Boolean   @default(true) @map("is_active")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  lastLoginAt          DateTime? @map("last_login_at")
+  refreshTokenHash     String?   @map("refresh_token_hash")
 
   // Relations
   employee                Employee?
@@ -138,6 +165,9 @@ model User {
   transfersDispatched     Transfer[]             @relation("TransferDispatchedBy")
   transfersReceived       Transfer[]             @relation("TransferReceivedBy")
   transfersCancelled      Transfer[]             @relation("TransferCancelledBy")
+  invoicePaymentsRecorded InvoicePayment[]       @relation("InvoicePaymentRecorder")
+  invoiceRefundsRecorded  InvoiceRefund[]        @relation("InvoiceRefundRecorder")
+  saleReturnsProcessed    SaleReturn[]           @relation("SaleReturnProcessor")
 
   @@map("users")
 }
@@ -164,14 +194,17 @@ model UserLocationScope {
 
 /// Company-wide configuration (currency, timezone, invoice prefix)
 model Company {
-  id            String   @id @default(uuid())
-  name          String
-  currency      String   @default("INR")
-  timezone      String   @default("Asia/Kolkata")
-  invoicePrefix String   @default("INV") @map("invoice_prefix")
-  gstNumber     String?  @map("gst_number")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id              String   @id @default(uuid())
+  name            String
+  currency        String   @default("INR")
+  timezone        String   @default("Asia/Kolkata")
+  invoicePrefix   String   @unique @default("INV") @map("invoice_prefix")
+  invoiceSequence Int      @default(0) @map("invoice_sequence")
+  // Reserved nullable storage for an explicitly approved future tax extension.
+  // It is not accepted or exposed by the current API and is not used in calculations.
+  gstNumber       String?  @map("gst_number")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   // Relations
   locations Location[]
@@ -555,6 +588,7 @@ model Invoice {
   status             InvoiceStatus @default(FINALIZED)
   grossTotal         Decimal       @map("gross_total") @db.Decimal(12, 2)
   discountTotal      Decimal       @default(0) @map("discount_total") @db.Decimal(12, 2)
+  billDiscountTotal  Decimal       @default(0) @map("bill_discount_total") @db.Decimal(12, 2)
   netTotal           Decimal       @map("net_total") @db.Decimal(12, 2)
   idempotencyKey     String        @unique @map("idempotency_key") // Invariant 13
   cancelledAt        DateTime?     @map("cancelled_at")
@@ -563,8 +597,11 @@ model Invoice {
   createdAt          DateTime      @default(now()) @map("created_at")
 
   // Relations
-  location Location   @relation(fields: [locationId], references: [id])
+  location Location        @relation(fields: [locationId], references: [id])
   lines    SaleLine[]
+  payment  InvoicePayment?
+  returns  SaleReturn[]
+  refunds  InvoiceRefund[]
 
   // Invoices are never deleted (Invariant 8)
   @@index([locationId, createdAt])
@@ -582,14 +619,97 @@ model SaleLine {
   conversionRatioUsed Int?    @map("conversion_ratio_used") // Snapshot of unitsPerCarton
   unitPriceAtSale     Decimal @map("unit_price_at_sale") @db.Decimal(12, 2)
   discountAmount      Decimal @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  billDiscountAmount  Decimal @default(0) @map("bill_discount_amount") @db.Decimal(12, 2)
   discountApprovedBy  String? @map("discount_approved_by") // Manager userId if over-limit
   lineTotal           Decimal @map("line_total") @db.Decimal(12, 2)
 
   // Relations
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  variant Variant @relation(fields: [variantId], references: [id])
+  invoice Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  variant Variant          @relation(fields: [variantId], references: [id])
+  returns SaleReturnLine[]
 
   @@map("sale_lines")
+}
+
+/// One full, manually recorded payment per invoice; split payments are not supported.
+model InvoicePayment {
+  id                   String        @id @default(uuid())
+  invoiceId            String        @unique @map("invoice_id")
+  method               PaymentMethod
+  amount               Decimal       @db.Decimal(12, 2)
+  cashTenderedAmount   Decimal?      @map("cash_tendered_amount") @db.Decimal(12, 2)
+  changeGivenAmount    Decimal?      @map("change_given_amount") @db.Decimal(12, 2)
+  transactionReference String?       @map("transaction_reference") @db.VarChar(120)
+  recordedByUserId     String        @map("recorded_by_user_id")
+  recordedAt           DateTime      @default(now()) @map("recorded_at")
+
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  recordedBy User    @relation("InvoicePaymentRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([method, recordedAt])
+  @@index([recordedByUserId, recordedAt])
+  @@map("invoice_payments")
+}
+
+/// Manual record of money returned; this does not initiate a payment or gateway transaction.
+model InvoiceRefund {
+  id                   String       @id @default(uuid())
+  invoiceId            String       @map("invoice_id")
+  saleReturnId         String?      @unique @map("sale_return_id")
+  type                 RefundType
+  method               RefundMethod
+  amount               Decimal      @db.Decimal(12, 2)
+  transactionReference String?      @map("transaction_reference") @db.VarChar(120)
+  reason               String       @db.VarChar(500)
+  recordedByUserId     String       @map("recorded_by_user_id")
+  recordedAt           DateTime     @default(now()) @map("recorded_at")
+
+  invoice    Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  saleReturn SaleReturn? @relation(fields: [saleReturnId], references: [id], onDelete: Restrict)
+  recordedBy User        @relation("InvoiceRefundRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId, recordedAt])
+  @@index([recordedByUserId, recordedAt])
+  @@map("invoice_refunds")
+}
+
+/// Return must be tied to its original invoice; there is intentionally no customer data or time limit.
+model SaleReturn {
+  id                String   @id @default(uuid())
+  returnNumber      String   @unique @map("return_number")
+  invoiceId         String   @map("invoice_id")
+  reason            String   @db.VarChar(500)
+  processedByUserId String   @map("processed_by_user_id")
+  processedAt       DateTime @default(now()) @map("processed_at")
+  idempotencyKey    String   @unique @map("idempotency_key")
+
+  invoice     Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  processedBy User             @relation("SaleReturnProcessor", fields: [processedByUserId], references: [id], onDelete: Restrict)
+  lines       SaleReturnLine[]
+  refund      InvoiceRefund?
+
+  @@index([invoiceId, processedAt])
+  @@map("sale_returns")
+}
+
+/// Returned items record inspected disposition and a price-snapshot-based refund amount.
+model SaleReturnLine {
+  id                String            @id @default(uuid())
+  saleReturnId      String            @map("sale_return_id")
+  saleLineId        String            @map("sale_line_id")
+  quantityBaseUnits Int               @map("quantity_base_units")
+  grossAmount       Decimal           @map("gross_amount") @db.Decimal(12, 2)
+  discountAmount    Decimal           @map("discount_amount") @db.Decimal(12, 2)
+  refundAmount      Decimal           @map("refund_amount") @db.Decimal(12, 2)
+  disposition       ReturnDisposition
+  inspectionNotes   String?           @map("inspection_notes") @db.VarChar(500)
+
+  saleReturn SaleReturn @relation(fields: [saleReturnId], references: [id], onDelete: Restrict)
+  saleLine   SaleLine   @relation(fields: [saleLineId], references: [id], onDelete: Restrict)
+
+  @@unique([saleReturnId, saleLineId])
+  @@index([saleLineId])
+  @@map("sale_return_lines")
 }
 
 /// Audit trail for items removed from active (unfinalized) bills

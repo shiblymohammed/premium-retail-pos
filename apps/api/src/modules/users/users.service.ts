@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Prisma, Role } from '@prisma/client';
+import { LocationType, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -24,6 +24,33 @@ export class UsersService {
    */
   async findById(id: string) {
     return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  async getDiscountAuthority(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, discountLimitPercent: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return {
+      role: user.role,
+      unlimited: user.role === Role.SUPER_ADMIN,
+      discountLimitPercent: user.role === Role.SUPER_ADMIN ? null : user.discountLimitPercent,
+    };
+  }
+
+  async getSalesPermissions(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true, canCancelSales: true, canProcessReturns: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return {
+      role: user.role,
+      canCancelSales: user.role === Role.SUPER_ADMIN || user.canCancelSales,
+      canProcessReturns: user.role === Role.SUPER_ADMIN || user.canProcessReturns,
+      permissionsInherited: user.role === Role.SUPER_ADMIN,
+    };
   }
 
   /**
@@ -105,12 +132,14 @@ export class UsersService {
     }
 
     if (locationIds.length > 0) {
-      const validLocations = await this.prisma.location.count({
+      const validLocations = await this.prisma.location.findMany({
         where: { id: { in: locationIds }, isActive: true },
+        select: { id: true, type: true },
       });
-      if (validLocations !== locationIds.length) {
+      if (validLocations.length !== locationIds.length) {
         throw new BadRequestException('Every assigned location must exist and be active');
       }
+      this.validateCashierLocations(data.role, locationIds, validLocations);
     }
 
     if (await this.prisma.user.findUnique({ where: { email }, select: { id: true } })) {
@@ -133,6 +162,9 @@ export class UsersService {
           id: true,
           email: true,
           role: true,
+          discountLimitPercent: true,
+          canCancelSales: true,
+          canProcessReturns: true,
           isActive: true,
           createdAt: true,
           locationScopes: { select: { locationId: true } },
@@ -170,6 +202,9 @@ export class UsersService {
         id: true,
         email: true,
         role: true,
+        discountLimitPercent: true,
+        canCancelSales: true,
+        canProcessReturns: true,
         isActive: true,
         createdAt: true,
         lastLoginAt: true,
@@ -223,12 +258,16 @@ export class UsersService {
       throw new BadRequestException('At least one allowed location is required for this role');
     }
 
-    const activeLocationCount = locationIds.length
-      ? await tx.location.count({ where: { id: { in: locationIds }, isActive: true } })
-      : 0;
-    if (activeLocationCount !== locationIds.length) {
+    const activeLocations = locationIds.length
+      ? await tx.location.findMany({
+          where: { id: { in: locationIds }, isActive: true },
+          select: { id: true, type: true },
+        })
+      : [];
+    if (activeLocations.length !== locationIds.length) {
       throw new BadRequestException('Every assigned location must exist and be active');
     }
+    this.validateCashierLocations(nextRole, locationIds, activeLocations);
 
       if (data.locationIds !== undefined || nextRole === Role.SUPER_ADMIN) {
         await tx.userLocationScope.deleteMany({ where: { userId } });
@@ -251,6 +290,9 @@ export class UsersService {
           id: true,
           email: true,
           role: true,
+          discountLimitPercent: true,
+          canCancelSales: true,
+          canProcessReturns: true,
           isActive: true,
           createdAt: true,
           locationScopes: { select: { locationId: true } },
@@ -298,6 +340,161 @@ export class UsersService {
       }
       return inactive;
     });
+  }
+
+  async assignDiscountLimit(
+    userId: string,
+    input: { discountLimitPercent: number; reason: string },
+    actor: UserActor,
+  ) {
+    const requestedLimit = new Prisma.Decimal(input.discountLimitPercent);
+    const reason = input.reason.trim();
+    if (reason.length < 3) throw new BadRequestException('A reason of at least 3 characters is required');
+
+    return this.prisma.$transaction(async (tx) => {
+      if (actor.userId === userId) {
+        throw new ForbiddenException('You cannot assign your own discount limit');
+      }
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${actor.userId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+      const [target, assigningUser] = await Promise.all([
+        tx.user.findUnique({
+          where: { id: userId },
+          include: { locationScopes: { select: { locationId: true } } },
+        }),
+        tx.user.findUnique({
+          where: { id: actor.userId },
+          select: { id: true, role: true, discountLimitPercent: true, isActive: true },
+        }),
+      ]);
+      if (!target) throw new NotFoundException('User not found');
+      if (!assigningUser?.isActive) throw new ForbiddenException('The assigning account is inactive');
+      if (target.role === Role.SUPER_ADMIN) {
+        throw new BadRequestException('Super Admin accounts are uncapped and cannot be assigned a discount limit');
+      }
+
+      if (assigningUser.role === Role.ADMIN) {
+        if (target.role === Role.ADMIN || target.locationScopes.length === 0 ||
+            target.locationScopes.some((scope) => !actor.locationIds.includes(scope.locationId))) {
+          throw new ForbiddenException('You can assign discount limits only to users within your authorized scope');
+        }
+        if (requestedLimit.greaterThan(assigningUser.discountLimitPercent)) {
+          throw new ForbiddenException('You cannot assign a discount limit higher than your own');
+        }
+      } else if (assigningUser.role !== Role.SUPER_ADMIN) {
+        throw new ForbiddenException('Only an Admin or Super Admin can assign discount limits');
+      }
+
+      if (target.discountLimitPercent.equals(requestedLimit)) {
+        return tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { id: true, email: true, role: true, discountLimitPercent: true, isActive: true },
+        });
+      }
+
+      const previousLimit = target.discountLimitPercent;
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { discountLimitPercent: requestedLimit },
+        select: { id: true, email: true, role: true, discountLimitPercent: true, isActive: true },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorId: assigningUser.id,
+          action: 'DISCOUNT_LIMIT_ASSIGNED',
+          targetEntity: 'User',
+          targetId: target.id,
+          beforeValue: JSON.stringify({ discountLimitPercent: previousLimit.toString() }),
+          afterValue: JSON.stringify({ discountLimitPercent: requestedLimit.toString() }),
+          reason,
+        },
+      });
+      return updated;
+    });
+  }
+
+  async assignSalesPermissions(
+    userId: string,
+    input: { canCancelSales: boolean; canProcessReturns: boolean; reason: string },
+    actor: UserActor,
+  ) {
+    const reason = input.reason.trim();
+    if (reason.length < 3) throw new BadRequestException('A reason of at least 3 characters is required');
+
+    return this.prisma.$transaction(async (tx) => {
+      if (actor.userId === userId) throw new ForbiddenException('You cannot assign your own sales permissions');
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${actor.userId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+      const [target, assigningUser] = await Promise.all([
+        tx.user.findUnique({
+          where: { id: userId },
+          include: { locationScopes: { select: { locationId: true } } },
+        }),
+        tx.user.findUnique({
+          where: { id: actor.userId },
+          select: { id: true, role: true, isActive: true },
+        }),
+      ]);
+      if (!target) throw new NotFoundException('User not found');
+      if (!assigningUser?.isActive) throw new ForbiddenException('The assigning account is inactive');
+      if (!target.isActive) throw new BadRequestException('Sales permissions can only be assigned to active users');
+      if (target.role === Role.SUPER_ADMIN) {
+        throw new BadRequestException('Super Admin permissions are inherent and cannot be reassigned');
+      }
+
+      if (assigningUser.role === Role.ADMIN) {
+        if (target.role === Role.ADMIN || target.locationScopes.length === 0 ||
+            target.locationScopes.some((scope) => !actor.locationIds.includes(scope.locationId))) {
+          throw new ForbiddenException('You can assign sales permissions only to users within your authorized scope');
+        }
+      } else if (assigningUser.role !== Role.SUPER_ADMIN) {
+        throw new ForbiddenException('Only an Admin or Super Admin can assign sales permissions');
+      }
+
+      const before = { canCancelSales: target.canCancelSales, canProcessReturns: target.canProcessReturns };
+      const after = { canCancelSales: input.canCancelSales, canProcessReturns: input.canProcessReturns };
+      if (before.canCancelSales === after.canCancelSales && before.canProcessReturns === after.canProcessReturns) {
+        return tx.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: {
+            id: true, email: true, role: true, canCancelSales: true,
+            canProcessReturns: true, isActive: true,
+          },
+        });
+      }
+
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: after,
+        select: {
+          id: true, email: true, role: true, canCancelSales: true,
+          canProcessReturns: true, isActive: true,
+        },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorId: assigningUser.id,
+          action: 'SALES_PERMISSIONS_ASSIGNED',
+          targetEntity: 'User',
+          targetId: target.id,
+          beforeValue: JSON.stringify(before),
+          afterValue: JSON.stringify(after),
+          reason,
+        },
+      });
+      return updated;
+    });
+  }
+
+  private validateCashierLocations(
+    role: Role,
+    locationIds: string[],
+    locations: { id: string; type: LocationType }[],
+  ) {
+    if (role !== Role.CASHIER) return;
+    if (locationIds.length !== 1 || locations[0]?.type !== LocationType.RETAIL_STORE) {
+      throw new BadRequestException('A cashier must be assigned to exactly one active retail store');
+    }
   }
 }
 

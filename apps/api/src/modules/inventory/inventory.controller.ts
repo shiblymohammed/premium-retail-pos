@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
@@ -14,7 +14,17 @@ export class InventoryController {
 
   @Get('balances')
   async getBalances(@Query() query: InventoryBalanceQueryDto) {
-    return { data: await this.inventoryService.getBalances(query) };
+    const variantIds = query.variantIds
+      ?.split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (variantIds && (variantIds.length === 0 || variantIds.length > 100)) {
+      throw new BadRequestException('variantIds must contain between 1 and 100 IDs');
+    }
+    if (query.variantId && variantIds) {
+      throw new BadRequestException('Use variantId or variantIds, not both');
+    }
+    return { data: await this.inventoryService.getBalances({ ...query, variantIds }) };
   }
 
   @Post('opening-stock/import')

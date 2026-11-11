@@ -13,6 +13,8 @@ import { EmployeesModule } from './modules/employees/employees.module';
 import { ProductsModule } from './modules/products/products.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { TransfersModule } from './modules/transfers/transfers.module';
+import { PosModule } from './modules/pos/pos.module';
+import { SalesModule } from './modules/sales/sales.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { TransfersModule } from './modules/transfers/transfers.module';
     ProductsModule,
     InventoryModule,
     TransfersModule,
+    PosModule,
+    SalesModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditLoggingInterceptor },

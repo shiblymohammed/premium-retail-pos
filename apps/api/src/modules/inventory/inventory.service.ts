@@ -335,10 +335,12 @@ export class InventoryService {
     return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
   }
 
-  async getBalances(query: { locationId: string; variantId?: string; stockState?: StockState }) {
-    const variantFilter = query.variantId
-      ? Prisma.sql`AND v."id" = ${query.variantId}`
-      : Prisma.empty;
+  async getBalances(query: { locationId: string; variantId?: string; variantIds?: string[]; stockState?: StockState }) {
+    const variantFilter = query.variantIds?.length
+      ? Prisma.sql`AND v."id" IN (${Prisma.join(query.variantIds)})`
+      : query.variantId
+        ? Prisma.sql`AND v."id" = ${query.variantId}`
+        : Prisma.empty;
     const stateFilter = query.stockState
       ? Prisma.sql`AND states."stock_state" = ${query.stockState}::"StockState"`
       : Prisma.empty;
