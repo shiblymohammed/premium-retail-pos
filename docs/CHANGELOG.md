@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## Phase 8 — Simple staff attendance
+- Added a mobile-friendly staff page to sign in, start work, and end work.
+- Added authenticated, employee-linked API punches using server time and the employee’s assigned active workplace.
+- Enforced one start and one end punch per workplace-local calendar day; duplicate completion is rejected.
+- Added manager/admin-configurable local start times per location and a location-scoped daily attendance register.
+- Saved each IN punch’s target time and late/on-time decision; managers can see the employee, actual clock-in, target, and late status.
+- Added an audit event whenever a location’s attendance target is changed.
+- Added optional per-location QR verification using signed location-bound tokens that rotate every 60 seconds.
+- Added manager punch corrections that preserve the original timestamp, require a reason, recalculate late status, and create an audit event.
+- Added location-scoped daily, weekly, and monthly summaries with CSV export.
+- Deferred GPS/geofencing, full shift and grace rules, break tracking, and overtime per current client scope.
+
 ## Phase 7 — Stock audits and reconciliation
 - Added location-locked physical audit sessions with a ledger snapshot of active variants.
 - Added blind count entry, global/category threshold settings (default recount over 2% or over 5 base units), optional high-count alerts, and a recount queue.

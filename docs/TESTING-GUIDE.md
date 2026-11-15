@@ -799,6 +799,37 @@ npm run test --workspace=apps/api -- --runInBand --no-cache --cacheDirectory=./.
 
 This verifies timezone-aware cadence, manual start restrictions, recount threshold handling, no stock movement before approval, approved ledger variance, and lock release.
 
+## Simple Staff Attendance (Phase 8 baseline)
+
+This release supports a staff member starting and ending one workday. Managers/admins can configure a local target time per location; punches strictly after the target are marked late. Per-location QR verification is optional. Managers can correct punches with an audited reason and generate daily, weekly, and monthly summaries. GPS/geofencing and full shift/grace rules are deferred.
+
+1. Ensure an active user has an active employee profile assigned to an active location and is scoped to that location.
+2. Start the API and web app, then open `/attendance` on a phone-sized browser or desktop.
+3. Sign in with the employee’s account. Confirm the location and employee code shown are correct.
+4. Tap **Start work** and confirm the server-recorded time appears as the first punch and the status changes to **At work**.
+5. Tap **End work** and confirm the second server-recorded time appears and the status changes to **Completed**.
+6. Try to submit another punch; the API must reject the duplicate for that workplace-local date.
+7. Sign in with an account without an employee profile or location access and confirm it cannot create attendance punches.
+
+### Manager target and late-arrival review
+
+1. Sign in at `/attendance/manage` with a manager/admin account that has access to the location.
+2. Choose the store and save its expected start time. The main admin can do this for any location.
+3. Verify today’s staff register shows the saved target and the clock-in/clock-out times.
+4. For the late case, configure a target a few minutes ahead, clock in after it, and refresh the manager view. The IN punch should show **Late**, the actual recorded time, and the target used for that decision.
+5. Change the location target and confirm the earlier punch’s saved target/late status remains unchanged.
+6. Confirm an account without manager role or location scope cannot load the manager register or change the target through the API.
+
+### QR, corrections, and reports
+
+1. In `/attendance/manage`, enable QR verification for a test location and display the QR. It rotates about every 25 seconds and each signed token expires after 60 seconds.
+2. On a separate phone/browser, scan the QR, sign in at `/attendance`, and mark the next punch. Confirm the manager register shows QR verification. Without a fresh QR, the punch must be rejected while QR is required.
+3. From the manager register, correct a punch time and enter a reason. Confirm the updated time/late status is shown and the original timestamp and reason remain available in the audit event.
+4. Generate daily, weekly, and monthly summaries for a date with attendance. Check present/completed/late counts and recorded hours, then export CSV.
+5. Confirm a manager cannot view or correct records outside their assigned locations.
+
+Automated coverage: `npm test --workspace=apps/api -- --runInBand --cacheDirectory=.jest-cache --runTestsByPath src/modules/attendance/attendance.service.spec.ts`.
+
 ---
 
 ## Phase 8: Test Authorization Guards (25 minutes)

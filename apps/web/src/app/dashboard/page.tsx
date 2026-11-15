@@ -74,6 +74,7 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></>,
     warehouse: <><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/><path d="M7 11h2m3 0h2m3 0h1"/></>,
     settings: <><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.6a8 8 0 0 1-1.8 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.8-1l-1.7.6-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.6a8 8 0 0 1 1.8-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.8 1l1.7-.6 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z" transform="translate(-1 -1) scale(1.08)"/></>,
+    clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] || paths.grid}</svg>;
 }
@@ -172,6 +173,8 @@ export default function DashboardPage() {
           <a className={styles.navItem} href="#recent-invoices" title="Recent invoices"><Icon name="receipt" />Invoices</a>
           <a className={styles.navItem} href="/products" title="Inventory"><Icon name="box" />Inventory</a>
           <a className={styles.navItem} href="/audits" title="Stock audits"><Icon name="shield" />Stock audits</a>
+          <a className={styles.navItem} href="/attendance" title="Staff attendance"><Icon name="clock" />Staff attendance</a>
+          <a className={styles.navItem} href="/attendance/manage" title="Attendance management"><Icon name="clock" />Attendance management</a>
           <a className={styles.navItem} href="/operations" title="Transfers"><Icon name="transfer" />Transfers</a>
           <a className={styles.navItem} href="/operations" title="Warehouse operations"><Icon name="warehouse" />Warehouse</a>
           <button className={styles.navItem} type="button" title="Export sales report" onClick={downloadReport}><Icon name="chart" />Reports</button>

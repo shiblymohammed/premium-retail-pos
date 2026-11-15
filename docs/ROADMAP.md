@@ -8,11 +8,11 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| **Current Baseline** | Phase 7 implementation complete; scheduled runtime and physical-count acceptance pending |
+| **Current Baseline** | Phase 8 agreed attendance scope implemented and live-checked with two demo staff accounts |
 | **Implemented Functionality** | Phases 1–6 functionality remains implemented; Phase 7 now has location-frozen audit sessions, blind count responses, configurable category/global thresholds, recount flags, manager approval, immutable stock adjustments, and archived resolved audit records |
-| **Partial Functionality** | Phase 7 implementation is complete; runtime acceptance of a scheduled audit at the store/warehouse window and final on-site physical-count UAT remain. The schedule defaults to 7:00 PM local time. Final client UAT and thermal printer hardware verification remain; a stale stock-refresh alert can persist after reconnect. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
-| **Resolved Decisions** | 11 of 20 Open Decisions confirmed: `OD-01` through `OD-11` (see §5) |
-| **Remaining Blockers** | 9 unresolved business/technical decisions outside the confirmed decision set |
+| **Partial Functionality** | Phase 7 runtime acceptance at the scheduled store/warehouse window and on-site physical-count UAT remain. Phase 8 automated tests, builds, and 15 live checks using two demo staff accounts passed. Final client UAT and thermal printer hardware verification remain. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
+| **Resolved Decisions** | 12 of 20 Open Decisions confirmed for the current release: `OD-01` through `OD-12` (see §5) |
+| **Remaining Blockers** | 8 unresolved business/technical decisions outside the confirmed decision set |
 | **Foundation Status** | API/web builds pass; local PostgreSQL, initial migration, seed data, and seeded login have been verified by the project owner |
 
 ---
@@ -20,8 +20,8 @@
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 7: Stock Audits, Recounts & Approved Adjustments — Implementation Complete**
-> The client confirmed that retail-store audits run daily after 7:00 PM local time and warehouse audits run Sundays after 7:00 PM. Audit sessions lock a location, collect blind counts, apply the confirmed >2% or >5-unit recount defaults (configurable globally or by category), and post adjustments only after manager approval. Manual starts enforce these windows; automatic schedules default to 7:00 PM in the company timezone and cannot be disabled. API policy and workflow unit tests pass; observing a scheduled live run and client physical-count UAT remain.
+> **Phase 8: Staff Attendance — Current Release Features Implemented**
+> Current attendance scope is implemented and live-checked: staff clock in/out, managers configure location start times and see late arrivals, optional rotating QR validation, audited punch corrections, and daily/weekly/monthly reports. GPS/geofencing and advanced shift rules remain deferred. API unit tests and production builds pass; 15 live attendance checks passed with two local demo employees. Store/warehouse audit runtime acceptance and physical-count UAT remain Phase 7 acceptance items.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
@@ -131,12 +131,15 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P1` Archive full audit history (expected, count, recount, approved value, variance, approver, reason); terminal records are protected from update/delete
 
 ### Phase 8: Staff Mobile Attendance
-- [ ] `P1` Build mobile-friendly staff attendance punch interface
-- [ ] `P1` Implement dynamic workplace QR code generation with periodic expiration/rotation
-- [ ] `P1` Implement mobile GPS geofence radius verification against assigned location coordinates
-- [ ] `P1` Record employee, server timestamp, workplace ID, verification result, and exception flags
-- [ ] `P1` Implement manager/HR attendance correction module with audit log of original punch and correction reason
-- [ ] `P2` Generate daily, weekly, and monthly attendance summary reports
+- [x] `P1` Build mobile-friendly staff attendance punch interface for simple start/end of workday
+- [x] `P1` Implement signed, location-bound workplace QR codes with 60-second expiry and periodic rotation
+- [Deferred] `P1` Implement mobile GPS geofence radius verification against assigned location coordinates — excluded from the current client release
+- [x] `P1` Record employee, server timestamp, and assigned workplace for start/end punches
+- [x] `P1` Allow authorized managers/admins to set a local attendance target per location and review the daily register
+- [x] `P1` Snapshot the target and late/on-time result on the IN punch; show late status and actual clock-in time to scoped managers
+- [x] `P1` Implement scoped manager attendance corrections with original punch preservation and audited reason
+- [x] `P2` Generate daily, weekly, and monthly attendance summary reports with CSV export
+> Current client scope: staff manually start and end their workday. Authorized managers/admins configure a simple start-time target per location; a punch strictly after that time is marked late. GPS/geofence, full shifts, grace periods, breaks, and overtime are deferred for future scope. QR check-in can be enabled per location.
 
 ### Phase 9: Employee Loans and Advances
 - [ ] `P1` Implement Loans & Advances profile section for employees
@@ -192,7 +195,7 @@ The following 20 open decisions (`OD-01` through `OD-20`) originate from Section
 | **OD-09** | Tax & Invoice Details | Does this release need tax setup, customer details, e-invoicing, or e-way bills? | **CONFIRMED: None are required for the current client release.** Do not collect customer details or implement tax/e-invoice/e-way-bill flows now; add them later only through approved extensions. | **RESOLVED for current release / Future extension** |
 | **OD-10** | Payments | Which payment methods are supported, and is gateway/terminal integration needed? | **CONFIRMED:** Cash, Card, and Online, one full payment per sale; split payments and card-terminal/payment-gateway integrations are not required. Retain method, amount, time, cashier, optional non-sensitive transaction reference, and cash tender/change values for cash reconciliation. Never store card number, CVV, PIN, or track data. | **RESOLVED** (Unblocks payment workflow) |
 | **OD-11** | Offline Mode | Scope of offline-first operation vs. online-only operation. | **CONFIRMED: Online-First with Offline POS Resilient Queueing.** POS keeps running without internet, caches transactions locally with idempotency keys, and syncs automatically once online. | **RESOLVED** (Unblocks Client architecture) |
-| **OD-12** | Attendance | Specific shift schedules, grace periods, break tracking, overtime rules, and geofence radius. | Set default 50-meter geofence, 15-minute grace period; confirm workplace coordinates. | Open / Medium (Blocks Attendance logic) |
+| **OD-12** | Attendance | Specific shift schedules, grace periods, break tracking, overtime rules, and geofence radius. | **CONFIRMED current release:** simple staff start/end punches only. Shift rules, grace periods, breaks, overtime, GPS radius, and workplace coordinates are deferred for future scope. | RESOLVED for current release / Future extension |
 | **OD-13** | Verification | Is facial recognition or liveness verification required for mobile attendance? | **Optional / Excluded from baseline**; conduct privacy, security, and hardware cost review first. | Deferred / Low |
 | **OD-14** | Loans & HR | Is loan tracking purely internal, or does it interface with third-party payroll software? | Internal ledger tracking only in base scope; deduction schedules linked to repayment records. | Open / Medium (Blocks HR schema) |
 | **OD-15** | Hardware | Target hardware specifications (barcode scanners, thermal printers, cash drawers, scales). | Support standard USB/Bluetooth ESC/POS thermal printers and HID keyboard-wedge barcode scanners. | Open / Medium (Blocks POS driver testing) |

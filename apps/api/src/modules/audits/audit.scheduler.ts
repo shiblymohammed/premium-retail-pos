@@ -26,7 +26,7 @@ export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
     this.running = true;
     try {
       const locations = await this.prisma.location.findMany({
-        where: { isActive: true, dailyAuditEnabled: true, dailyAuditTime: { not: null } },
+        where: { isActive: true, dailyAuditEnabled: true },
         select: { id: true, name: true, type: true, dailyAuditTime: true, company: { select: { timezone: true } } },
       });
       if (!locations.length) return;

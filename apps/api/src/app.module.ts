@@ -16,6 +16,7 @@ import { TransfersModule } from './modules/transfers/transfers.module';
 import { PosModule } from './modules/pos/pos.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { AuditsModule } from './modules/audits/audits.module';
+import { AttendanceModule } from './modules/attendance/attendance.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { AuditsModule } from './modules/audits/audits.module';
     PosModule,
     SalesModule,
     AuditsModule,
+    AttendanceModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditLoggingInterceptor },

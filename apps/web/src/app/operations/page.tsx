@@ -188,7 +188,7 @@ export default function OperationsPage() {
     <main className="ops-shell">
       <header className="ops-topbar">
         <a className="ops-brand" href="/"><span className="brand-mark small">P</span><span><strong>Premium Retail</strong><small>OPERATIONS TEST BENCH</small></span></a>
-        <nav className="ops-topnav"><a href="/dashboard">Demo dashboard</a><a href="/">Cashier terminal</a><a href="/admin/discount-limits">Discount limits</a><a href="/admin/sales-permissions">Sale permissions</a><a href="/sales-controls">Returns & cancellations</a></nav>
+        <nav className="ops-topnav"><a href="/dashboard">Demo dashboard</a><a href="/">Cashier terminal</a><a href="/attendance">Staff attendance</a><a href="/admin/discount-limits">Discount limits</a><a href="/admin/sales-permissions">Sale permissions</a><a href="/sales-controls">Returns & cancellations</a></nav>
         {token ? <div className="ops-session"><span className="ops-session-dot" />{role}<button onClick={signOut}>Sign out</button></div> : <span className="ops-session muted-session">Sign in to make authenticated requests</span>}
       </header>
 

@@ -7,9 +7,9 @@
 ## 1. System Overview
 
 ### 1.1 Current Repository Implementation State
-- **Status**: Phases 1–6 implemented; Phase 7 audit workflows, manager UI, and required timezone-aware scheduling are implemented. Scheduled-run runtime acceptance and on-site physical-count UAT remain. See the [roadmap](ROADMAP.md).
+- **Status**: Phases 1–6 implemented; Phase 7 audit workflows, manager UI, and required timezone-aware scheduling are implemented. Phase 8 includes employee-linked clock-in/clock-out, per-location target start times, late/on-time snapshots, optional rotating workplace QR validation, audited manager corrections, and scoped daily/weekly/monthly reports. GPS/geofencing and advanced shift rules are deferred. See the [roadmap](ROADMAP.md).
 - **Repository Contents**: A TypeScript monorepo with a Next.js web application, a NestJS API, Prisma schema/migrations, shared packages, and project documentation ([README](../README.md), [roadmap](ROADMAP.md), [changelog](CHANGELOG.md)).
-- **Implemented Services**: Authentication, organization and user access, product catalogue, inventory ledger and receiving, transfers/replenishment, POS billing, discounts, invoice cancellation, returns, manual refund records, and stock audit sessions/counts/approvals with configurable daily scheduling. Attendance, loans, reports, and deployment/UAT work remain.
+- **Implemented Services**: Authentication, organization and user access, product catalogue, inventory ledger and receiving, transfers/replenishment, POS billing, discounts, invoice cancellation, returns, manual refund records, stock audit sessions/counts/approvals with configurable daily scheduling, and employee clock-in/out with manager-configured local targets, optional rotating QR verification, audited corrections, and attendance summaries. GPS/geofencing, full shift management, loans, and deployment/UAT work remain.
 
 ### 1.2 Proposed Technical Architecture
 In accordance with Section 21 of the specification document, the proposed enterprise architecture adopts a modular multi-tier structure designed for transactional consistency, horizontal scalability, and strict security isolation:

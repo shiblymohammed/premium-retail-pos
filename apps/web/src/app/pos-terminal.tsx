@@ -892,6 +892,7 @@ export default function PosTerminal() {
             <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Signing in…' : 'Open cashier terminal'} <span>→</span></button>
           </form>
           <div className="secure-note"><span className="status-dot" /> Store access is checked by the server</div>
+          <a className="admin-entry-link operations-entry" href="/attendance">Staff: mark attendance</a>
           <a className="admin-entry-link operations-entry" href="/dashboard">Open client demo dashboard</a>
           <a className="admin-entry-link" href="/admin/discount-limits">Admin: manage discount limits</a>
           <a className="admin-entry-link secondary-admin-link" href="/admin/sales-permissions">Admin: manage cancellation and return permissions</a>

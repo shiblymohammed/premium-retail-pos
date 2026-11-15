@@ -233,6 +233,8 @@ model Location {
   dailyAuditEnabled     Boolean      @default(true) @map("daily_audit_enabled")
   dailyAuditTime        String       @default("19:00") @map("daily_audit_time") @db.VarChar(5)
   dailyAuditLastRunDate String?      @map("daily_audit_last_run_date") @db.VarChar(10)
+  attendanceStartTime   String?      @map("attendance_start_time") @db.VarChar(5)
+  attendanceQrRequired  Boolean      @default(false) @map("attendance_qr_required")
   createdAt             DateTime     @default(now()) @map("created_at")
   updatedAt             DateTime     @updatedAt @map("updated_at")
 
@@ -823,6 +825,8 @@ model Attendance {
   correctedByUserId String?   @map("corrected_by_user_id")
   correctionReason  String?   @map("correction_reason")
   originalTimestamp DateTime? @map("original_timestamp") // Preserved if corrected
+  isLate            Boolean   @default(false) @map("is_late")
+  targetStartTime   String?   @map("target_start_time") @db.VarChar(5)
   createdAt         DateTime  @default(now()) @map("created_at")
 
   // Relations
