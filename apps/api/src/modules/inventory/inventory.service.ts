@@ -192,12 +192,13 @@ export class InventoryService {
       referenceType?: string;
       referenceId?: string;
       notes?: string;
+      allowAuditLocked?: boolean;
     },
   ) {
     if (!Number.isInteger(input.quantityBaseUnits) || input.quantityBaseUnits === 0 || Math.abs(input.quantityBaseUnits) > 2147483647) {
       throw new BadRequestException('Movement quantity must be a non-zero 32-bit integer in base units');
     }
-    await this.lockOperationalLocation(tx, input.locationId);
+    await this.lockOperationalLocation(tx, input.locationId, input.allowAuditLocked ?? false);
     const lockedVariants = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT v."id"
       FROM "variants" v
@@ -262,7 +263,7 @@ export class InventoryService {
     };
   }
 
-  private async lockOperationalLocation(tx: Prisma.TransactionClient, locationId: string) {
+  private async lockOperationalLocation(tx: Prisma.TransactionClient, locationId: string, allowAuditLocked = false) {
     const rows = await tx.$queryRaw<Array<{ id: string; isActive: boolean; isAuditLocked: boolean }>>(Prisma.sql`
       SELECT "id", "is_active" AS "isActive", "is_audit_locked" AS "isAuditLocked"
       FROM "locations" WHERE "id" = ${locationId} FOR UPDATE
@@ -270,7 +271,7 @@ export class InventoryService {
     const location = rows[0];
     if (!location) throw new NotFoundException('Location not found');
     if (!location.isActive) throw new ConflictException('Cannot post stock to an inactive location');
-    if (location.isAuditLocked) throw new ConflictException('Location is locked for a stock audit');
+    if (location.isAuditLocked && !allowAuditLocked) throw new ConflictException('Location is locked for a stock audit');
   }
 
   private async loadActiveVariants(tx: Prisma.TransactionClient, ids: string[]) {

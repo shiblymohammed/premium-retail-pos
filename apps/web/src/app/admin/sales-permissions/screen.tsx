@@ -11,6 +11,7 @@ type UserRecord = {
   isActive: boolean;
   canCancelSales: boolean;
   canProcessReturns: boolean;
+  canCountStockAudits: boolean;
 };
 
 type Authority = { role: string; canCancelSales: boolean; canProcessReturns: boolean; permissionsInherited: boolean };
@@ -34,6 +35,7 @@ export default function SalesPermissionsAdmin() {
   const [selectedId, setSelectedId] = useState('');
   const [canCancelSales, setCanCancelSales] = useState(false);
   const [canProcessReturns, setCanProcessReturns] = useState(false);
+  const [canCountStockAudits, setCanCountStockAudits] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -45,6 +47,7 @@ export default function SalesPermissionsAdmin() {
     if (!selectedUser) return;
     setCanCancelSales(selectedUser.canCancelSales);
     setCanProcessReturns(selectedUser.canProcessReturns);
+    setCanCountStockAudits(selectedUser.canCountStockAudits);
     setReason('');
   }, [selectedUser]);
 
@@ -106,6 +109,14 @@ export default function SalesPermissionsAdmin() {
       const result = await response.json();
       const updated = result.data as UserRecord;
       setUsers((current) => current.map((user) => user.id === updated.id ? { ...user, ...updated } : user));
+      const auditResponse = await fetch(`${API_BASE}/users/${selectedUser.id}/stock-audit-permission`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ canCountStockAudits, reason }),
+      });
+      if (!auditResponse.ok) throw new Error(`Sales permissions saved, but stock audit permission failed: ${await errorMessage(auditResponse)}`);
+      const auditUpdated = (await auditResponse.json()).data as Pick<UserRecord, 'canCountStockAudits'>;
+      setUsers((current) => current.map((user) => user.id === selectedUser.id ? { ...user, ...auditUpdated } : user));
       setNotice(`Saved permissions for ${updated.email}.`);
       setReason('');
     } catch (caught) {
@@ -162,8 +173,8 @@ export default function SalesPermissionsAdmin() {
       </header>
       <section className="discount-admin-content">
         <div className="admin-nav-links"><a className="back-link" href="/">← POS</a><a className="back-link" href="/admin/discount-limits">Discount limits →</a></div>
-        <div className="page-heading admin-heading"><div><div className="eyebrow">ACCESS CONTROL</div><h1>Assign sales permissions</h1><p>Grant only the actions each active user needs. Admin grants are limited to users in their location scope.</p></div></div>
-        <div className="policy-note"><strong>Note</strong><span>Super Admin inherits both permissions. Return windows, receipt checks, refund method, and stock inspection rules are separate business rules and remain to be defined.</span></div>
+        <div className="page-heading admin-heading"><div><div className="eyebrow">ACCESS CONTROL</div><h1>Assign user permissions</h1><p>Grant only the actions each active user needs. Admin grants are limited to users in their location scope.</p></div></div>
+        <div className="policy-note"><strong>Note</strong><span>Super Admin inherits sales controls. Stock audit counting is individually granted and every permission change is recorded.</span></div>
         <div className="discount-admin-grid">
           <section className="limit-form-card">
             <div className="card-eyebrow">ASSIGN USER PERMISSIONS</div>
@@ -175,6 +186,7 @@ export default function SalesPermissionsAdmin() {
                 </select>
                 {selectedUser && <div className="permission-toggle"><div><strong>Cancel finalized sales</strong><span>Can initiate a sale cancellation.</span></div><input type="checkbox" checked={canCancelSales} onChange={(event) => setCanCancelSales(event.target.checked)} /></div>}
                 {selectedUser && <div className="permission-toggle"><div><strong>Process customer returns</strong><span>Can initiate return handling.</span></div><input type="checkbox" checked={canProcessReturns} onChange={(event) => setCanProcessReturns(event.target.checked)} /></div>}
+                {selectedUser && <div className="permission-toggle"><div><strong>Enter stock audit counts</strong><span>Allows blind count entry at this user’s assigned locations. Approval remains a manager action.</span></div><input type="checkbox" checked={canCountStockAudits} onChange={(event) => setCanCountStockAudits(event.target.checked)} /></div>}
                 <label htmlFor="reason">Reason for this assignment</label>
                 <textarea id="reason" rows={3} minLength={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: approved shift supervisor authority" required />
                 {error && <div className="alert error">{error}</div>}

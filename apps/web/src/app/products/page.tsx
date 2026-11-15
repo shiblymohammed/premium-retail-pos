@@ -70,6 +70,7 @@ export default function ProductsPage() {
   const [category, setCategory] = useState('All categories');
   const [statusFilter, setStatusFilter] = useState<'All' | StockState>('All');
   const [query, setQuery] = useState('');
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const summary = locationSummary[location];
   const visibleReorders = reorderItems.filter((item) => location === 'All locations' || item.location === location);
   const visibleProducts = useMemo(() => productRows.filter((product) =>
@@ -93,22 +94,26 @@ export default function ProductsPage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return <main className={styles.appShell}>
-    <aside className={styles.sidebar}>
+  return <main className={`${styles.appShell} ${navCollapsed ? styles.navCollapsed : ''}`}>
+    <header className={styles.referenceHeader}>
+      <div className={styles.referenceBrand}><button className={styles.sidebarToggle} type="button" onClick={() => setNavCollapsed((collapsed) => !collapsed)} aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-controls="retail-sidebar" aria-expanded={!navCollapsed} title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}><span aria-hidden="true">{navCollapsed ? '›' : '‹'}</span></button><span className={styles.referenceBrandMark}>P</span><strong>Premium Retail</strong><span className={styles.referenceDivider}>/</span><span>Store operations</span></div>
+      <div className={styles.referenceHeaderRight}><span className={styles.headerStatus}><i /> DEMO WORKSPACE</span><span>Local sample data</span></div>
+    </header>
+    <aside className={styles.sidebar} id="retail-sidebar">
       <a className={styles.brand} href="/dashboard"><span className={styles.brandMark}>P</span><span><strong>Premium Retail</strong><small>RETAIL OPERATIONS</small></span></a>
       <label className={styles.locationCard}><span className={styles.locationIcon}><Icon name="pin" size={17}/></span><span className={styles.locationControl}><small>VIEWING LOCATION</small><span className={styles.selectWrap}><select value={location} onChange={(event) => setLocation(event.target.value)} aria-label="Inventory location">{locations.map((item) => <option key={item}>{item}</option>)}</select><b>⌄</b></span><em>Inventory at a glance</em></span></label>
-      <p className={styles.navLabel}>WORKSPACE</p>
+      <p className={styles.navLabel}>STORE OPERATIONS</p>
       <nav className={styles.nav} aria-label="Main navigation">
-        <a href="/dashboard" className={styles.navItem}><Icon name="grid"/>Overview</a>
-        <a href="/" className={styles.navItem}><Icon name="receipt"/>POS terminal</a>
-        <a href="/products" className={`${styles.navItem} ${styles.active}`}><Icon name="box"/>Products & inventory</a>
-        <a href="/operations" className={styles.navItem}><Icon name="transfer"/>Transfers & replenishment</a>
-        <p className={styles.navLabel}>SALES CONTROLS</p>
-        <a href="/admin/discount-limits" className={styles.navItem}><Icon name="chart"/>Discount limits</a>
-        <a href="/admin/sales-permissions" className={styles.navItem}><Icon name="shield"/>Sale permissions</a>
-        <a href="/sales-controls" className={styles.navItem}><Icon name="receipt"/>Returns & cancellations</a>
+        <a href="/dashboard" className={styles.navItem} title="Retail overview"><Icon name="grid"/>Retail overview</a>
+        <a href="/" className={styles.navItem} title="POS terminal"><Icon name="receipt"/>POS terminal</a>
+        <a href="/products" className={`${styles.navItem} ${styles.active}`} title="Products and inventory"><Icon name="box"/>Products & inventory</a>
+        <a href="/operations" className={styles.navItem} title="Transfers and replenishment"><Icon name="transfer"/>Transfers & replenishment</a>
+        <p className={styles.navLabel}>POLICIES & AUDIT</p>
+        <a href="/admin/discount-limits" className={styles.navItem} title="Discount limits"><Icon name="chart"/>Discount limits</a>
+        <a href="/admin/sales-permissions" className={styles.navItem} title="Sale permissions"><Icon name="shield"/>Sale permissions</a>
+        <a href="/sales-controls" className={styles.navItem} title="Returns and cancellations"><Icon name="receipt"/>Returns & cancellations</a>
       </nav>
-      <div className={styles.sidebarNote}><span className={styles.noteMark}><Icon name="shield" size={16}/></span><strong>Ledger-backed stock</strong><p>Each balance is derived from recorded inventory movements.</p><a href="/operations">Open operations bench <span>→</span></a></div>
+      <div className={styles.sidebarNote}><span className={styles.noteMark}><Icon name="box" size={16}/></span><strong>Inventory ledger</strong><p>Demo stock is grouped across three retail locations.</p><a href="/operations">API test bench <span>→</span></a></div>
       <div className={styles.sideFooter}><i/> Demo workspace <span>Mock data</span></div>
     </aside>
 
@@ -124,24 +129,31 @@ export default function ProductsPage() {
           <article className={`${styles.statCard} ${styles.negativeCard}`}><span className={styles.statLabel}>NEGATIVE AVAILABLE</span><strong>{summary.negative} <em>variants</em></strong><small>Review location balances</small><b className={styles.statIcon}><Icon name="shield" size={18}/></b></article>
         </div>
 
-        <div className={styles.sectionGrid}>
-          <section className={styles.panel}>
-            <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>INVENTORY LEDGER</span><h2>Stock state overview</h2><p>Quantity is tracked in each product’s canonical base unit.</p></div><span className={styles.locationTag}><Icon name="pin" size={13}/>{location}</span></div>
-            <div className={styles.stockStates}>
-              <div className={styles.stateRow}><span className={styles.stateDot}/><div><strong>Available</strong><small>Ready to sell or dispatch</small></div><b>{summary.available.toLocaleString('en-IN')} <em>units</em></b><span className={styles.stateTrack}><i className={styles.availableFill} style={{ width: `${summary.available / (summary.available + summary.inTransit + summary.reserved + summary.quarantined) * 100}%` }}/></span></div>
-              <div className={styles.stateRow}><span className={`${styles.stateDot} ${styles.inTransitDot}`}/><div><strong>In transit</strong><small>Dispatched, awaiting receipt</small></div><b>{summary.inTransit.toLocaleString('en-IN')} <em>units</em></b><span className={styles.stateTrack}><i className={styles.transitFill} style={{ width: `${summary.inTransit / (summary.available + summary.inTransit + summary.reserved + summary.quarantined) * 100}%` }}/></span></div>
-              <div className={styles.stateRow}><span className={`${styles.stateDot} ${styles.reservedDot}`}/><div><strong>Reserved</strong><small>Allocated to operations</small></div><b>{summary.reserved.toLocaleString('en-IN')} <em>units</em></b><span className={styles.stateTrack}><i className={styles.reservedFill} style={{ width: `${summary.reserved / (summary.available + summary.inTransit + summary.reserved + summary.quarantined) * 100}%` }}/></span></div>
-              <div className={styles.stateRow}><span className={`${styles.stateDot} ${styles.quarantineDot}`}/><div><strong>Quarantined</strong><small>Held for inspection</small></div><b>{summary.quarantined.toLocaleString('en-IN')} <em>units</em></b><span className={styles.stateTrack}><i className={styles.quarantineFill} style={{ width: `${summary.quarantined / (summary.available + summary.inTransit + summary.reserved + summary.quarantined) * 100}%` }}/></span></div>
+        <div className={styles.overviewGrid}>
+          <section className={`${styles.panel} ${styles.chartPanel}`}>
+            <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>STOCK MOVEMENT</span><h2>Total stock volume vs. consumption</h2><p>Available inventory compared with recent sales velocity.</p></div><label className={styles.periodSelect}>Last 30 days <span>⌄</span></label></div>
+            <div className={styles.chartLegend}><span><i/>Stock volume</span><span><i/>Consumption</span><b>{location}</b></div>
+            <div className={styles.inventoryChart} role="img" aria-label="Sample stock volume and consumption trend over the last six months">
+              <div className={styles.chartYLabels}><span>10k</span><span>7.5k</span><span>5k</span><span>2.5k</span><span>0</span></div>
+              <svg viewBox="0 0 720 215" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="stockFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#8b6be8" stopOpacity=".19"/><stop offset="100%" stopColor="#8b6be8" stopOpacity="0"/></linearGradient></defs><path className={styles.gridLines} d="M0 20H720M0 62H720M0 104H720M0 146H720M0 188H720"/><path className={styles.stockArea} d="M0 129 C35 118 55 112 83 102 S130 116 165 97 S215 74 248 91 S299 126 331 105 S382 67 414 78 S466 101 497 82 S545 43 579 56 S633 93 662 70 S696 47 720 59 L720 188H0Z"/><path className={styles.stockLine} d="M0 129 C35 118 55 112 83 102 S130 116 165 97 S215 74 248 91 S299 126 331 105 S382 67 414 78 S466 101 497 82 S545 43 579 56 S633 93 662 70 S696 47 720 59"/><path className={styles.consumptionLine} d="M0 158 C42 145 60 154 92 139 S145 144 177 126 S220 112 252 121 S303 144 334 133 S384 102 417 115 S467 128 500 117 S550 83 584 98 S634 122 664 105 S698 90 720 99"/><circle cx="579" cy="56" r="5" className={styles.chartDot}/></svg>
+              <div className={styles.chartXLabels}><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span></div>
             </div>
           </section>
-          <section className={`${styles.panel} ${styles.reorderPanel}`}>
-            <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>REPLENISHMENT WATCH</span><h2>Needs attention</h2><p>Review items approaching their reorder point.</p></div><span className={styles.attentionCount}>18</span></div>
-            <div className={styles.reorderRows}>{visibleReorders.length ? visibleReorders.slice(0, 3).map((item) => <div key={item.sku}><span className={styles.productThumb}>{item.initials}</span><span><strong>{item.name}</strong><small>{item.sku} · {item.location}</small></span><b>{item.stock}</b></div>) : <p className={styles.noReorders}>No sample items need attention at this location.</p>}</div>
-            <a href="/operations" className={styles.textLink}>Review replenishment requests <span>→</span></a>
+          <section className={`${styles.panel} ${styles.tagPanel}`}>
+            <div className={styles.sectionTitle}><div><span className={styles.eyebrow}>CATALOGUE SNAPSHOT</span><h2>Custom tags &amp; labels</h2><p>Quickly review priority groups.</p></div><button type="button" className={styles.smallAction}>＋ Add tag</button></div>
+            <div className={styles.tagChips}><button className={styles.tagSelected} type="button">Fast moving <b>12</b></button><button type="button">Discounted <b>8</b></button><button type="button">Low demand <b>6</b></button><button type="button">New arrivals <b>14</b></button></div>
+            <div className={styles.miniTableWrap}><table className={styles.miniTable}><thead><tr><th>PRODUCT</th><th>ON HAND</th><th>IN TRANSIT</th><th>PRICE</th></tr></thead><tbody>{productRows.slice(0, 4).map((product) => <tr key={product.sku}><td><span className={styles.miniProduct}><i>{product.name.slice(0, 1)}</i><span><strong>{product.name}</strong><small>{product.sku}</small></span></span></td><td>{product.available}</td><td>{product.inTransit}</td><td>{money(product.price)}</td></tr>)}</tbody></table></div>
+            <a href="#product-catalogue" className={styles.textLink}>View product catalogue <span>→</span></a>
           </section>
         </div>
 
-        <section className={styles.productsPanel}>
+        <div className={styles.insightGrid}>
+          <section className={`${styles.panel} ${styles.orderPanel}`}><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>RECENT ACTIVITY</span><h2>Sales &amp; orders</h2><p>Latest demo activity from your stores.</p></div><button type="button" className={styles.iconAction} aria-label="Search orders"><Icon name="search" size={16}/></button></div><div className={styles.orderRows}><div><i className={styles.orderThumb}>AR</i><span><strong>Arabica Ground Coffee</strong><small>Order #PR-8042 · 12 min ago</small></span><b>−4 <em>units</em></b></div><div><i className={styles.orderThumb}>AO</i><span><strong>Almond Oat Drink</strong><small>Order #PR-8038 · 38 min ago</small></span><b>−2 <em>units</em></b></div><div><i className={styles.orderThumb}>DT</i><span><strong>Daily Moisture Lotion</strong><small>Order #PR-8031 · 1 hr ago</small></span><b>−1 <em>unit</em></b></div></div><a href="/" className={styles.textLink}>Open POS terminal <span>→</span></a></section>
+          <section className={`${styles.panel} ${styles.restockPanel}`}><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>SUGGESTED ACTION</span><h2>Restock recommendation</h2><p>Based on current stock and sample sales.</p></div><span className={styles.aiMark}>✦</span></div><div className={styles.restockMetric}><strong>120 <small>units</small></strong><span>Suggested to replenish</span></div><div className={styles.sparkline}><svg viewBox="0 0 300 78" preserveAspectRatio="none" aria-hidden="true"><path d="M0 62 C30 55 42 36 71 43 S108 60 136 39 S177 47 205 27 S246 39 270 13 S290 20 300 6"/><circle cx="300" cy="6" r="4"/></svg></div><div className={styles.restockFoot}><span><i/> Demand is trending up</span><a href="/operations">Review plan →</a></div></section>
+          <section className={`${styles.panel} ${styles.transitPanel}`}><div className={styles.sectionTitle}><div><span className={styles.eyebrow}>INBOUND STOCK</span><h2>Still in transit</h2><p>Transfers awaiting store receipt.</p></div><span className={styles.transitCount}>{visibleReorders.length + 2}</span></div><div className={styles.transitRows}>{visibleReorders.slice(0, 3).map((item, index) => <div key={item.sku}><i className={styles.transitThumb}>{item.initials}</i><span><strong>{item.name}</strong><small>{item.sku} · {index + 2} days</small></span><a href="/operations" aria-label={`View transfer for ${item.name}`}>View</a></div>)}</div><a href="/operations" className={styles.textLink}>See all transfers <span>→</span></a></section>
+        </div>
+
+        <section className={styles.productsPanel} id="product-catalogue">
           <div className={styles.tableHeader}><div><span className={styles.eyebrow}>PRODUCT CATALOGUE</span><h2>Products <span className={styles.countPill}>{visibleProducts.length} shown</span></h2><p>Product and variant stock for the selected view.</p></div><button type="button" className={styles.addButton} onClick={() => window.location.assign('/operations')}><Icon name="plus" size={15}/> Add product</button></div>
           <div className={styles.toolbar}>
             <label className={styles.search}><Icon name="search" size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search product, SKU, or variant"/></label>

@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## Phase 7 — Stock audits and reconciliation
+- Added location-locked physical audit sessions with a ledger snapshot of active variants.
+- Added blind count entry, global/category threshold settings (default recount over 2% or over 5 base units), optional high-count alerts, and a recount queue.
+- Added manager submission/review/approval and abort workflows; inventory only changes through immutable `STOCK_ADJUSTMENT` ledger movements after approval.
+- Added archived audit reasons and database protection against changing or deleting resolved audit records.
+- Added the authenticated manager audit workspace at `/audits`.
+- Added configurable per-location scheduling in company-local time, with store and warehouse cadence rules.
+- Added scheduler idempotency per local date and recorded whether an audit was scheduled.
+- Applied migration `20261113000000_daily_audit_schedule` to local PostgreSQL.
+- Separated manager approval reasons from threshold policy change reasons in the audit UI.
+- Enforced retail-store audit availability every day only after 7:00 PM local time and warehouse audit availability on Sundays only, for both manual and scheduled starts.
+- Confirmed warehouse audits also start after 7:00 PM Sundays; schedules are mandatory and default to 19:00 local time, with later start times configurable.
+- Fixed local development CORS so the POS frontend on port 3001 can call the API; production continues to require explicit configured origins.
+- API/web production builds pass and the full API test suite passes (39 tests across 10 suites); live scheduled-window and on-site physical-count acceptance remain.
+- Decisions `OD-05` and `OD-06` confirmed: starting thresholds are over 2% or over 5 units, and counts are blind until manager review.
+- Database migrations `20261112000000_audit_session_resolution_reason` and `20261112001000_audit_thresholds_and_history` were applied successfully to local PostgreSQL on 2026-11-12.
+
 ## [Unreleased]
 
 ### Added

@@ -205,6 +205,7 @@ export class UsersService {
         discountLimitPercent: true,
         canCancelSales: true,
         canProcessReturns: true,
+        canCountStockAudits: true,
         isActive: true,
         createdAt: true,
         lastLoginAt: true,
@@ -482,6 +483,35 @@ export class UsersService {
           reason,
         },
       });
+      return updated;
+    });
+  }
+
+  async assignStockAuditPermission(userId: string, input: { canCountStockAudits: boolean; reason: string }, actor: UserActor) {
+    const reason = input.reason.trim();
+    if (reason.length < 3) throw new BadRequestException('A reason of at least 3 characters is required');
+    return this.prisma.$transaction(async (tx) => {
+      if (actor.userId === userId) throw new ForbiddenException('You cannot assign your own stock audit count permission');
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${actor.userId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+      const [target, assigningUser] = await Promise.all([
+        tx.user.findUnique({ where: { id: userId }, include: { locationScopes: { select: { locationId: true } } } }),
+        tx.user.findUnique({ where: { id: actor.userId }, select: { id: true, role: true, isActive: true } }),
+      ]);
+      if (!target) throw new NotFoundException('User not found');
+      if (!assigningUser?.isActive) throw new ForbiddenException('The assigning account is inactive');
+      if (!target.isActive) throw new BadRequestException('Permission can only be assigned to active users');
+      if (target.role === Role.SUPER_ADMIN) throw new BadRequestException('Super Admin permission is inherent');
+      if (assigningUser.role === Role.ADMIN) {
+        if (target.role === Role.ADMIN || target.locationScopes.length === 0 || target.locationScopes.some((s) => !actor.locationIds.includes(s.locationId))) {
+          throw new ForbiddenException('You can assign this permission only to users within your authorized scope');
+        }
+      } else if (assigningUser.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only an Admin or Super Admin can assign this permission');
+      const before = { canCountStockAudits: target.canCountStockAudits };
+      const after = { canCountStockAudits: input.canCountStockAudits };
+      if (before.canCountStockAudits === after.canCountStockAudits) return tx.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, email: true, role: true, canCountStockAudits: true, isActive: true } });
+      const updated = await tx.user.update({ where: { id: userId }, data: after, select: { id: true, email: true, role: true, canCountStockAudits: true, isActive: true } });
+      await tx.auditEvent.create({ data: { actorId: assigningUser.id, action: 'STOCK_AUDIT_PERMISSION_ASSIGNED', targetEntity: 'User', targetId: target.id, beforeValue: JSON.stringify(before), afterValue: JSON.stringify(after), reason } });
       return updated;
     });
   }

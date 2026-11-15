@@ -20,6 +20,12 @@ import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AssignDiscountLimitDto } from './dto/assign-discount-limit.dto';
 import { AssignSalesPermissionsDto } from './dto/assign-sales-permissions.dto';
+import { IsBoolean, IsString, MaxLength, MinLength } from 'class-validator';
+
+class AssignStockAuditPermissionDto {
+  @IsBoolean() canCountStockAudits: boolean;
+  @IsString() @MinLength(3) @MaxLength(500) reason: string;
+}
 
 @Controller('users')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -104,5 +110,12 @@ export class UsersController {
   ) {
     const user = await this.usersService.assignSalesPermissions(id, dto, actor);
     return { message: 'Sales permissions assigned', data: user };
+  }
+
+  @Patch(':id/stock-audit-permission')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async assignStockAuditPermission(@Param('id') id: string, @Body() dto: AssignStockAuditPermissionDto, @CurrentUser() actor: RequestUser) {
+    const user = await this.usersService.assignStockAuditPermission(id, dto, actor);
+    return { message: 'Stock audit count permission assigned', data: user };
   }
 }

@@ -12,9 +12,16 @@ async function bootstrap() {
   // Security headers (ADR-008)
   app.use(helmet());
 
-  // CORS configuration
+  // CORS configuration. Keep development origins explicit; production must set CORS_ORIGIN.
+  const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (process.env.NODE_ENV !== 'production') {
+    corsOrigins.push('http://localhost:3001');
+  }
   app.enableCors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: corsOrigins,
     credentials: true,
   });
 

@@ -8,11 +8,11 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| **Current Baseline** | Phase 6 — POS Billing, Invoices, Discounts & Sale Controls in progress |
-| **Implemented Functionality** | Phases 1–5 complete; Phase 6 terminal binding, cart/barcode/stock display, deletion auditing, assigned discount enforcement, online checkout, offline queue/sync, invoice cancellation, returns, manual refund records, and receipt printing are implemented |
-| **Partial Functionality** | Targeted Phase 6 API and browser checks passed, including offline queue/sync. Final client UAT and thermal printer hardware verification remain; a stale stock-refresh alert can persist after reconnect. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
-| **Resolved Decisions** | 9 of 20 Open Decisions confirmed: `OD-01`, `OD-02`, `OD-03`, `OD-04`, `OD-07`, `OD-08`, `OD-09`, `OD-10`, `OD-11` (see §5) |
-| **Remaining Blockers** | 11 unresolved business/technical decisions outside the completed Phase 6 policy set |
+| **Current Baseline** | Phase 7 implementation complete; scheduled runtime and physical-count acceptance pending |
+| **Implemented Functionality** | Phases 1–6 functionality remains implemented; Phase 7 now has location-frozen audit sessions, blind count responses, configurable category/global thresholds, recount flags, manager approval, immutable stock adjustments, and archived resolved audit records |
+| **Partial Functionality** | Phase 7 implementation is complete; runtime acceptance of a scheduled audit at the store/warehouse window and final on-site physical-count UAT remain. The schedule defaults to 7:00 PM local time. Final client UAT and thermal printer hardware verification remain; a stale stock-refresh alert can persist after reconnect. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
+| **Resolved Decisions** | 11 of 20 Open Decisions confirmed: `OD-01` through `OD-11` (see §5) |
+| **Remaining Blockers** | 9 unresolved business/technical decisions outside the confirmed decision set |
 | **Foundation Status** | API/web builds pass; local PostgreSQL, initial migration, seed data, and seeded login have been verified by the project owner |
 
 ---
@@ -20,8 +20,8 @@
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 6: POS Billing, Invoices, Discounts & Sale Controls — In Progress**
-> Phase 6 functionality is implemented, including offline synchronization and permission-controlled cancellation/returns. Targeted API and browser acceptance checks passed. Final client UAT, thermal printer hardware verification, and clearing a stale stock-refresh alert after reconnect remain.
+> **Phase 7: Stock Audits, Recounts & Approved Adjustments — Implementation Complete**
+> The client confirmed that retail-store audits run daily after 7:00 PM local time and warehouse audits run Sundays after 7:00 PM. Audit sessions lock a location, collect blind counts, apply the confirmed >2% or >5-unit recount defaults (configurable globally or by category), and post adjustments only after manager approval. Manual starts enforce these windows; automatic schedules default to 7:00 PM in the company timezone and cannot be disabled. API policy and workflow unit tests pass; observing a scheduled live run and client physical-count UAT remain.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
@@ -120,14 +120,15 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P1` Implement receipt layout printing support (browser print layout sized for 76 mm thermal paper; printer hardware acceptance pending)
 
 ### Phase 7: Stock Audits, Recounts & Approved Adjustments
-- [ ] `P1` Implement location-level stock movement freeze during audit session (Confirmed `OD-04`: audits take place after store closing hours; system locks sales and transfers for the location during counting)
-- [ ] `P1` Implement weekly physical stock audit session management by location and SKU/variant
-- [ ] `P1` Implement configurable variance threshold rules (quantity variance, percentage variance, high-count alert)
-- [ ] `P1` Implement Recount Required queue for flagged count variances
-- [ ] `P1` Build manager review screen comparing Expected Stock, Count 1, and Recount
-- [ ] `P0` Ensure physical counts do not mutate inventory balances until manager formally approves adjustment
-- [ ] `P0` Generate immutable `STOCK_ADJUSTMENT` ledger movement upon approved audit reconciliation
-- [ ] `P1` Archive full audit history (expected, count, recount, approved value, variance, approver, reason)
+- [x] `P1` Implement location-level stock movement freeze during audit session (Confirmed `OD-04`: audits take place after store closing hours; system locks sales and transfers for the location during counting)
+- [x] `P1` Implement required company-timezone audit cadence: stores daily and warehouses Sundays, both after 7:00 PM, with configurable later start time
+- [x] `P1` Implement configurable variance threshold rules (quantity variance, percentage variance, high-count alert; defaults >2% or >5 units, with high-count alerts configurable globally or per category)
+- [x] `P1` Restrict global/category audit threshold changes to Super Admin; require an audited, location-scoped user grant for stock count entry (default denied)
+- [x] `P1` Implement Recount Required queue for flagged count variances
+- [x] `P1` Build manager review screen comparing Expected Stock, Count 1, and Recount
+- [x] `P0` Ensure physical counts do not mutate inventory balances until manager formally approves adjustment
+- [x] `P0` Generate immutable `STOCK_ADJUSTMENT` ledger movement upon approved audit reconciliation
+- [x] `P1` Archive full audit history (expected, count, recount, approved value, variance, approver, reason); terminal records are protected from update/delete
 
 ### Phase 8: Staff Mobile Attendance
 - [ ] `P1` Build mobile-friendly staff attendance punch interface
@@ -183,9 +184,9 @@ The following 20 open decisions (`OD-01` through `OD-20`) originate from Section
 | **OD-01** | Inventory | Can cartons be opened and loose packets transferred between warehouses? | **CONFIRMED: Yes.** Cartons can be opened and loose packets transferred between warehouses, as well as between warehouses and stores. | **RESOLVED** (Unblocks Transfer schema) |
 | **OD-02** | Locations | Exact initial location hierarchy, branch counts, and direct replenishment routes. | Manual transfers may connect any two distinct active Main Warehouses, Sub-Warehouses, or Stores in the same company, including sibling and non-adjacent locations. Automated replenishment suggestions use the destination's configured parent as the proposed source. | **RESOLVED** (Same-company transfers across all location tiers) |
 | **OD-03** | Stock Policy | Is negative stock ever permitted? | **CONFIRMED: Warning & Negative Display.** Sales are permitted to proceed; system displays a prominent cashier warning and records the balance as a negative value. | **RESOLVED** (Unblocks Ledger logic) |
-| **OD-04** | Stock Audit | How are sales/transfers during an ongoing physical audit handled? | **CONFIRMED: Location Freeze (After Hours).** Audits occur when the store is closed; stock movements are frozen for the location until counting completes. | **RESOLVED** (Unblocks Audit flow) |
-| **OD-05** | Audit Thresholds | Specific quantity and percentage variance thresholds triggering recount. | Set default thresholds per category (e.g., > 2% variance or > 5 units triggers mandatory recount). | Open / Medium (Blocks Audit config) |
-| **OD-06** | Audit UX | Should physical stock audits be blind counts? | Decide whether counters can view expected stock quantities on screen. | Open / Medium (Blocks Audit UI) |
+| **OD-04** | Stock Audit | How are sales/transfers during an ongoing physical audit handled, and when should daily audits run? | **CONFIRMED:** Retail-store audits run daily after 7:00 PM local time; warehouse audits run Sundays after 7:00 PM. Stock movements stay frozen during each audit and reconciliation. | **RESOLVED** |
+| **OD-05** | Audit Thresholds | Specific quantity and percentage variance thresholds triggering recount. | **CONFIRMED:** Start with >2% or >5 units (either triggers recount); allow configurable global/category thresholds and high-count alert. | **RESOLVED** |
+| **OD-06** | Audit UX | Should physical stock audits be blind counts? | **CONFIRMED: Blind count.** Expected quantity stays hidden during counting and is available for manager review after submission. | **RESOLVED** |
 | **OD-07** | Discounts | How are discount limits assigned, where do they apply, and how is stacking handled? | **CONFIRMED:** Super Admin is uncapped. A Super Admin or Admin assigns each other user a percentage limit. Limits apply per line and across the whole bill; line and bill discounts cannot be combined. Admin assignment is scoped and cannot exceed their own limit. Any discount above the assigned limit is rejected; there is no override request. | **RESOLVED** (Unblocks POS logic) |
 | **OD-08** | Returns | Business rules for customer returns, refunds, and exchanges. | **CONFIRMED:** Admin/Super Admin assign per-user permissions. Returns require the original invoice, have no time limit, record any refund manually (amount, method, time, operator, optional safe reference), and never initiate a payment. Returned items require inspection notes and are either restocked as saleable or placed in quarantine. Full cancellation is a reasoned, permission-controlled void with a full manual refund record and inventory reversal. | **RESOLVED** (Unblocks cancellation and returns) |
 | **OD-09** | Tax & Invoice Details | Does this release need tax setup, customer details, e-invoicing, or e-way bills? | **CONFIRMED: None are required for the current client release.** Do not collect customer details or implement tax/e-invoice/e-way-bill flows now; add them later only through approved extensions. | **RESOLVED for current release / Future extension** |

@@ -626,7 +626,7 @@ curl -X POST http://localhost:4000/api/v1/companies ^
 
 ---
 
-## Phase 7: Test Location Module (30 minutes)
+## Location Hierarchy Test Module (30 minutes)
 
 ### Test 7.1: Create Main Warehouse
 
@@ -780,6 +780,24 @@ curl "http://localhost:4000/api/v1/locations?type=MAIN_WAREHOUSE" ^
 **✅ Verification:**
 - Only MAIN_WAREHOUSE type locations returned
 - Filtering works correctly
+
+---
+
+## Stock Audit Cadence and Reconciliation (Phase 7)
+
+The database enables the required schedule for every existing location at 7:00 PM in its company timezone. Store audits run daily; warehouse audits run Sundays. Later start times can be configured at `/audits`, but the schedule cannot be disabled. The API rejects store starts before 7:00 PM and warehouse starts outside Sunday after 7:00 PM. Automated tests cover these windows and the count/recount/approval workflow.
+
+For an operational acceptance run, open `/audits` as a manager and select the intended location. Before the allowed time, confirm the start action is unavailable; after the scheduled time, confirm the system has opened an active audit and the location is frozen. During blind counting, enter the actual physical quantity in that product’s base unit (for example, packets if the product is tracked in packets). Do not substitute the expected balance or a guessed value. A variance over either the configured percentage or unit threshold requires a recount. Submit the completed counts, have a manager review and approve them with a reason, then verify that only the approved variance appears as a `STOCK_ADJUSTMENT` and that the location unlocks. Matching counts should create no adjustment movement.
+
+For the warehouse operational run, repeat on Sunday after 7:00 PM local time. On any other day or before 7:00 PM, the API should reject a manual warehouse start. A real physical-count variance acceptance run must use an authorized location and quantities physically verified by store staff.
+
+### Automated Phase 7 checks
+
+```bash
+npm run test --workspace=apps/api -- --runInBand --no-cache --cacheDirectory=./.jest-cache modules/audits
+```
+
+This verifies timezone-aware cadence, manual start restrictions, recount threshold handling, no stock movement before approval, approved ledger variance, and lock release.
 
 ---
 

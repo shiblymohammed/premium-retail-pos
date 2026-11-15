@@ -7,9 +7,9 @@
 ## 1. System Overview
 
 ### 1.1 Current Repository Implementation State
-- **Status**: Phases 1–5 implemented; Phase 6 implementation is in place and acceptance testing is pending. See the [roadmap](ROADMAP.md) for the current task state.
+- **Status**: Phases 1–6 implemented; Phase 7 audit workflows, manager UI, and required timezone-aware scheduling are implemented. Scheduled-run runtime acceptance and on-site physical-count UAT remain. See the [roadmap](ROADMAP.md).
 - **Repository Contents**: A TypeScript monorepo with a Next.js web application, a NestJS API, Prisma schema/migrations, shared packages, and project documentation ([README](../README.md), [roadmap](ROADMAP.md), [changelog](CHANGELOG.md)).
-- **Implemented Services**: Authentication, organization and user access, product catalogue, inventory ledger and receiving, transfers/replenishment, POS billing, discounts, invoice cancellation, returns, and manual refund records. Stock audits, attendance, loans, reports, and deployment/UAT work remain in later phases.
+- **Implemented Services**: Authentication, organization and user access, product catalogue, inventory ledger and receiving, transfers/replenishment, POS billing, discounts, invoice cancellation, returns, manual refund records, and stock audit sessions/counts/approvals with configurable daily scheduling. Attendance, loans, reports, and deployment/UAT work remain.
 
 ### 1.2 Proposed Technical Architecture
 In accordance with Section 21 of the specification document, the proposed enterprise architecture adopts a modular multi-tier structure designed for transactional consistency, horizontal scalability, and strict security isolation:
@@ -96,7 +96,7 @@ POS/
 │       │   │   ├── receiving/         # Supplier stock-in
 │       │   │   ├── transfer/          # Inter-location transfers & replenishment
 │       │   │   ├── sales/             # POS checkout, cart deletions, cancellations
-│       │   │   ├── audit/             # Weekly physical counts, recounts, approvals
+│       │   │   ├── audits/            # Store daily and warehouse Sunday counts, recounts, approvals
 │       │   │   ├── attendance/        # QR/GPS mobile check-in/out
 │       │   │   ├── loans/             # Employee advances, repayments, ledger
 │       │   │   └── reports/           # Financial & stock ledger reconciliation
@@ -166,7 +166,7 @@ The system is partitioned into twelve modular domains. Each module enforces stri
 | **6. Transfers & Replenishment** | Auto-replenishment calculation, transfer lifecycle state machine, transit tracking. | In-transit stock cannot be sold at destination; cancelled transfers reversed via ledger; transfers support full cartons and loose packets between any locations in the same company (`OD-01`, `OD-02`). |
 | **7. POS & Sales** | Terminal binding, cart management, checkout, receipt numbering, invoice creation. | Invoices are immutable once finalized; sale cancellations create balancing reversal movements; active bill removals generate audit logs; POS continues operating offline, caching sales locally with automatic sync once online (`OD-11`). |
 | **8. Discount Authorization** | Operator discount limit assignment and enforcement. | Super Admin uncapped; other user limits assigned by Super Admin/Admin and enforced at line and bill level; line and bill discounts cannot be combined and over-limit discounts are rejected (`OD-07`). |
-| **9. Stock Audit & Recount** | Weekly audit sessions, physical counts, variance detection, recount approvals. | Conducted after closing hours; freezes location stock movements during active audit session (`OD-04`); physical counts never alter stock directly without manager approval. |
+| **9. Stock Audit & Recount** | Scheduled physical counts, variance detection, recount approvals. | Retail-store audits run daily after 19:00 local time; warehouses run Sundays after 19:00. The per-location scheduler uses company-local time and cannot be disabled; the location freezes during an active audit (`OD-04`); physical counts never alter stock directly without manager approval. |
 | **10. Attendance** | Mobile check-in/out, rotating QR codes, GPS geofencing, manager punch corrections. | Geofence verification against store coordinates; punches immutable to staff; manager corrections preserve original values and reason. |
 | **11. Loans & Advances** | Disbursal records, repayment tracking, balance computations, payroll linkage. | $\text{Outstanding} = \text{Issued} - \text{Repayments}$; planned payroll deductions do not reduce balance until officially confirmed. |
 | **12. Reports & Audit** | Ledger aggregation, sales summaries, stock discrepancy tracking, tamper-evident audit logs. | Reports strictly filter by caller location permissions; audit logs are immutable and permanent. |
@@ -251,7 +251,7 @@ classDiagram
 
 ### Invariant 7: Physical Counts Do Not Alter Stock Until Approved
 - **Rule**: Entering a physical count during an audit session cannot directly alter inventory balances.
-- **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
+- **Implementation Status**: Implemented in Phase 7; automated service tests cover count, recount, and approval behavior.
 - **Design Enforcement**: Audit count entries remain in `AuditCountItem` records. Only upon explicit manager approval of the variance is an `InventoryMovement` of type `STOCK_ADJUSTMENT` generated.
 
 ### Invariant 8: Completed Sales and Invoices Must Never Be Silently Deleted
@@ -359,9 +359,9 @@ classDiagram
 ### ADR-010: Location Freeze for Stock Audits During Closed Hours
 - **Status**: Accepted (Confirmed `OD-04`)
 - **Context**: Performing physical inventory audits while sales or transfers are active creates moving-target discrepancies and reconciliation complexity.
-- **Decision**: Physical stock audits will take place exclusively after store closing hours. When an audit session is initiated, the system applies an active lock (freeze) on all sales and stock movement endpoints for that specific location until the audit is formally submitted or closed.
+- **Decision**: Retail-store audits run every day after 7:00 PM local time; warehouse audits run every Sunday after 7:00 PM. Company-local schedules default to 19:00 and may be moved later. Manual starts outside the applicable window are rejected. When an audit session is initiated, the system applies an active lock on all sales and stock movement endpoints for that location until a manager approves or aborts the session. Keeping the lock through manager review preserves the expected balance used for reconciliation.
 - **Rationale**: Guarantees static expected quantities during counting, eliminating concurrency races between cashiers and auditors.
-- **Consequences**: Emergency checkout or transfer operations are prevented while an audit lock is active; location managers must formally conclude or abort the audit to lift the lock.
+- **Consequences**: Emergency checkout or transfer operations are prevented while an audit lock is active; location managers must approve or abort the audit to lift the lock.
 
 ### ADR-011: Dual-Tier Discount Authorization & Anti-Stacking Policy
 - **Status**: Accepted (Confirmed `OD-07`)
@@ -449,6 +449,7 @@ The proposed testing pyramid ensures strict adherence to business rules, concurr
 - **Discount Calculations**: Verification that discounts adhere to role caps and cannot be stacked to exceed permitted limits.
 - **Loan Math**: Formula validation: $\text{Outstanding} = \text{Issued} - \text{Repayments}$.
 - **Audit Recount Triggers**: Testing threshold evaluation for variance percentage and high-count limits.
+- **Audit permission boundary**: Only Super Admin can change global/category variance policy. Count entry requires an explicit per-user grant, defaults off, and remains constrained by the user's location scopes; grant/revoke changes are recorded in the audit log.
 
 ### 8.2 Integration Tests
 - **Sale Finalization**: Atomic deduction of stock, creation of invoice lines, and movement ledger insertion in a single transaction.
