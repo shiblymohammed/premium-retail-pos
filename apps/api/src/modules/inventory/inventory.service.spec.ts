@@ -1,4 +1,4 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { MovementType, StockState } from '@prisma/client';
 import { InventoryService } from './inventory.service';
 
@@ -84,6 +84,21 @@ describe('InventoryService ledger balances', () => {
       actorId: 'user-id',
       warning: expect.stringContaining('WARNING:'),
     }));
+  });
+
+  it('rejects every stock movement while a location audit is active', async () => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'location-id', isActive: true, isAuditLocked: true }]),
+      inventoryMovement: { create: jest.fn() },
+    };
+    const service = new InventoryService({} as any);
+
+    await expect(service.recordMovement(tx as any, {
+      locationId: 'location-id', variantId: 'variant-id', actorId: 'user-id',
+      type: MovementType.SUPPLIER_RECEIPT, stockState: StockState.AVAILABLE, quantityBaseUnits: 10,
+    })).rejects.toBeInstanceOf(ConflictException);
+
+    expect(tx.inventoryMovement.create).not.toHaveBeenCalled();
   });
 
   it('converts full cartons and loose packets and links confirmed receipts to their receiver', async () => {

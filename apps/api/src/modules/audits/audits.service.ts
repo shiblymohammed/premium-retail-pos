@@ -20,15 +20,16 @@ export class AuditsService {
 
   async start(locationId: string, actor: RequestUser) {
     return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string; type: LocationType; timezone: string; isActive: boolean; isAuditLocked: boolean }>>(Prisma.sql`
-        SELECT l."id", l."type", c."timezone", l."is_active" AS "isActive", l."is_audit_locked" AS "isAuditLocked"
+      const rows = await tx.$queryRaw<Array<{ id: string; type: LocationType; timezone: string; dailyAuditTime: string; isActive: boolean; isAuditLocked: boolean }>>(Prisma.sql`
+        SELECT l."id", l."type", c."timezone", l."daily_audit_time" AS "dailyAuditTime",
+          l."is_active" AS "isActive", l."is_audit_locked" AS "isAuditLocked"
         FROM "locations" l JOIN "companies" c ON c."id" = l."company_id"
         WHERE l."id" = ${locationId} FOR UPDATE OF l
       `);
       const location = rows[0];
       if (!location) throw new NotFoundException('Location not found');
       if (!location.isActive) throw new ConflictException('Cannot audit an inactive location');
-      this.assertAuditWindow(location.type, this.localAuditClock(new Date(), location.timezone));
+      this.assertAuditWindow(location.type, this.localAuditClock(new Date(), location.timezone), location.dailyAuditTime);
       if (location.isAuditLocked) throw new ConflictException('Location already has an active stock audit');
       return this.createSessionInTransaction(tx, locationId, actor.userId, false);
     });
@@ -133,7 +134,7 @@ export class AuditsService {
       locationType: location.type,
       allowedDays: location.type === LocationType.RETAIL_STORE ? 'Every day after 7:00 PM' : 'Sundays after 7:00 PM',
       earliestStartTime: location.type === LocationType.RETAIL_STORE ? '19:00' : null,
-      canStartNow: this.isWithinAuditWindow(location.type, this.localAuditClock(new Date(), location.company.timezone)),
+      canStartNow: this.isWithinAuditWindow(location.type, this.localAuditClock(new Date(), location.company.timezone), location.dailyAuditTime),
     };
   }
 
@@ -212,6 +213,7 @@ export class AuditsService {
       where: { id: sessionId },
       include: {
         location: { select: { id: true } },
+        approvedBy: { select: { id: true, email: true } },
         countItems: {
           include: {
             variant: {
@@ -258,7 +260,8 @@ export class AuditsService {
             variancePercent,
             notes: dto.notes ?? item.notes,
           };
-      return tx.auditCountItem.update({ where: { id: item.id }, data });
+      const updated = await tx.auditCountItem.update({ where: { id: item.id }, data });
+      return this.hideBlindCountItem(updated);
     });
   }
 
@@ -271,7 +274,8 @@ export class AuditsService {
       const item = await tx.auditCountItem.findFirst({ where: { id: itemId, auditSessionId: sessionId } });
       if (!item) throw new NotFoundException('Audit count item not found');
       if (item.countedQtyBase === null) throw new ConflictException('Enter the first count before requesting a recount');
-      return tx.auditCountItem.update({ where: { id: item.id }, data: { requiresRecount: true, recountQtyBase: null, notes: reason } });
+      const updated = await tx.auditCountItem.update({ where: { id: item.id }, data: { requiresRecount: true, recountQtyBase: null, notes: reason } });
+      return this.hideBlindCountItem(updated);
     });
   }
 
@@ -376,16 +380,23 @@ export class AuditsService {
     };
   }
 
-  private isWithinAuditWindow(type: LocationType, local: { time: string; weekday: string }) {
+  private isWithinAuditWindow(type: LocationType, local: { time: string; weekday: string }, configuredStartTime = '19:00') {
+    if (local.time < '19:00' || local.time < configuredStartTime) return false;
     return type === LocationType.RETAIL_STORE
-      ? local.time >= '19:00'
-      : local.weekday === 'Sun' && local.time >= '19:00';
+      ? true
+      : local.weekday === 'Sun';
   }
 
-  private assertAuditWindow(type: LocationType, local: { date: string; time: string; weekday: string }) {
-    if (this.isWithinAuditWindow(type, local)) return;
+  private assertAuditWindow(type: LocationType, local: { date: string; time: string; weekday: string }, configuredStartTime = '19:00') {
+    if (this.isWithinAuditWindow(type, local, configuredStartTime)) return;
     if (type === LocationType.RETAIL_STORE) {
+      if (local.time >= '19:00' && local.time < configuredStartTime) {
+        throw new ConflictException(`Store stock audits are scheduled to start at or after ${configuredStartTime} local time`);
+      }
       throw new ConflictException('Store stock audits are available only after 7:00 PM local time');
+    }
+    if (local.weekday === 'Sun' && local.time >= '19:00' && local.time < configuredStartTime) {
+      throw new ConflictException(`Warehouse stock audits are scheduled to start at or after ${configuredStartTime} local time on Sundays`);
     }
     throw new ConflictException('Warehouse stock audits are available only after 7:00 PM on Sundays');
   }
@@ -394,7 +405,17 @@ export class AuditsService {
     if (!session?.countItems) return session;
     return {
       ...session,
-      countItems: session.countItems.map((item) => ({ ...item, expectedQtyBase: undefined as unknown as number })),
+      countItems: session.countItems.map((item) => this.hideBlindCountItem(item)),
     } as T;
+  }
+
+  private hideBlindCountItem<T extends { expectedQtyBase: number; varianceBase?: number | null; variancePercent?: unknown }>(item: T): T {
+    const {
+      expectedQtyBase: _expectedQtyBase,
+      varianceBase: _varianceBase,
+      variancePercent: _variancePercent,
+      ...blindCountItem
+    } = item;
+    return blindCountItem as T;
   }
 }

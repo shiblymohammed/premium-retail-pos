@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { revokeSession } from '@/lib/auth';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -859,6 +860,7 @@ export default function PosTerminal() {
   }
 
   function logout() {
+    void revokeSession(token);
     setToken('');
     setTerminal(null);
     setCart([]);

@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useRef, useState } from 'react';
+import { revokeSession } from '@/lib/auth';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -198,6 +199,7 @@ export default function SalesControlsPage() {
   }
 
   function signOut() {
+    void revokeSession(token);
     setToken('');
     setPermissions(null);
     setInvoice(null);

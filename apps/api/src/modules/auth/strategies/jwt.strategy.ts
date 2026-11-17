@@ -25,6 +25,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User account is inactive');
     }
+    if (payload.sessionVersion !== user.sessionVersion) {
+      throw new UnauthorizedException('Session has been signed out or replaced');
+    }
 
     const locationIds = await this.usersService.getUserLocationIds(user.id);
     return {

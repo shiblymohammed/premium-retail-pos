@@ -10,9 +10,9 @@
 | :--- | :--- |
 | **Current Baseline** | Phase 8 agreed attendance scope implemented and live-checked with two demo staff accounts |
 | **Implemented Functionality** | Phases 1–6 functionality remains implemented; Phase 7 now has location-frozen audit sessions, blind count responses, configurable category/global thresholds, recount flags, manager approval, immutable stock adjustments, and archived resolved audit records |
-| **Partial Functionality** | Phase 7 runtime acceptance at the scheduled store/warehouse window and on-site physical-count UAT remain. Phase 8 automated tests, builds, and 15 live checks using two demo staff accounts passed. Final client UAT and thermal printer hardware verification remain. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
+| **Partial Functionality** | Phase 7 implementation and automated schedule/workflow checks pass; scheduled runtime acceptance remains. On-site physical-count UAT is deferred until requested by the client and is not a current blocker. Phase 8 automated tests, builds, and 15 live checks using two demo staff accounts passed. Final client UAT and thermal printer hardware verification remain. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
 | **Resolved Decisions** | 12 of 20 Open Decisions confirmed for the current release: `OD-01` through `OD-12` (see §5) |
-| **Remaining Blockers** | 8 unresolved business/technical decisions outside the confirmed decision set |
+| **Remaining Blockers** | 4 unresolved in-scope decisions; OD-13 and OD-14 are deferred |
 | **Foundation Status** | API/web builds pass; local PostgreSQL, initial migration, seed data, and seeded login have been verified by the project owner |
 
 ---
@@ -20,8 +20,11 @@
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Phase 8: Staff Attendance — Current Release Features Implemented**
-> Current attendance scope is implemented and live-checked: staff clock in/out, managers configure location start times and see late arrivals, optional rotating QR validation, audited punch corrections, and daily/weekly/monthly reports. GPS/geofencing and advanced shift rules remain deferred. API unit tests and production builds pass; 15 live attendance checks passed with two local demo employees. Store/warehouse audit runtime acceptance and physical-count UAT remain Phase 7 acceptance items.
+> **Next Active Phase: Phase 10 — Reports, Dashboards & Notifications**
+> Phase 8 attendance scope is implemented and live-checked: staff clock in/out, managers configure location start times and see late arrivals, optional rotating QR validation, audited punch corrections, and daily/weekly/monthly reports. GPS/geofencing and advanced shift rules remain deferred. Phase 7 scheduled runtime acceptance remains; on-site physical-count UAT is deferred until requested by the client and is not a current blocker.
+
+> **Deferred: Phase 9 — Employee Loans and Advances**
+> The client does not need loan tracking in the current release. Keep the existing employee profile placeholder; do not build loan, repayment, or payroll-deduction workflows unless the client reactivates this phase.
 
 ### Immediate Next Tasks
 - [x] **P0**: Formally review and resolve high-impact Open Decisions (`OD-01`, `OD-03`, `OD-04`, `OD-07`, `OD-11`) — ✅ Resolved
@@ -129,6 +132,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P0` Ensure physical counts do not mutate inventory balances until manager formally approves adjustment
 - [x] `P0` Generate immutable `STOCK_ADJUSTMENT` ledger movement upon approved audit reconciliation
 - [x] `P1` Archive full audit history (expected, count, recount, approved value, variance, approver, reason); terminal records are protected from update/delete
+> On-site physical-count UAT is deferred until requested by the client; automated tests cover the audit workflow and scheduled cadence rules.
 
 ### Phase 8: Staff Mobile Attendance
 - [x] `P1` Build mobile-friendly staff attendance punch interface for simple start/end of workday
@@ -141,30 +145,32 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P2` Generate daily, weekly, and monthly attendance summary reports with CSV export
 > Current client scope: staff manually start and end their workday. Authorized managers/admins configure a simple start-time target per location; a punch strictly after that time is marked late. GPS/geofence, full shifts, grace periods, breaks, and overtime are deferred for future scope. QR check-in can be enabled per location.
 
-### Phase 9: Employee Loans and Advances
-- [ ] `P1` Implement Loans & Advances profile section for employees
-- [ ] `P1` Support multiple active and historical loans per employee (amount, issue date, terms, manager approval)
-- [ ] `P0` Maintain running outstanding balance formula: $\text{Outstanding} = \text{Issued} - \text{Confirmed Repayments}$
-- [ ] `P1` Implement repayment ledger supporting full, partial, and early repayments
-- [ ] `P1` Link planned payroll deductions to repayment records without double-reducing balances prior to payroll confirmation
-- [ ] `P1` Implement loan correction/reversal workflow retaining original audit history
+### Phase 9: Employee Loans and Advances — Deferred by Client
+> Out of the current release. Retain only the existing employee-profile placeholder; implement these workflows only after the client requests them.
+- [Deferred] `P1` Implement Loans & Advances profile section for employees
+- [Deferred] `P1` Support multiple active and historical loans per employee (amount, issue date, terms, manager approval)
+- [Deferred] `P0` Maintain running outstanding balance formula: $\text{Outstanding} = \text{Issued} - \text{Confirmed Repayments}$
+- [Deferred] `P1` Implement repayment ledger supporting full, partial, and early repayments
+- [Deferred] `P1` Link planned payroll deductions to repayment records without double-reducing balances prior to payroll confirmation
+- [Deferred] `P1` Implement loan correction/reversal workflow retaining original audit history
 
-### Phase 10: Reports, Dashboards & Notifications
-- [ ] `P1` Implement location-scoped and consolidated Sales Summary & Sales Detail reports
-- [ ] `P1` Implement Current Stock Report with base units and carton/packet breakdowns
-- [ ] `P1` Implement Movement Ledger Audit Report with source/destination tracing
-- [ ] `P1` Implement Low Stock & Replenishment Tracker
-- [ ] `P1` Implement Transfer Discrepancy Report
-- [ ] `P1` Implement Audit Variance Report and Price Change History Log
-- [ ] `P1` Implement Item Deletion & Cancelled Sale Audit Report
+### Phase 10: Reports, Dashboards & Notifications — In Progress
+- [x] `P1` Implement location-scoped and consolidated Sales Summary & Sales Detail reports (location-scoped, paginated API and reports screen; CSV export is capped at 50,000 invoices per export)
+- [x] `P1` Implement Current Stock Report with base units and carton/packet breakdowns (API and reports screen)
+- [x] `P1` Implement Movement Ledger Audit Report with source/destination tracing
+- [x] `P1` Implement Low Stock & Replenishment Tracker
+- [x] `P1` Implement Transfer Discrepancy Report
+- [x] `P1` Implement Audit Variance Report and Price Change History Log
+- [x] `P1` Implement Item Deletion & Cancelled Sale Audit Report
 - [ ] `P2` Implement role-scoped executive and manager dashboard widgets
-- [ ] `P2` Implement in-app notification center (replenishment approvals, recount alerts, transfer discrepancies)
-- [ ] `P2` Implement secure CSV and PDF export utilities respecting location permissions
+- [x] `P2` Implement in-app notification center (per-user persisted alerts, read/unread state, and links to the related workflow; SMS/WhatsApp remain excluded from the current scope)
+- [x] `P2` Implement secure CSV and downloadable PDF export utilities respecting location permissions (consolidated scope restricted to Admin / Super Admin)
 
 ### Phase 11: Security, Concurrency, Automated Tests & Hardening
 - [ ] `P0` Enforce database constraints and unique indexes on SKUs, barcodes, invoice numbers, and idempotency keys
 - [ ] `P0` Implement concurrency stress tests validating atomic sales against low stock (prevent race conditions)
-- [ ] `P0` Implement comprehensive unit test suite covering unit conversions, discount capping, and loan balances
+- [ ] `P0` Implement comprehensive unit tests for current-release features including unit conversions and discount capping
+- [Deferred] Add loan-balance tests only if Phase 9 is reactivated
 - [ ] `P0` Implement security tests verifying that cashiers cannot access external location stock or admin APIs
 - [ ] `P0` Add rate limiting, HTTP security headers (Helmet), and strict CORS origin whitelisting
 - [ ] `P0` Protect sensitive employee financial data and attendance geolocation data
@@ -197,10 +203,10 @@ The following 20 open decisions (`OD-01` through `OD-20`) originate from Section
 | **OD-11** | Offline Mode | Scope of offline-first operation vs. online-only operation. | **CONFIRMED: Online-First with Offline POS Resilient Queueing.** POS keeps running without internet, caches transactions locally with idempotency keys, and syncs automatically once online. | **RESOLVED** (Unblocks Client architecture) |
 | **OD-12** | Attendance | Specific shift schedules, grace periods, break tracking, overtime rules, and geofence radius. | **CONFIRMED current release:** simple staff start/end punches only. Shift rules, grace periods, breaks, overtime, GPS radius, and workplace coordinates are deferred for future scope. | RESOLVED for current release / Future extension |
 | **OD-13** | Verification | Is facial recognition or liveness verification required for mobile attendance? | **Optional / Excluded from baseline**; conduct privacy, security, and hardware cost review first. | Deferred / Low |
-| **OD-14** | Loans & HR | Is loan tracking purely internal, or does it interface with third-party payroll software? | Internal ledger tracking only in base scope; deduction schedules linked to repayment records. | Open / Medium (Blocks HR schema) |
+| **OD-14** | Loans & HR | Is loan tracking purely internal, or does it interface with third-party payroll software? | **Deferred by client:** loan tracking and payroll deductions are not needed in the current release; revisit if Phase 9 is reactivated. | Deferred / Not a current blocker |
 | **OD-15** | Hardware | Target hardware specifications (barcode scanners, thermal printers, cash drawers, scales). | Support standard USB/Bluetooth ESC/POS thermal printers and HID keyboard-wedge barcode scanners. | Open / Medium (Blocks POS driver testing) |
-| **OD-16** | Exports | Supported export formats, scheduling, and role-based export permissions. | Support CSV and PDF download; restrict consolidated exports to Admin / Super Admin. | Open / Low (Reports module) |
-| **OD-17** | Notifications | Scope of notification delivery (In-app only vs. SMS / Email / WhatsApp). | In-app alerts included in base scope; external SMS/WhatsApp excluded unless third-party gateway funded. | Open / Low (External costs) |
+| **OD-16** | Exports | Supported export formats, scheduling, and role-based export permissions. | **CONFIRMED current release:** CSV and downloadable PDF; consolidated data restricted to Admin / Super Admin. Scheduled exports are deferred. | **RESOLVED for current release / Future extension** |
+| **OD-17** | Notifications | Scope of notification delivery (In-app only vs. SMS / Email / WhatsApp). | **CONFIRMED:** In-app alerts only. External SMS/Email/WhatsApp delivery is excluded unless separately approved and funded. | **RESOLVED for current release / Future extension** |
 | **OD-18** | Data Migration | Scope and format of legacy data to migrate (products, stock, employees, historic sales). | Provide standard CSV import templates for master catalogue and opening stock balances only. | Open / Medium (Pre-launch readiness) |
 | **OD-19** | Scale Targets | Concurrency targets: concurrent cashiers, active SKUs, daily transactions, data retention span. | Design for 50+ stores, 10,000+ SKUs, 50,000 daily sales, 5-year online retention. | Open / Medium (Database indexing) |
 | **OD-20** | Acceptance | Formal UAT sign-off criteria, bug severity definitions, and commercial support timeline. |   Define Sev-1 through Sev-4 response times and confirm start date for the 30-day bug-fixing period. | Open / High (Contractual milestone) |

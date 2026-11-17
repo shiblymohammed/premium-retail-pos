@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { revokeSession } from '@/lib/auth';
 import styles from '../attendance.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
@@ -188,7 +189,7 @@ export default function AttendanceManagerPage() {
     finally { setBusy(false); }
   }
 
-  function signOut() { setToken(''); setLocations([]); setLocationId(''); setDay(null); setReport(null); setQrImage(''); setError(''); setNotice(''); }
+  function signOut() { void revokeSession(token); setToken(''); setLocations([]); setLocationId(''); setDay(null); setReport(null); setQrImage(''); setError(''); setNotice(''); }
 
   useEffect(() => {
     if (!token || !locationId) return;

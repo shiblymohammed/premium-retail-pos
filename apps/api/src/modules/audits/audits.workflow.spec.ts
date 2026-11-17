@@ -5,7 +5,9 @@ describe('AuditsService count, recount, and approval workflow', () => {
   const actor = { userId: 'manager-id', email: 'manager@example.test', role: Role.SUPER_ADMIN, locationIds: [] };
 
   it('flags a recount when the percent threshold is exceeded and does not move stock', async () => {
-    const update = jest.fn().mockImplementation(({ data }) => Promise.resolve(data));
+    const update = jest.fn().mockImplementation(({ data }) => Promise.resolve({
+      id: 'count-item', expectedQtyBase: 100, varianceBase: -3, variancePercent: 3, ...data,
+    }));
     const item = {
       id: 'count-item', auditSessionId: 'audit-id', variantId: 'variant-id', expectedQtyBase: 100,
       countedQtyBase: null, recountQtyBase: null, requiresRecount: false, recountThresholdPercent: 2,
@@ -22,10 +24,36 @@ describe('AuditsService count, recount, and approval workflow', () => {
     const inventory = { recordMovement: jest.fn() };
     const service = new AuditsService(prisma as any, inventory as any);
 
-    await service.recordCount('audit-id', 'count-item', { quantityBaseUnits: 97 }, actor);
+    const result = await service.recordCount('audit-id', 'count-item', { quantityBaseUnits: 97 }, actor);
 
     expect(update).toHaveBeenCalledWith({ where: { id: 'count-item' }, data: expect.objectContaining({ countedQtyBase: 97, requiresRecount: true }) });
     expect(inventory.recordMovement).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({ countedQtyBase: 97, requiresRecount: true }));
+    expect(result).not.toHaveProperty('expectedQtyBase');
+    expect(result).not.toHaveProperty('varianceBase');
+    expect(result).not.toHaveProperty('variancePercent');
+  });
+
+  it('keeps blind-count values hidden from a recount response while the audit is active', async () => {
+    const item = { id: 'count-item', expectedQtyBase: 100, countedQtyBase: 90, varianceBase: -10, variancePercent: 10 };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'audit-id', status: AuditSessionStatus.ACTIVE }]),
+      auditCountItem: {
+        findFirst: jest.fn().mockResolvedValue(item),
+        update: jest.fn().mockResolvedValue({ ...item, requiresRecount: true, recountQtyBase: null }),
+      },
+    };
+    const prisma = {
+      auditSession: { findUnique: jest.fn().mockResolvedValue({ status: AuditSessionStatus.ACTIVE, locationId: 'location-id', countItems: [item] }) },
+      $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
+    };
+    const service = new AuditsService(prisma as any, {} as any);
+
+    const result = await service.requestRecount('audit-id', 'count-item', 'Please verify the shelf again', actor);
+
+    expect(result).not.toHaveProperty('expectedQtyBase');
+    expect(result).not.toHaveProperty('varianceBase');
+    expect(result).not.toHaveProperty('variancePercent');
   });
 
   it('posts only the manager-approved recount variance to the append-only ledger', async () => {

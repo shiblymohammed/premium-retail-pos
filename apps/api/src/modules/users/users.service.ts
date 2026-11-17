@@ -93,6 +93,13 @@ export class UsersService {
     });
   }
 
+  async revokeSessions(userId: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { sessionVersion: { increment: 1 }, refreshTokenHash: null },
+    });
+  }
+
   async rotateRefreshTokenHash(userId: string, oldHash: string, newHash: string) {
     return this.prisma.user.updateMany({
       where: { id: userId, refreshTokenHash: oldHash, isActive: true },

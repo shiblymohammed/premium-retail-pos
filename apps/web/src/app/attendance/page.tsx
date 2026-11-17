@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { revokeSession } from '@/lib/auth';
 import styles from './attendance.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
@@ -68,7 +69,7 @@ export default function AttendancePage() {
     finally { setBusy(false); }
   }
 
-  function signOut() { setToken(''); setToday(null); setEmail(''); setPassword(''); setError(''); setNotice(''); }
+  function signOut() { void revokeSession(token); setToken(''); setToday(null); setEmail(''); setPassword(''); setError(''); setNotice(''); }
 
   useEffect(() => { if (!token) return; const id = window.setInterval(() => { void loadToday(token).catch(() => undefined); }, 60_000); return () => window.clearInterval(id); }, [loadToday, token]);
   useEffect(() => {

@@ -7,12 +7,13 @@ describe('AuditsService location audit windows', () => {
 
   afterEach(() => jest.useRealTimers());
 
-  function serviceFor(location: { type: LocationType; isAuditLocked?: boolean }) {
+  function serviceFor(location: { type: LocationType; isAuditLocked?: boolean; dailyAuditTime?: string }) {
     const tx = {
       $queryRaw: jest.fn().mockResolvedValue([{
         id: 'location-id',
         type: location.type,
         timezone: 'Asia/Kolkata',
+        dailyAuditTime: location.dailyAuditTime ?? '19:00',
         isActive: true,
         isAuditLocked: location.isAuditLocked ?? true,
       }]),
@@ -33,6 +34,13 @@ describe('AuditsService location audit windows', () => {
     const { service } = serviceFor({ type: LocationType.RETAIL_STORE });
 
     await expect(service.start('location-id', actor)).rejects.toThrow('already has an active stock audit');
+  });
+
+  it('respects a later configured start time for manual store audits', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-13T13:45:00.000Z'));
+    const { service } = serviceFor({ type: LocationType.RETAIL_STORE, dailyAuditTime: '20:00' });
+
+    await expect(service.start('location-id', actor)).rejects.toThrow('at or after 20:00 local time');
   });
 
   it('rejects a warehouse audit on a weekday', async () => {

@@ -149,6 +149,7 @@ model User {
   updatedAt            DateTime  @updatedAt @map("updated_at")
   lastLoginAt          DateTime? @map("last_login_at")
   refreshTokenHash     String?   @map("refresh_token_hash")
+  sessionVersion       Int       @default(0) @map("session_version")
 
   // Relations
   employee                Employee?
@@ -171,6 +172,7 @@ model User {
   saleReturnsProcessed    SaleReturn[]           @relation("SaleReturnProcessor")
   initiatedAuditSessions  AuditSession[]         @relation("AuditInitiator")
   approvedAuditSessions   AuditSession[]         @relation("AuditApprover")
+  notifications           InAppNotification[]
 
   @@map("users")
 }
@@ -902,6 +904,25 @@ model AuditEvent {
   @@index([targetEntity, targetId])
   @@index([actorId, createdAt])
   @@map("audit_events")
+}
+
+/// Per-user in-app notification state. Business alerts are sourced from their audit/workflow records.
+model InAppNotification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  dedupeKey String    @map("dedupe_key")
+  type      String
+  title     String
+  message   String   @db.Text
+  href      String
+  createdAt DateTime @default(now()) @map("created_at")
+  readAt    DateTime? @map("read_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@map("in_app_notifications")
 }
 
 // ============================================================

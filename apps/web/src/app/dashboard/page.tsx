@@ -177,7 +177,7 @@ export default function DashboardPage() {
           <a className={styles.navItem} href="/attendance/manage" title="Attendance management"><Icon name="clock" />Attendance management</a>
           <a className={styles.navItem} href="/operations" title="Transfers"><Icon name="transfer" />Transfers</a>
           <a className={styles.navItem} href="/operations" title="Warehouse operations"><Icon name="warehouse" />Warehouse</a>
-          <button className={styles.navItem} type="button" title="Export sales report" onClick={downloadReport}><Icon name="chart" />Reports</button>
+          <a className={styles.navItem} href="/reports" title="Live sales and stock reports"><Icon name="chart" />Reports</a>
           <div className={styles.navLabel}>SETTINGS & CONTROLS</div>
           <a className={styles.navItem} href="/admin/discount-limits" title="Discount limits"><Icon name="chart" />Discount limits</a>
           <a className={styles.navItem} href="/admin/sales-permissions" title="Sale permissions"><Icon name="shield" />Sale permissions</a>
@@ -197,7 +197,7 @@ export default function DashboardPage() {
           <div className={styles.mobileBrand}><span className={styles.brandMark}>P</span><strong>Premium Retail</strong></div>
           <div className={styles.breadcrumb}><span>Retail operations</span><b>/</b><strong>Overview</strong></div>
           <label className={styles.globalSearch}><Icon name="search" size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search invoices, cashiers…" /><kbd>⌘ K</kbd></label>
-          <a className={styles.notificationButton} href="#operational-safeguards" aria-label={`View ${metrics.lowStock + metrics.negative} inventory alerts`}><Icon name="bell" size={17}/>{metrics.lowStock + metrics.negative > 0 && <i/>}</a>
+          <a className={styles.notificationButton} href="/reports" aria-label="Open live in-app operational alerts" title="Live operational alerts"><Icon name="bell" size={17}/></a>
           <select className={styles.headerPeriod} value={period} onChange={(event) => setPeriod(event.target.value as Period)} aria-label="Dashboard date range"><option>7 days</option><option>30 days</option><option>90 days</option></select>
           <button className={styles.headerExport} type="button" onClick={downloadReport}><Icon name="chart" size={14}/> Export</button>
           <div className={styles.profile}><span className={styles.avatar}>SM</span><span><strong>Sam Morgan</strong><small>Super Admin · demo view</small></span></div>

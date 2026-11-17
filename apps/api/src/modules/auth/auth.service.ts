@@ -11,6 +11,7 @@ export interface JwtPayload {
   email: string;
   role: string;
   locationIds: string[];
+  sessionVersion: number;
 }
 
 export interface TokenPair {
@@ -61,6 +62,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       locationIds,
+      sessionVersion: user.sessionVersion,
     });
   }
 
@@ -69,6 +71,10 @@ export class AuthService {
    */
   async hashPassword(plaintext: string): Promise<string> {
     return bcrypt.hash(plaintext, this.BCRYPT_ROUNDS);
+  }
+
+  async logout(userId: string): Promise<void> {
+    await this.usersService.revokeSessions(userId);
   }
 
   /**
@@ -125,6 +131,7 @@ export class AuthService {
         email: user.email,
         role: user.role,
         locationIds,
+        sessionVersion: user.sessionVersion,
       }, oldHash);
     } catch {
       throw new UnauthorizedException('Invalid or expired refresh token');

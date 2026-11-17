@@ -1,5 +1,7 @@
-import { Controller, Post, Body, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, Req, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
+import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -27,5 +29,13 @@ export class AuthController {
       message: 'Token refreshed',
       data: tokens,
     };
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard('jwt'))
+  async logout(@CurrentUser() actor: RequestUser) {
+    await this.authService.logout(actor.userId);
+    return { message: 'Logged out successfully' };
   }
 }
