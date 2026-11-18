@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import AppFrame from '../components/app-frame';
 
 export const metadata: Metadata = {
   title: 'Premium Retail POS',
@@ -19,7 +20,7 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body><AppFrame>{children}</AppFrame></body>
     </html>
   );
 }

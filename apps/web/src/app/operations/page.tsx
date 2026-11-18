@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { revokeSession } from '@/lib/auth';
+import { clearStoredSession, getStoredSession, revokeSession, setStoredSession } from '@/lib/auth';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -93,8 +93,10 @@ export default function OperationsPage() {
   const groups = useMemo(() => [...new Set(presets.map((preset) => preset.phase))], []);
 
   useEffect(() => {
-    const savedToken = sessionStorage.getItem('pos-operations-token') || '';
-    const savedRole = sessionStorage.getItem('pos-operations-role') || '';
+    const authSession = getStoredSession();
+    const savedToken = authSession?.accessToken || sessionStorage.getItem('pos-operations-token') || '';
+    const savedRole = authSession?.user.role || sessionStorage.getItem('pos-operations-role') || '';
+    if (authSession?.user.email) setEmail(authSession.user.email);
     setToken(savedToken);
     setRole(savedRole);
     const savedHistory = sessionStorage.getItem('pos-operations-history');

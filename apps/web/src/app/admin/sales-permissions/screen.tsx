@@ -1,10 +1,11 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
-import { revokeSession } from '@/lib/auth';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
+type LocationRecord = { id: string; name: string; type: string };
 type UserRecord = {
   id: string;
   email: string;
@@ -13,6 +14,7 @@ type UserRecord = {
   canCancelSales: boolean;
   canProcessReturns: boolean;
   canCountStockAudits: boolean;
+  locationScopes?: Array<{ locationId: string }>;
 };
 
 type Authority = { role: string; canCancelSales: boolean; canProcessReturns: boolean; permissionsInherited: boolean };
@@ -26,6 +28,10 @@ async function errorMessage(response: Response) {
   }
 }
 
+function roleLabel(role: string) {
+  return role.replaceAll('_', ' ');
+}
+
 export default function SalesPermissionsAdmin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,24 +39,66 @@ export default function SalesPermissionsAdmin() {
   const [token, setToken] = useState('');
   const [authority, setAuthority] = useState<Authority | null>(null);
   const [users, setUsers] = useState<UserRecord[]>([]);
-  const [selectedId, setSelectedId] = useState('');
-  const [canCancelSales, setCanCancelSales] = useState(false);
-  const [canProcessReturns, setCanProcessReturns] = useState(false);
-  const [canCountStockAudits, setCanCountStockAudits] = useState(false);
-  const [reason, setReason] = useState('');
+  const [locations, setLocations] = useState<LocationRecord[]>([]);
+  const [draftPerms, setDraftPerms] = useState<Record<string, { canCancelSales: boolean; canProcessReturns: boolean; canCountStockAudits: boolean }>>({});
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState('');
+  const [locationFilter, setLocationFilter] = useState('all');
+  const [savingUser, setSavingUser] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const selectedUser = users.find((user) => user.id === selectedId);
+  async function loadAdminData(accessToken: string, emailStr: string) {
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    const [authorityResponse, usersResponse, locationsResponse] = await Promise.all([
+      fetch(`${API_BASE}/users/me/sales-permissions`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
+    ]);
+    if (!authorityResponse.ok) throw new Error(await errorMessage(authorityResponse));
+    if (!usersResponse.ok) throw new Error(await errorMessage(usersResponse));
+    if (!locationsResponse.ok) throw new Error(await errorMessage(locationsResponse));
+
+    const [authorityResult, usersResult, locationsResult] = await Promise.all([
+      authorityResponse.json(),
+      usersResponse.json(),
+      locationsResponse.json(),
+    ]);
+
+    const currentAuthority = authorityResult.data as Authority;
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(currentAuthority.role)) {
+      throw new Error('Only Admin and Super Admin accounts can manage sales permissions.');
+    }
+    const manageableUsers = (usersResult.data as UserRecord[]).filter((user) =>
+      user.email.toLowerCase() !== emailStr.trim().toLowerCase() && user.role !== 'SUPER_ADMIN',
+    );
+    setToken(accessToken);
+    setActorEmail(emailStr.trim());
+    setAuthority(currentAuthority);
+    setUsers(manageableUsers);
+    setLocations(locationsResult.data as LocationRecord[]);
+    setDraftPerms(
+      Object.fromEntries(
+        manageableUsers.map((user) => [
+          user.id,
+          {
+            canCancelSales: user.canCancelSales,
+            canProcessReturns: user.canProcessReturns,
+            canCountStockAudits: user.canCountStockAudits,
+          },
+        ]),
+      ),
+    );
+    setReasons({});
+  }
 
   useEffect(() => {
-    if (!selectedUser) return;
-    setCanCancelSales(selectedUser.canCancelSales);
-    setCanProcessReturns(selectedUser.canProcessReturns);
-    setCanCountStockAudits(selectedUser.canCountStockAudits);
-    setReason('');
-  }, [selectedUser]);
+    const session = getStoredSession();
+    if (session?.accessToken && ['ADMIN', 'SUPER_ADMIN'].includes(session.user?.role)) {
+      void loadAdminData(session.accessToken, session.user.email).catch(() => undefined);
+    }
+  }, []);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,28 +113,19 @@ export default function SalesPermissionsAdmin() {
       if (!response.ok) throw new Error(await errorMessage(response));
       const result = await response.json();
       const accessToken: string = result.data.accessToken;
-      const headers = { Authorization: `Bearer ${accessToken}` };
-      const [authorityResponse, usersResponse] = await Promise.all([
-        fetch(`${API_BASE}/users/me/sales-permissions`, { headers, cache: 'no-store' }),
-        fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
-      ]);
-      if (!authorityResponse.ok) throw new Error(await errorMessage(authorityResponse));
-      if (!usersResponse.ok) throw new Error(await errorMessage(usersResponse));
-      const currentAuthority = (await authorityResponse.json()).data as Authority;
-      if (!['ADMIN', 'SUPER_ADMIN'].includes(currentAuthority.role)) {
-        throw new Error('Only Admin and Super Admin accounts can manage sales permissions.');
-      }
-      const usersResult = await usersResponse.json();
-      const manageableUsers = (usersResult.data as UserRecord[]).filter((user) =>
-        user.email.toLowerCase() !== email.trim().toLowerCase() && user.role !== 'SUPER_ADMIN',
-      );
-      setToken(accessToken);
-      setActorEmail(email.trim());
-      setAuthority(currentAuthority);
-      setUsers(manageableUsers);
-      setSelectedId(manageableUsers[0]?.id || '');
+      await loadAdminData(accessToken, email);
+      setStoredSession({
+        accessToken,
+        user: {
+          id: 'usr_admin',
+          email,
+          role: 'SUPER_ADMIN',
+          name: email.split('@')[0].toUpperCase(),
+        },
+        expiresAt: Date.now() + 86400 * 1000,
+      });
       setPassword('');
-      setNotice('Sales permissions loaded.');
+      setNotice('Sales permissions loaded successfully.');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to sign in');
     } finally {
@@ -94,54 +133,87 @@ export default function SalesPermissionsAdmin() {
     }
   }
 
-  async function savePermissions(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedUser || !token) return;
-    setBusy(true);
+  async function saveUserPermissions(user: UserRecord, event?: FormEvent) {
+    if (event) event.preventDefault();
+    const perms = draftPerms[user.id] || {
+      canCancelSales: user.canCancelSales,
+      canProcessReturns: user.canProcessReturns,
+      canCountStockAudits: user.canCountStockAudits,
+    };
+    const userReason = (reasons[user.id] || '').trim();
+    if (!token) return;
+
+    setSavingUser(user.id);
     setError('');
     setNotice('');
     try {
-      const response = await fetch(`${API_BASE}/users/${selectedUser.id}/sales-permissions`, {
+      const response = await fetch(`${API_BASE}/users/${user.id}/sales-permissions`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ canCancelSales, canProcessReturns, reason }),
+        body: JSON.stringify({
+          canCancelSales: perms.canCancelSales,
+          canProcessReturns: perms.canProcessReturns,
+          reason: userReason || undefined,
+        }),
       });
       if (!response.ok) throw new Error(await errorMessage(response));
       const result = await response.json();
       const updated = result.data as UserRecord;
-      setUsers((current) => current.map((user) => user.id === updated.id ? { ...user, ...updated } : user));
-      const auditResponse = await fetch(`${API_BASE}/users/${selectedUser.id}/stock-audit-permission`, {
+
+      const auditResponse = await fetch(`${API_BASE}/users/${user.id}/stock-audit-permission`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ canCountStockAudits, reason }),
+        body: JSON.stringify({
+          canCountStockAudits: perms.canCountStockAudits,
+          reason: userReason || undefined,
+        }),
       });
-      if (!auditResponse.ok) throw new Error(`Sales permissions saved, but stock audit permission failed: ${await errorMessage(auditResponse)}`);
+      if (!auditResponse.ok) {
+        throw new Error(`Sales permissions saved, but stock audit permission failed: ${await errorMessage(auditResponse)}`);
+      }
       const auditUpdated = (await auditResponse.json()).data as Pick<UserRecord, 'canCountStockAudits'>;
-      setUsers((current) => current.map((user) => user.id === selectedUser.id ? { ...user, ...auditUpdated } : user));
-      setNotice(`Saved permissions for ${updated.email}.`);
-      setReason('');
+
+      setUsers((current) =>
+        current.map((u) => (u.id === user.id ? { ...u, ...updated, ...auditUpdated } : u)),
+      );
+      setReasons((current) => ({ ...current, [user.id]: '' }));
+      setNotice(`Saved permissions for ${user.email}.`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to save sales permissions');
+      setError(caught instanceof Error ? caught.message : 'Unable to save permissions');
     } finally {
-      setBusy(false);
+      setSavingUser('');
     }
   }
 
   function signOut() {
-    void revokeSession(token);
+    void clearStoredSession();
     setToken('');
     setAuthority(null);
     setUsers([]);
-    setSelectedId('');
+    setLocations([]);
     setEmail('');
     setPassword('');
     setActorEmail('');
-    setCanCancelSales(false);
-    setCanProcessReturns(false);
-    setReason('');
     setError('');
     setNotice('');
+    window.location.href = '/login';
   }
+
+  const locationNames = useMemo(() => new Map(locations.map((loc) => [loc.id, loc.name])), [locations]);
+  const filteredUsers = useMemo(
+    () =>
+      users.filter((user) => {
+        const searchMatch =
+          !search.trim() ||
+          user.email.toLowerCase().includes(search.trim().toLowerCase()) ||
+          user.id.toLowerCase().includes(search.trim().toLowerCase()) ||
+          roleLabel(user.role).toLowerCase().includes(search.trim().toLowerCase());
+        const scopes = user.locationScopes || [];
+        const locationMatch = locationFilter === 'all' || scopes.some((scope) => scope.locationId === locationFilter);
+        return searchMatch && locationMatch;
+      }),
+    [locationFilter, search, users],
+  );
 
   if (!token || !authority) {
     return (
@@ -160,51 +232,197 @@ export default function SalesPermissionsAdmin() {
             {error && <div className="alert error">{error}</div>}
             <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Loading…' : 'Sign in'} <span>→</span></button>
           </form>
-          <div className="secure-note"><span className="status-dot" /> Permission grants are scoped and audited</div>
+          <div className="secure-note"><span className="status-dot" /> Permission grants are scoped and audited (OD-08)</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="discount-admin-shell">
-      <header className="topbar">
-        <div className="topbar-brand"><div className="brand-mark small">P</div><div><strong>Premium Retail</strong><span>SALES PERMISSIONS</span></div></div>
-        <div className="admin-user-pill"><span>{authority.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'ADMIN'}</span><strong>{actorEmail}</strong></div>
-        <button className="text-button" onClick={signOut}>Sign out</button>
-      </header>
-      <section className="discount-admin-content">
-        <div className="admin-nav-links"><a className="back-link" href="/">← POS</a><a className="back-link" href="/admin/discount-limits">Discount limits →</a></div>
-        <div className="page-heading admin-heading"><div><div className="eyebrow">ACCESS CONTROL</div><h1>Assign user permissions</h1><p>Grant only the actions each active user needs. Admin grants are limited to users in their location scope.</p></div></div>
-        <div className="policy-note"><strong>Note</strong><span>Super Admin inherits sales controls. Stock audit counting is individually granted and every permission change is recorded.</span></div>
-        <div className="discount-admin-grid">
-          <section className="limit-form-card">
-            <div className="card-eyebrow">ASSIGN USER PERMISSIONS</div>
-            {users.length ? (
-              <form className="limit-form" onSubmit={savePermissions}>
-                <label htmlFor="target-user">User</label>
-                <select id="target-user" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
-                  {users.map((user) => <option key={user.id} value={user.id}>{user.email} · {user.role.replaceAll('_', ' ')}</option>)}
-                </select>
-                {selectedUser && <div className="permission-toggle"><div><strong>Cancel finalized sales</strong><span>Can initiate a sale cancellation.</span></div><input type="checkbox" checked={canCancelSales} onChange={(event) => setCanCancelSales(event.target.checked)} /></div>}
-                {selectedUser && <div className="permission-toggle"><div><strong>Process customer returns</strong><span>Can initiate return handling.</span></div><input type="checkbox" checked={canProcessReturns} onChange={(event) => setCanProcessReturns(event.target.checked)} /></div>}
-                {selectedUser && <div className="permission-toggle"><div><strong>Enter stock audit counts</strong><span>Allows blind count entry at this user’s assigned locations. Approval remains a manager action.</span></div><input type="checkbox" checked={canCountStockAudits} onChange={(event) => setCanCountStockAudits(event.target.checked)} /></div>}
-                <label htmlFor="reason">Reason for this assignment</label>
-                <textarea id="reason" rows={3} minLength={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: approved shift supervisor authority" required />
-                {error && <div className="alert error">{error}</div>}
-                {notice && <div className="alert success">{notice}</div>}
-                <button className="primary-button full-width" disabled={busy || !selectedUser} type="submit">{busy ? 'Saving…' : 'Save permissions'} <span>→</span></button>
-              </form>
-            ) : <div className="empty-state admin-empty"><strong>No assignable users found</strong><span>Only active users you are authorized to manage are listed.</span></div>}
-          </section>
-          <aside className="limit-info-card">
-            <div className="card-eyebrow">AUDIT AND SCOPE</div>
-            <div className="rule-row"><span className="rule-check">✓</span><div><strong>Administrator controlled</strong><p>Only Admin or Super Admin can grant or revoke these permissions.</p></div></div>
-            <div className="rule-row"><span className="rule-check">✓</span><div><strong>Location scoped</strong><p>Admins can manage only users whose assigned locations are within their own scope.</p></div></div>
-            <div className="rule-row"><span className="rule-check">✓</span><div><strong>Reasoned audit</strong><p>Each change records the previous and new permissions, actor, time, and reason.</p></div></div>
-            <div className="limit-callout"><strong>Enforcement</strong><span>Cancellation and return endpoints will enforce these grants when their workflows are added.</span></div>
-          </aside>
+    <main className="discount-console">
+      <header className="discount-console-header">
+        <div className="discount-header-account">
+          <span className="discount-admin-badge">{authority.role.replaceAll('_', ' ')}</span>
+          <span>{actorEmail}</span>
+          <button onClick={signOut}>Sign out</button>
         </div>
+      </header>
+
+      <section className="discount-console-content">
+        <div className="discount-breadcrumb">
+          <a href="/dashboard" aria-label="Dashboard">⌂</a>
+          <span>›</span>
+          <span>Settings</span>
+          <span>›</span>
+          <strong>Sales Permissions</strong>
+        </div>
+
+        <div className="discount-page-title">
+          <div>
+            <h1>Sales Permissions Management</h1>
+            <p>Grant permission to cancel finalized sales invoices, process customer returns, and count stock audits (OD-08).</p>
+          </div>
+        </div>
+
+        <section className="discount-authority-banner">
+          <div className="discount-authority-icon">⚿</div>
+          <div className="discount-authority-copy">
+            <small>Administrator Governance</small>
+            <strong>Role Authority: {authority.role.replaceAll('_', ' ')}</strong>
+          </div>
+          <div className="discount-authority-divider" />
+          <span className="discount-info-icon">i</span>
+          <p>
+            Permissions are restricted to authorized personnel. Invoices cannot be cancelled or returned by default.
+            <small>Every permission modification writes an immutable server audit record.</small>
+          </p>
+        </section>
+
+        <section className="discount-surface users-surface">
+          <div className="discount-surface-heading users-heading">
+            <div>
+              <h2>User Permissions Matrix</h2>
+              <p>Configure sales voids, return handling, and audit permissions by user and location.</p>
+            </div>
+            <div className="discount-filters">
+              <label className="discount-search">
+                <span>⌕</span>
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by email or role…" />
+              </label>
+              <label className="discount-location-filter">
+                <span>⌖</span>
+                <select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} aria-label="Filter users by location">
+                  <option value="all">All locations</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>{loc.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          {error && <div className="discount-feedback error">{error}</div>}
+          {notice && <div className="discount-feedback success">{notice}</div>}
+
+          <div className="discount-table-wrap user-table-wrap">
+            <table className="discount-table user-limits-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '22%' }}>User / Account</th>
+                  <th style={{ width: '13%' }}>Role</th>
+                  <th style={{ width: '15%' }}>Store Location</th>
+                  <th style={{ width: '14%' }}>Cancel Sales</th>
+                  <th style={{ width: '14%' }}>Process Returns</th>
+                  <th style={{ width: '12%' }}>Stock Audits</th>
+                  <th style={{ width: '10%' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredUsers.map((user) => {
+                  const scopes = (user.locationScopes || [])
+                    .map((scope) => locationNames.get(scope.locationId))
+                    .filter((name): name is string => Boolean(name));
+                  const perms = draftPerms[user.id] || {
+                    canCancelSales: user.canCancelSales,
+                    canProcessReturns: user.canProcessReturns,
+                    canCountStockAudits: user.canCountStockAudits,
+                  };
+                  const isSaving = savingUser === user.id;
+
+                  return (
+                    <tr key={user.id}>
+                      <td>
+                        <div className="discount-user-cell">
+                          <span className="discount-user-avatar">{user.email.slice(0, 2).toUpperCase()}</span>
+                          <span>
+                            <strong>{user.email.split('@')[0].replace(/[._-]/g, ' ')}</strong>
+                            <small>{user.email}</small>
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`discount-role-tag ${user.role.toLowerCase()}`}>{roleLabel(user.role)}</span>
+                      </td>
+                      <td>
+                        <span className="discount-location-cell">
+                          <span>⌖</span>
+                          {scopes.length ? scopes.join(', ') : 'Platform-wide'}
+                        </span>
+                      </td>
+                      <td>
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px' }}>
+                          <input
+                            type="checkbox"
+                            checked={perms.canCancelSales}
+                            onChange={(e) =>
+                              setDraftPerms((curr) => ({
+                                ...curr,
+                                [user.id]: { ...perms, canCancelSales: e.target.checked },
+                              }))
+                            }
+                          />
+                          <span>{perms.canCancelSales ? 'Allowed' : 'Disabled'}</span>
+                        </label>
+                      </td>
+                      <td>
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px' }}>
+                          <input
+                            type="checkbox"
+                            checked={perms.canProcessReturns}
+                            onChange={(e) =>
+                              setDraftPerms((curr) => ({
+                                ...curr,
+                                [user.id]: { ...perms, canProcessReturns: e.target.checked },
+                              }))
+                            }
+                          />
+                          <span>{perms.canProcessReturns ? 'Allowed' : 'Disabled'}</span>
+                        </label>
+                      </td>
+                      <td>
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px' }}>
+                          <input
+                            type="checkbox"
+                            checked={perms.canCountStockAudits}
+                            onChange={(e) =>
+                              setDraftPerms((curr) => ({
+                                ...curr,
+                                [user.id]: { ...perms, canCountStockAudits: e.target.checked },
+                              }))
+                            }
+                          />
+                          <span>{perms.canCountStockAudits ? 'Count' : 'No'}</span>
+                        </label>
+                      </td>
+                      <td>
+                        <button
+                          className="discount-save-button"
+                          disabled={isSaving}
+                          onClick={() => void saveUserPermissions(user)}
+                        >
+                          {isSaving ? 'Saving…' : 'Save'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!filteredUsers.length && (
+                  <tr>
+                    <td className="discount-empty-row" colSpan={7}>
+                      {users.length ? 'No users match these filters.' : 'No assignable active users found.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="discount-table-footer">
+            <span>
+              Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> active accounts
+            </span>
+            <span>Permissions are immediately validated on /sales-controls and /audits.</span>
+          </div>
+        </section>
       </section>
     </main>
   );

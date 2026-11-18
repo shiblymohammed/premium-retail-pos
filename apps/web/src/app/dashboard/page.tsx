@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import styles from './dashboard.module.css';
 
-type LocationScope = 'All retail locations' | 'Downtown Store' | 'North Mall' | 'West End Outlet';
+type LocationScope = 'All retail locations' | 'Downtown Store' | 'North Mall' | 'West End Outlet' | 'Central Warehouse';
 type SaleStatus = 'Completed' | 'Cancelled' | 'Return recorded';
 type SaleRow = {
   invoice: string;
@@ -19,13 +19,14 @@ type SaleRow = {
   status: SaleStatus;
 };
 
-const locations: LocationScope[] = ['All retail locations', 'Downtown Store', 'North Mall', 'West End Outlet'];
+const locations: LocationScope[] = ['All retail locations', 'Downtown Store', 'North Mall', 'West End Outlet', 'Central Warehouse'];
 
 const locationMetrics: Record<LocationScope, { sales: number; invoices: number; lowStock: number; negative: number; inTransit: number; factor: number }> = {
   'All retail locations': { sales: 248650, invoices: 1284, lowStock: 18, negative: 3, inTransit: 6, factor: 1 },
   'Downtown Store': { sales: 92140, invoices: 437, lowStock: 7, negative: 1, inTransit: 3, factor: 0.37 },
   'North Mall': { sales: 77860, invoices: 396, lowStock: 5, negative: 1, inTransit: 2, factor: 0.31 },
   'West End Outlet': { sales: 78650, invoices: 451, lowStock: 6, negative: 1, inTransit: 1, factor: 0.32 },
+  'Central Warehouse': { sales: 0, invoices: 0, lowStock: 0, negative: 0, inTransit: 0, factor: 0 },
 };
 
 const stockByLocation: Record<LocationScope, { available: number; inTransit: number; reserved: number; quarantined: number }> = {
@@ -33,6 +34,7 @@ const stockByLocation: Record<LocationScope, { available: number; inTransit: num
   'Downtown Store': { available: 3110, inTransit: 210, reserved: 90, quarantined: 16 },
   'North Mall': { available: 2560, inTransit: 305, reserved: 80, quarantined: 31 },
   'West End Outlet': { available: 2750, inTransit: 245, reserved: 140, quarantined: 37 },
+  'Central Warehouse': { available: 0, inTransit: 0, reserved: 0, quarantined: 0 },
 };
 
 const sales = [
@@ -99,7 +101,6 @@ export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>('7 days');
   const [filter, setFilter] = useState<'All' | SaleStatus>('All');
   const [search, setSearch] = useState('');
-  const [navCollapsed, setNavCollapsed] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const metrics = locationMetrics[scope];
   const stock = stockByLocation[scope];
@@ -111,6 +112,15 @@ export default function DashboardPage() {
   const transactionTotal = useMemo(() => sales.filter((sale) => scope === 'All retail locations' || sale.store === scope).length, [scope]);
   const stockTotal = stock.available + stock.inTransit + stock.reserved + stock.quarantined;
   const receiptsToReview = scopedTransfers.filter((transfer) => transfer.tone === 'issue').length;
+
+  useEffect(() => {
+    const syncScope = (event: Event) => {
+      const next = (event as CustomEvent<string>).detail;
+      if (locations.includes(next as LocationScope)) setScope(next as LocationScope);
+    };
+    window.addEventListener('premium-retail-location-change', syncScope);
+    return () => window.removeEventListener('premium-retail-location-change', syncScope);
+  }, []);
 
   useEffect(() => {
     const updateConnection = () => setIsOnline(navigator.onLine);
@@ -146,52 +156,7 @@ export default function DashboardPage() {
   ];
 
   return (
-    <main className={`${styles.dashboard} ${navCollapsed ? styles.navCollapsed : ''}`}>
-      <header className={styles.referenceHeader}>
-        <div className={styles.referenceBrand}><button className={styles.sidebarToggle} type="button" onClick={() => setNavCollapsed((collapsed) => !collapsed)} aria-label={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-controls="retail-sidebar" aria-expanded={!navCollapsed} title={navCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}><span aria-hidden="true">{navCollapsed ? '›' : '‹'}</span></button><span className={styles.referenceBrandMark}>P</span><strong>Premium Retail</strong><span className={styles.referenceDivider}>/</span><span>Store operations</span></div>
-        <div className={styles.referenceHeaderRight}><span className={styles.headerStatus}><i /> DEMO WORKSPACE</span><span>Local sample data</span></div>
-      </header>
-      <aside className={styles.sidebar} id="retail-sidebar">
-        <a className={styles.brand} href="/dashboard"><span className={styles.brandMark}>P</span><span><strong>Premium Retail</strong><small>RETAIL OPERATIONS</small></span></a>
-        <label className={styles.storeSwitch} title="Choose a location">
-          <span className={styles.storeIcon}><Icon name="pin" size={17} /></span>
-          <span className={styles.storePicker}>
-            <small>VIEWING LOCATION</small>
-            <span className={styles.storeSelectWrap}>
-              <select value={scope} onChange={(event) => setScope(event.target.value as LocationScope)} aria-label="Location scope">
-                {locations.map((location) => <option key={location}>{location}</option>)}
-              </select>
-              <span className={styles.storeChevron} aria-hidden="true">⌄</span>
-            </span>
-            <span className={styles.locationHint}>Sales and stock in this view</span>
-          </span>
-        </label>
-        <div className={styles.navLabel}>WORKSPACE</div>
-        <nav className={styles.nav} aria-label="Main navigation">
-          <a className={styles.navItem + ' ' + styles.active} href="/dashboard" title="Dashboard"><Icon name="grid" />Dashboard</a>
-          <a className={styles.navItem} href="/" title="Sales and POS terminal"><Icon name="receipt" />Sales</a>
-          <a className={styles.navItem} href="#recent-invoices" title="Recent invoices"><Icon name="receipt" />Invoices</a>
-          <a className={styles.navItem} href="/products" title="Inventory"><Icon name="box" />Inventory</a>
-          <a className={styles.navItem} href="/audits" title="Stock audits"><Icon name="shield" />Stock audits</a>
-          <a className={styles.navItem} href="/attendance" title="Staff attendance"><Icon name="clock" />Staff attendance</a>
-          <a className={styles.navItem} href="/attendance/manage" title="Attendance management"><Icon name="clock" />Attendance management</a>
-          <a className={styles.navItem} href="/operations" title="Transfers"><Icon name="transfer" />Transfers</a>
-          <a className={styles.navItem} href="/operations" title="Warehouse operations"><Icon name="warehouse" />Warehouse</a>
-          <a className={styles.navItem} href="/reports" title="Live sales and stock reports"><Icon name="chart" />Reports</a>
-          <div className={styles.navLabel}>SETTINGS & CONTROLS</div>
-          <a className={styles.navItem} href="/admin/discount-limits" title="Discount limits"><Icon name="chart" />Discount limits</a>
-          <a className={styles.navItem} href="/admin/sales-permissions" title="Sale permissions"><Icon name="shield" />Sale permissions</a>
-          <a className={styles.navItem} href="/sales-controls" title="Returns and cancellations"><Icon name="settings" />Returns & cancellations</a>
-        </nav>
-        <div className={styles.sidebarPromo}>
-          <div className={styles.promoIcon}><Icon name="grid" size={16} /></div>
-          <strong>Sample workspace</strong>
-          <p>Demo figures across three retail locations.</p>
-          <a href="/operations">API test bench <Icon name="arrow" size={14} /></a>
-        </div>
-        <div className={styles.sidebarFooter}><span className={styles.avatar}>SM</span><span className={styles.sidebarUser}><strong>Sam Morgan</strong><small>Super Admin</small></span><small className={styles.sidebarUserMode}>Demo</small></div>
-      </aside>
-
+    <main className={styles.dashboard}>
       <section className={styles.mainArea}>
         <header className={styles.topbar}>
           <div className={styles.mobileBrand}><span className={styles.brandMark}>P</span><strong>Premium Retail</strong></div>

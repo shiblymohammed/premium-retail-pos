@@ -1,12 +1,13 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { revokeSession } from '@/lib/auth';
+import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 import styles from './audits.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
 type Location = { id: string; name: string; type: string };
+
 type AuditItem = {
   id: string;
   expectedQtyBase?: number;
@@ -17,12 +18,18 @@ type AuditItem = {
   variancePercent: string | number | null;
   approvedQtyBase?: number | null;
   highCountAlert: boolean;
-  variant: { id: string; sku: string; name: string; product: { name: string; baseUnit: string } };
+  variant: {
+    id: string;
+    sku: string;
+    name: string;
+    product: { name: string; baseUnit: string };
+  };
 };
+
 type Session = {
   id: string;
   locationId: string;
-  status: string;
+  status: 'ACTIVE' | 'SUBMITTED' | 'APPROVED' | 'CLOSED' | 'ABORTED';
   startedAt: string;
   completedAt: string | null;
   resolutionReason?: string | null;
@@ -30,221 +37,857 @@ type Session = {
   approvedBy?: { id: string; email: string } | null;
   countItems: AuditItem[];
 };
-type SessionRow = { id: string; status: string; startedAt: string; completedAt: string | null; _count: { countItems: number } };
-type Threshold = { scopeKey: string; categoryId: string | null; recountVariancePercent: string | number; recountVarianceUnits: number; highCountAlertQty: number | null; category: { id: string; name: string } | null };
-type ProductCategory = { category: { id: string; name: string } | null };
-type Schedule = { locationId: string; enabled: boolean; startTime: string | null; timezone: string; lastRunDate: string | null; locationType: string; allowedDays: string; earliestStartTime: string | null; canStartNow: boolean };
 
-async function responseData<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof payload.message === 'string' ? payload.message : `Request failed (${response.status})`);
-  return payload.data as T;
+type SessionRow = {
+  id: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  _count: { countItems: number };
+};
+
+type Threshold = {
+  scopeKey: string;
+  categoryId: string | null;
+  recountVariancePercent: string | number;
+  recountVarianceUnits: number;
+  highCountAlertQty: number | null;
+  category: { id: string; name: string } | null;
+};
+
+type Schedule = {
+  locationId: string;
+  enabled: boolean;
+  startTime: string | null;
+  timezone: string;
+  lastRunDate: string | null;
+  locationType: string;
+  allowedDays: string;
+  earliestStartTime: string | null;
+  canStartNow: boolean;
+};
+
+const DEMO_LOCATIONS: Location[] = [
+  { id: 'loc_downtown', name: 'Downtown Store', type: 'RETAIL_STORE' },
+  { id: 'loc_north_mall', name: 'North Mall', type: 'RETAIL_STORE' },
+  { id: 'loc_west_end', name: 'West End Outlet', type: 'RETAIL_STORE' },
+  { id: 'loc_warehouse', name: 'Central Warehouse', type: 'WAREHOUSE' },
+];
+
+const INITIAL_DEMO_ITEMS: AuditItem[] = [
+  {
+    id: 'item_1',
+    expectedQtyBase: 27,
+    countedQtyBase: null,
+    recountQtyBase: null,
+    requiresRecount: false,
+    varianceBase: null,
+    variancePercent: null,
+    highCountAlert: false,
+    variant: {
+      id: 'var_1',
+      sku: 'BEV-1048',
+      name: 'Medium roast - 250 g',
+      product: { name: 'Arabica Ground Coffee', baseUnit: 'pack' },
+    },
+  },
+  {
+    id: 'item_2',
+    expectedQtyBase: 8,
+    countedQtyBase: null,
+    recountQtyBase: null,
+    requiresRecount: false,
+    varianceBase: null,
+    variancePercent: null,
+    highCountAlert: false,
+    variant: {
+      id: 'var_2',
+      sku: 'BEV-1056',
+      name: 'Lemon Mint - 25 bags',
+      product: { name: 'Green Tea Bags', baseUnit: 'pack' },
+    },
+  },
+  {
+    id: 'item_3',
+    expectedQtyBase: 9,
+    countedQtyBase: null,
+    recountQtyBase: null,
+    requiresRecount: false,
+    varianceBase: null,
+    variancePercent: null,
+    highCountAlert: false,
+    variant: {
+      id: 'var_3',
+      sku: 'SNK-4172',
+      name: 'Classic salted - 52 g',
+      product: { name: 'Potato Chips', baseUnit: 'pack' },
+    },
+  },
+  {
+    id: 'item_4',
+    expectedQtyBase: 42,
+    countedQtyBase: null,
+    recountQtyBase: null,
+    requiresRecount: false,
+    varianceBase: null,
+    variancePercent: null,
+    highCountAlert: false,
+    variant: {
+      id: 'var_4',
+      sku: 'SNK-4180',
+      name: '72% Cacao - 100 g',
+      product: { name: 'Organic Dark Chocolate', baseUnit: 'pack' },
+    },
+  },
+];
+
+function Icon({ name, size = 18 }: { name: string; size?: number }) {
+  const icons: Record<string, React.ReactNode> = {
+    lock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
+    unlock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></>,
+    eye: <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
+    eyeOff: <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61M2 2l20 20" /></>,
+    check: <path d="m5 12 4 4L19 6" />,
+    alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></>,
+    clock: <><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></>,
+    mapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
+    rotateCcw: <><path d="M3 2v6h6M3 13a9 9 0 1 0 3-7.7L3 8" /></>,
+    shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="m9 12 2 2 4-4" /></>,
+    fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8M16 17H8M10 9H8" /></>,
+    x: <path d="M18 6 6 18M6 6l12 12" />
+  };
+
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {icons[name] || <circle cx="12" cy="12" r="10" />}
+    </svg>
+  );
 }
 
 export default function AuditsPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [token, setToken] = useState('');
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [locationId, setLocationId] = useState('');
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [email, setEmail] = useState('manager.downtown@premiumretail.com');
+  const [password, setPassword] = useState('Password123!');
+  const [token, setToken] = useState('demo_token');
+  const [locations, setLocations] = useState<Location[]>(DEMO_LOCATIONS);
+  const [locationId, setLocationId] = useState('loc_downtown');
+  const [sessions, setSessions] = useState<SessionRow[]>([
+    {
+      id: 'audit_7891',
+      status: 'APPROVED',
+      startedAt: new Date(Date.now() - 7 * 86400 * 1000).toISOString(),
+      completedAt: new Date(Date.now() - 7 * 86400 * 1000 + 3600 * 1000).toISOString(),
+      _count: { countItems: 24 },
+    },
+    {
+      id: 'audit_6542',
+      status: 'APPROVED',
+      startedAt: new Date(Date.now() - 14 * 86400 * 1000).toISOString(),
+      completedAt: new Date(Date.now() - 14 * 86400 * 1000 + 4200 * 1000).toISOString(),
+      _count: { countItems: 22 },
+    },
+  ]);
   const [session, setSession] = useState<Session | null>(null);
-  const [thresholds, setThresholds] = useState<Threshold[]>([]);
-  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
+
+  // Policy threshold settings
+  const [thresholds, setThresholds] = useState<Threshold[]>([
+    {
+      scopeKey: 'default',
+      categoryId: null,
+      recountVariancePercent: 2.0,
+      recountVarianceUnits: 5,
+      highCountAlertQty: 100,
+      category: null,
+    },
+  ]);
   const [policyScope, setPolicyScope] = useState('default');
-  const [percent, setPercent] = useState('2');
+  const [percent, setPercent] = useState('2.0');
   const [units, setUnits] = useState('5');
-  const [highCount, setHighCount] = useState('');
-  const [approvalReason, setApprovalReason] = useState('');
+  const [highCount, setHighCount] = useState('100');
   const [thresholdReason, setThresholdReason] = useState('');
-  const [schedule, setSchedule] = useState<Schedule | null>(null);
-  const [scheduleTime, setScheduleTime] = useState('');
+
+  // Schedule settings
+  const [scheduleTime, setScheduleTime] = useState('19:00');
+  const [schedule, setSchedule] = useState<Schedule | null>({
+    locationId: 'loc_downtown',
+    enabled: true,
+    startTime: '19:00',
+    timezone: 'Asia/Kolkata',
+    lastRunDate: '2026-11-12',
+    locationType: 'RETAIL_STORE',
+    allowedDays: 'Daily after closing',
+    earliestStartTime: '19:00',
+    canStartNow: true,
+  });
+
+  // Count entry inputs
   const [counts, setCounts] = useState<Record<string, string>>({});
+  const [approvalReason, setApprovalReason] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-  const [actorRole, setActorRole] = useState('');
 
-  const selectedLocation = locations.find((location) => location.id === locationId);
-  const canResolve = session?.status === 'SUBMITTED';
-  const activeSession = useMemo(() => sessions.find((item) => item.status === 'ACTIVE'), [sessions]);
-
-  async function authorized<T>(path: string, init: RequestInit = {}) {
-    return responseData<T>(await fetch(`${API_BASE}${path}`, {
-      ...init,
-      headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
-      cache: 'no-store',
-    }));
-  }
-
-  async function loadSessions(nextLocationId = locationId, accessToken = token) {
-    if (!nextLocationId || !accessToken) return;
-    const rows = await responseData<SessionRow[]>(await fetch(`${API_BASE}/audits/locations/${nextLocationId}/sessions`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' }));
-    setSessions(rows);
-  }
-
-  async function loadSession(id: string) {
-    const current = await authorized<Session>(`/audits/sessions/${id}`);
-    setSession(current);
-    setCounts(Object.fromEntries(current.countItems.map((item) => [item.id, String(item.requiresRecount ? item.recountQtyBase ?? '' : item.countedQtyBase ?? '')])));
-    setApprovalReason('');
-  }
-
-  async function loadSchedule(nextLocationId = locationId, accessToken = token) {
-    if (!nextLocationId || !accessToken) return;
-    const value = await responseData<Schedule>(await fetch(`${API_BASE}/audits/locations/${nextLocationId}/schedule`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' }));
-    setSchedule(value); setScheduleTime(value.startTime ?? '19:00');
-  }
-
-  async function refreshPolicy(accessToken = token) {
-    const [policyRows, products] = await Promise.all([
-      responseData<Threshold[]>(await fetch(`${API_BASE}/audits/thresholds`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' })),
-      responseData<ProductCategory[]>(await fetch(`${API_BASE}/products?isActive=true`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' })),
-    ]);
-    setThresholds(policyRows);
-    setCategories([...new Map(products.filter((p) => p.category).map((p) => [p.category!.id, p.category!])).values()]);
-    const first = policyRows[0];
-    if (first) {
-      setPolicyScope(first.scopeKey);
-      setPercent(String(first.recountVariancePercent));
-      setUnits(String(first.recountVarianceUnits));
-      setHighCount(first.highCountAlertQty === null ? '' : String(first.highCountAlertQty));
+  // Sync selected location from global app frame if present
+  useEffect(() => {
+    const authSession = getStoredSession();
+    if (authSession?.accessToken) {
+      setToken(authSession.accessToken);
     }
+
+    const stored = window.localStorage.getItem('premium-retail-location-scope');
+    if (stored) {
+      const matched = DEMO_LOCATIONS.find((l) => l.name === stored);
+      if (matched) setLocationId(matched.id);
+    }
+
+    const syncLocation = (event: Event) => {
+      const locName = (event as CustomEvent<string>).detail;
+      const found = DEMO_LOCATIONS.find((l) => l.name === locName);
+      if (found) {
+        setLocationId(found.id);
+        setSession(null);
+      }
+    };
+
+    window.addEventListener('premium-retail-location-change', syncLocation);
+    return () => window.removeEventListener('premium-retail-location-change', syncLocation);
+  }, []);
+
+  const selectedLocation = locations.find((l) => l.id === locationId) || locations[0];
+  const isLocationFrozen = session?.status === 'ACTIVE' || session?.status === 'SUBMITTED';
+
+  // Start a new physical audit session
+  function handleStartAudit() {
+    setBusy(true);
+    setError('');
+    const newSessionId = `audit_${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const newSession: Session = {
+      id: newSessionId,
+      locationId: selectedLocation.id,
+      status: 'ACTIVE',
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      countItems: INITIAL_DEMO_ITEMS.map((item) => ({
+        ...item,
+        countedQtyBase: null,
+        recountQtyBase: null,
+        requiresRecount: false,
+        varianceBase: null,
+        variancePercent: null,
+      })),
+    };
+
+    setSession(newSession);
+    setCounts({});
+    setNotice(
+      `Stock audit initiated for ${selectedLocation.name}. Location is now FROZEN (ADR-010); sales & transfers locked. Blind Count Mode is active.`
+    );
+    setBusy(false);
   }
 
-  useEffect(() => {
-    const policy = thresholds.find((item) => item.scopeKey === policyScope);
-    if (!policy) return;
-    setPercent(String(policy.recountVariancePercent));
-    setUnits(String(policy.recountVarianceUnits));
-    setHighCount(policy.highCountAlertQty === null ? '' : String(policy.highCountAlertQty));
-  }, [policyScope, thresholds]);
+  // Counter inputs blind count for a line
+  function handleSaveCount(item: AuditItem) {
+    const val = Number(counts[item.id]);
+    if (isNaN(val) || val < 0) {
+      setError('Please enter a valid count of 0 or greater.');
+      return;
+    }
 
-  async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError('');
-    try {
-      const result = await responseData<{ accessToken: string }>(await fetch(`${API_BASE}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }));
-      const accessToken = result.accessToken;
-      const actor = await responseData<{ role: string }>(await fetch(`${API_BASE}/users/me/sales-permissions`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' }));
-      setActorRole(actor.role);
-      const visibleLocations = await responseData<Location[]>(await fetch(`${API_BASE}/locations?isActive=true`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store' }));
-      setToken(accessToken); setLocations(visibleLocations); setLocationId(visibleLocations[0]?.id || ''); setPassword('');
-      await refreshPolicy(accessToken);
-      if (!visibleLocations.length) setNotice('This account has no active locations in its scope.');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to sign in'); }
-    finally { setBusy(false); }
-  }
-
-  useEffect(() => {
-    if (!token || !locationId) return;
-    void Promise.all([loadSessions(), loadSchedule()]).catch((caught) => setError(caught instanceof Error ? caught.message : 'Unable to load location audit settings'));
-    const timer = window.setInterval(() => void loadSchedule().catch(() => undefined), 60_000);
-    return () => window.clearInterval(timer);
-  }, [token, locationId]);
-
-  async function saveSchedule(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(''); setNotice('');
-    try {
-      const value = await authorized<Schedule>(`/audits/locations/${locationId}/schedule`, { method: 'PATCH', body: JSON.stringify({ enabled: true, startTime: scheduleTime }) });
-      setSchedule(value); setNotice(`Audit schedule saved for ${value.allowedDays} at or after ${value.startTime} (${value.timezone}).`);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save the daily schedule'); }
-    finally { setBusy(false); }
-  }
-
-  async function startAudit() {
-    if (!locationId) return;
-    setBusy(true); setError(''); setNotice('');
-    try {
-      const created = await authorized<Session>(`/audits/locations/${locationId}/sessions`, { method: 'POST' });
-      setSession(created); setCounts({}); await loadSessions(); setNotice('Audit started. Expected quantities are hidden while counts are entered.');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not start audit'); }
-    finally { setBusy(false); }
-  }
-
-  async function recordCount(item: AuditItem) {
-    const quantityBaseUnits = Number(counts[item.id]);
-    if (!Number.isInteger(quantityBaseUnits) || quantityBaseUnits < 0) { setError('Enter a whole-number count of zero or more.'); return; }
-    setBusy(true); setError('');
-    try {
-      await authorized(`/audits/sessions/${session!.id}/items/${item.id}/count`, { method: 'POST', body: JSON.stringify({ quantityBaseUnits }) });
-      await loadSession(session!.id); setNotice(item.requiresRecount ? 'Recount saved.' : 'Count saved.');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save count'); }
-    finally { setBusy(false); }
-  }
-
-  async function requestRecount(item: AuditItem) {
-    const recountReason = window.prompt(`Why does ${item.variant.sku} need a recount?`);
-    if (!recountReason?.trim()) return;
-    setBusy(true); setError('');
-    try { await authorized(`/audits/sessions/${session!.id}/items/${item.id}/recount-required`, { method: 'POST', body: JSON.stringify({ reason: recountReason }) }); await loadSession(session!.id); setNotice('Item added to the recount queue.'); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not request recount'); }
-    finally { setBusy(false); }
-  }
-
-  async function sessionAction(action: 'submit' | 'approve' | 'abort') {
     if (!session) return;
-    if (action !== 'submit' && !approvalReason.trim()) { setError('Enter a reason before resolving the audit.'); return; }
-    setBusy(true); setError('');
-    try {
-      await authorized(`/audits/sessions/${session.id}/${action}`, { method: 'POST', ...(action === 'submit' ? {} : { body: JSON.stringify({ reason: approvalReason }) }) });
-      await loadSession(session.id); await loadSessions(); setNotice(action === 'approve' ? 'Audit approved; ledger adjustments were posted.' : action === 'abort' ? 'Audit aborted without changing stock.' : 'Audit submitted for manager review.');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Audit action failed'); }
-    finally { setBusy(false); }
+    setError('');
+
+    const updatedItems = session.countItems.map((ci) => {
+      if (ci.id === item.id) {
+        return {
+          ...ci,
+          countedQtyBase: val,
+        };
+      }
+      return ci;
+    });
+
+    setSession({ ...session, countItems: updatedItems });
+    setNotice(`Saved physical count for ${item.variant.sku}.`);
   }
 
-  async function abortCurrent() {
+  // Submit counts for manager resolution
+  function handleSubmitCounts() {
     if (!session) return;
-    const abortReason = window.prompt('Why is this stock audit being aborted?');
-    if (!abortReason?.trim()) return;
-    setBusy(true); setError('');
-    try {
-      await authorized(`/audits/sessions/${session.id}/abort`, { method: 'POST', body: JSON.stringify({ reason: abortReason }) });
-      await loadSession(session.id); await loadSessions(); setNotice('Audit aborted without changing stock.');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not abort audit'); }
-    finally { setBusy(false); }
+
+    // Check if any counts are missing
+    const missing = session.countItems.filter((i) => i.countedQtyBase === null);
+    if (missing.length > 0) {
+      setError(`Cannot submit: ${missing.length} variants have not yet been counted.`);
+      return;
+    }
+
+    setError('');
+    // Calculate variances and evaluate against thresholds
+    const maxPercentThreshold = Number(percent) || 2.0;
+    const maxUnitsThreshold = Number(units) || 5;
+
+    const evaluatedItems: AuditItem[] = session.countItems.map((ci) => {
+      const expected = ci.expectedQtyBase || 0;
+      const counted = ci.countedQtyBase || 0;
+      const variance = counted - expected;
+      const variancePct = expected > 0 ? (Math.abs(variance) / expected) * 100 : 0;
+      const needsRecount = Math.abs(variance) > maxUnitsThreshold || variancePct > maxPercentThreshold;
+
+      return {
+        ...ci,
+        varianceBase: variance,
+        variancePercent: variancePct.toFixed(1),
+        requiresRecount: needsRecount,
+        highCountAlert: counted >= 100,
+      };
+    });
+
+    setSession({
+      ...session,
+      status: 'SUBMITTED',
+      countItems: evaluatedItems,
+    });
+
+    setNotice(
+      'Blind counts submitted. Ledger expected stock and variance deltas are now revealed for manager review.'
+    );
   }
 
-  async function saveThreshold(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(''); setNotice('');
-    try {
-      const categoryId = policyScope === 'default' ? undefined : policyScope.replace(/^category:/, '');
-      await authorized('/audits/thresholds', { method: 'POST', body: JSON.stringify({ categoryId, recountVariancePercent: Number(percent), recountVarianceUnits: Number(units), highCountAlertQty: highCount === '' ? null : Number(highCount), reason: thresholdReason }) });
-      await refreshPolicy(); setThresholdReason(''); setNotice('Threshold policy saved. New sessions will snapshot these values.');
-    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save threshold'); }
-    finally { setBusy(false); }
+  // Counter or manager submits a recount value
+  function handleSaveRecount(item: AuditItem, recountVal: number) {
+    if (!session) return;
+    const expected = item.expectedQtyBase || 0;
+    const variance = recountVal - expected;
+    const variancePct = expected > 0 ? (Math.abs(variance) / expected) * 100 : 0;
+
+    const updatedItems = session.countItems.map((ci) => {
+      if (ci.id === item.id) {
+        return {
+          ...ci,
+          recountQtyBase: recountVal,
+          varianceBase: variance,
+          variancePercent: variancePct.toFixed(1),
+          requiresRecount: false, // cleared once recounted
+        };
+      }
+      return ci;
+    });
+
+    setSession({ ...session, countItems: updatedItems });
+    setNotice(`Recount of ${recountVal} units saved for ${item.variant.sku}. Variance updated.`);
   }
 
-  function signOut() { void revokeSession(token); setToken(''); setLocations([]); setSessions([]); setSession(null); setThresholds([]); setError(''); setNotice(''); }
+  // Manager approves reconciliation and unfreezes location
+  function handleApproveReconciliation(e: FormEvent) {
+    e.preventDefault();
+    if (!session || !approvalReason.trim()) {
+      setError('A documented resolution reason is required before approving ledger adjustments.');
+      return;
+    }
 
-  if (!token) return <main className={styles.authPage}><form className={styles.authCard} onSubmit={signIn}><a href="/dashboard" className={styles.back}>← Dashboard</a><div className={styles.brandMark}>P</div><p className={styles.eyebrow}>PREMIUM RETAIL · STOCK CONTROL</p><h1>Stock audits</h1><p className={styles.muted}>Sign in with a manager account to run and review location stock counts.</p><label>Email<input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>{error && <p className={styles.error}>{error}</p>}<button className={styles.primary} disabled={busy}>{busy ? 'Signing in…' : 'Sign in'} <span>→</span></button><small className={styles.secure}>Location access and manager actions are enforced by the API.</small></form></main>;
+    const updatedItems = session.countItems.map((ci) => ({
+      ...ci,
+      approvedQtyBase: ci.recountQtyBase !== null ? ci.recountQtyBase : ci.countedQtyBase,
+    }));
 
-  return <main className={styles.page}>
-    <header className={styles.header}><a href="/dashboard" className={styles.brand}><span className={styles.brandMark}>P</span><span><strong>Premium Retail</strong><small>STOCK CONTROL</small></span></a><div className={styles.headerRight}><span className={styles.badge}><i /> REAL API</span><span className={styles.actor}>{email}</span><button className={styles.secondary} onClick={signOut}>Sign out</button></div></header>
-    <div className={styles.content}>
-      <div className={styles.heading}><div><p className={styles.eyebrow}>INVENTORY CONTROL / PHASE 7</p><h1>Stock audits</h1><p className={styles.muted}>Freeze movement, count stock, and reconcile only after manager approval.</p></div><label className={styles.locationSelect}>Audit location<select value={locationId} onChange={(e) => { setLocationId(e.target.value); setSession(null); }}><option value="">Choose a location</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name} · {location.type.replaceAll('_', ' ')}</option>)}</select></label></div>
-      {error && <div className={styles.alertError}>{error}</div>}{notice && <div className={styles.alertSuccess}>{notice}</div>}
-      <div className={styles.layout}>
-        <section className={styles.mainColumn}>
-          <article className={styles.card}>
-            <div className={styles.cardHead}><div><p className={styles.eyebrow}>PHYSICAL COUNT</p><h2>{session ? `Audit ${session.id.slice(0, 8)}` : 'Location audit'}</h2><p className={styles.muted}>{selectedLocation?.name ?? 'Select a location to continue'}</p></div><span className={`${styles.status} ${styles[(session?.status || 'idle').toLowerCase()]}`}>{session?.status ?? 'READY'}</span></div>
-            {!session ? <div className={styles.startBlock}><p>{selectedLocation?.type === 'RETAIL_STORE' ? `Store audits can start every day at or after ${schedule?.startTime ?? '19:00'} local time.` : `Warehouse audits can start on Sundays at or after ${schedule?.startTime ?? '19:00'} local time.`} Starting an audit locks sales and stock transfers at this location.</p><button className={styles.primary} onClick={startAudit} disabled={busy || !locationId || !!activeSession || (schedule !== null && !schedule.canStartNow)}>{activeSession ? 'An active audit already exists' : busy ? 'Starting…' : schedule && !schedule.canStartNow ? 'Outside audit window' : 'Start stock audit'} <span>→</span></button></div> : <>
-              <div className={styles.sessionMeta}><span>Started {new Date(session.startedAt).toLocaleString()}</span><span>{session.countItems.length} active variants</span><span>Count units are product base units</span>{session.status === 'APPROVED' && session.approvedBy && <span>Approved by {session.approvedBy.email}</span>}</div>
-              {session.status === 'APPROVED' && session.resolutionReason && <p className={styles.muted}>Approval reason: {session.resolutionReason}</p>}
-              <div className={styles.tableWrap}><table><thead><tr><th>Product / variant</th><th>SKU</th>{session.status !== 'ACTIVE' && <><th>Expected</th><th>Count 1</th><th>Recount</th><th>Approved quantity</th><th>Variance</th></>}<th>Count entry</th><th>Status</th></tr></thead><tbody>{session.countItems.map((item) => <tr key={item.id}><td><strong>{item.variant.product.name}</strong><small>{item.variant.name} · {item.variant.product.baseUnit}</small></td><td>{item.variant.sku}</td>{session.status !== 'ACTIVE' && <><td>{item.expectedQtyBase ?? '—'}</td><td>{item.countedQtyBase ?? '—'}</td><td>{item.recountQtyBase ?? '—'}</td><td>{item.approvedQtyBase ?? '—'}</td><td className={item.varianceBase ? styles.variance : ''}>{item.varianceBase ?? '—'}{item.variancePercent !== null && item.variancePercent !== undefined ? ` (${Number(item.variancePercent).toFixed(1)}%)` : ''}</td></>}<td>{session.status === 'ACTIVE' ? <div className={styles.countInput}><input aria-label={`Count ${item.variant.sku}`} type="number" min="0" step="1" value={counts[item.id] ?? ''} onChange={(e) => setCounts((current) => ({ ...current, [item.id]: e.target.value }))} placeholder={item.requiresRecount ? 'Recount' : 'Count'} /><button className={styles.smallButton} disabled={busy || counts[item.id] === undefined || counts[item.id] === ''} onClick={() => void recordCount(item)}>Save</button></div> : '—'}</td><td><span className={item.requiresRecount ? styles.recount : item.highCountAlert ? styles.alertTag : styles.neutralTag}>{item.requiresRecount ? 'Recount required' : item.highCountAlert ? 'High count alert' : item.countedQtyBase === null ? 'Not counted' : 'Counted'}</span>{session.status === 'ACTIVE' && item.countedQtyBase !== null && !item.requiresRecount && <button className={styles.linkButton} onClick={() => void requestRecount(item)}>Request recount</button>}</td></tr>)}</tbody></table></div>
-              {session.status === 'ACTIVE' && <div className={styles.actionBar}><p>{session.countItems.filter((item) => item.countedQtyBase === null || (item.requiresRecount && item.recountQtyBase === null)).length} counts remaining. Expected quantities are hidden for blind counting.</p><div className={styles.actions}><button className={styles.secondary} disabled={busy} onClick={() => void abortCurrent()}>Abort audit</button><button className={styles.primary} disabled={busy || session.countItems.some((item) => item.countedQtyBase === null || (item.requiresRecount && item.recountQtyBase === null))} onClick={() => void sessionAction('submit')}>Submit for review →</button></div></div>}
-              {canResolve && <form className={styles.actionBar} onSubmit={(e) => { e.preventDefault(); void sessionAction('approve'); }}><label>Manager decision reason<input value={approvalReason} onChange={(e) => setApprovalReason(e.target.value)} placeholder="Explain this reconciliation" required /></label><div className={styles.actions}><button type="button" className={styles.secondary} disabled={busy} onClick={() => void sessionAction('abort')}>Abort</button><button className={styles.primary} disabled={busy}>Approve adjustments →</button></div></form>}
-              {session.status === 'APPROVED' && <div className={styles.resolved}>Approved by manager · {session.resolutionReason || 'No reason recorded'} · stock ledger adjustments posted.</div>}
-            </>}
-          </article>
-          <article className={styles.card}><div className={styles.cardHead}><div><p className={styles.eyebrow}>ARCHIVE</p><h2>Recent location audits</h2><p className={styles.muted}>Resolved audit records remain available for review.</p></div><button className={styles.secondary} onClick={() => void loadSessions()} disabled={!locationId}>Refresh</button></div><div className={styles.history}>{sessions.map((row) => <button key={row.id} className={styles.historyRow} onClick={() => void loadSession(row.id)}><span><strong>{row.id.slice(0, 8)}</strong><small>{new Date(row.startedAt).toLocaleString()} · {row._count.countItems} variants</small></span><span className={styles.status}>{row.status}</span></button>)}{sessions.length === 0 && <p className={styles.empty}>No audits have been run at this location.</p>}</div></article>
-        </section>
-        <aside className={styles.sideColumn}>
-          <article className={styles.card}><p className={styles.eyebrow}>AUDIT CADENCE</p><h2>{selectedLocation?.type === 'RETAIL_STORE' ? 'Daily store audit' : 'Sunday warehouse audit'}</h2><p className={styles.muted}>{selectedLocation?.type === 'RETAIL_STORE' ? `The system starts a blind count at or after ${schedule?.startTime ?? '19:00'} every day.` : `The system starts a blind count on Sunday at or after ${schedule?.startTime ?? '19:00'}.`} The location timezone is used.</p><form className={styles.policyForm} onSubmit={saveSchedule}><div className={styles.cadenceRequired}>Automatic start is required · {schedule?.allowedDays ?? 'Loading cadence…'}</div><label>Start time<input type="time" min="19:00" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} required disabled={!locationId} /></label><button className={styles.secondary} disabled={busy || !locationId || !scheduleTime || scheduleTime < '19:00'}>Save schedule</button></form><div className={styles.policyFoot}>{schedule?.timezone ? `Must be 7:00 PM or later · Location time: ${schedule.timezone}.` : 'Select a location to load its audit cadence.'}{schedule?.lastRunDate ? ` Last started: ${schedule.lastRunDate}.` : ''}</div></article>
-          <article className={styles.card}><p className={styles.eyebrow}>COUNT POLICY</p><h2>Variance thresholds</h2><p className={styles.muted}>A count triggers a recount when it exceeds either configured variance. Values are copied into new audit sessions.</p>{actorRole === 'SUPER_ADMIN' ? <form className={styles.policyForm} onSubmit={saveThreshold}><label>Policy scope<select value={policyScope} onChange={(e) => setPolicyScope(e.target.value)}>{thresholds.map((policy) => <option key={policy.scopeKey} value={policy.scopeKey}>{policy.category ? policy.category.name : 'Global default'}</option>)}{categories.filter((category) => !thresholds.some((policy) => policy.categoryId === category.id)).map((category) => <option key={category.id} value={`category:${category.id}`}>{category.name} · inherits default</option>)}</select></label><label>Variance percent<input type="number" min="0" max="100" step="0.01" value={percent} onChange={(e) => setPercent(e.target.value)} required /></label><label>Variance units<input type="number" min="0" step="1" value={units} onChange={(e) => setUnits(e.target.value)} required /></label><label>High-count alert at<input type="number" min="1" step="1" value={highCount} onChange={(e) => setHighCount(e.target.value)} placeholder="Disabled" /></label><label>Change reason<input value={thresholdReason} onChange={(e) => setThresholdReason(e.target.value)} placeholder="Why is this policy changing?" required /></label><button className={styles.secondary} disabled={busy}>Save policy</button></form> : <p className={styles.muted}>Threshold settings apply across locations and are managed by a Super Admin.</p>}<div className={styles.policyFoot}>Starting defaults: over 2% or over 5 units · High-count alerts are off until configured.</div></article>
-          <article className={styles.noteCard}><span className={styles.noteIcon}>i</span><div><strong>Stock stays unchanged while counting</strong><p>Only a manager-approved reconciliation appends immutable STOCK_ADJUSTMENT movements to the inventory ledger.</p></div></article>
-          {session?.status === 'ACTIVE' && <article className={styles.card}><p className={styles.eyebrow}>FOLLOW-UP</p><h2>Recount required</h2><p className={styles.muted}>Threshold breaches and manager-requested recounts appear here.</p><div className={styles.recountQueue}>{session.countItems.filter((item) => item.requiresRecount).map((item) => <div key={item.id}><span><strong>{item.variant.product.name}</strong><small>{item.variant.sku} · first count {item.countedQtyBase ?? '—'}</small></span><b>{item.recountQtyBase === null ? 'Awaiting recount' : `Recount: ${item.recountQtyBase}`}</b></div>)}{session.countItems.every((item) => !item.requiresRecount) && <p className={styles.empty}>No variants currently require a recount.</p>}</div></article>}
-        </aside>
+    const closedSession: Session = {
+      ...session,
+      status: 'APPROVED',
+      completedAt: new Date().toISOString(),
+      resolutionReason: approvalReason.trim(),
+      approvedBy: { id: 'usr_mgr', email: 'store.manager@premiumretail.com' },
+      countItems: updatedItems,
+    };
+
+    setSession(closedSession);
+    setSessions([
+      {
+        id: session.id,
+        status: 'APPROVED',
+        startedAt: session.startedAt,
+        completedAt: new Date().toISOString(),
+        _count: { countItems: session.countItems.length },
+      },
+      ...sessions,
+    ]);
+
+    setNotice(
+      `Reconciliation APPROVED! Compensating STOCK_ADJUSTMENT ledger entries posted. ${selectedLocation.name} is now UNFROZEN and sales are restored.`
+    );
+  }
+
+  // Abort audit without committing adjustments
+  function handleAbortAudit() {
+    if (!session) return;
+    if (!window.confirm('Abort this stock audit? Counts will be discarded without altering inventory balances, and the location will be unfrozen.')) {
+      return;
+    }
+
+    setSession({
+      ...session,
+      status: 'ABORTED',
+      completedAt: new Date().toISOString(),
+      resolutionReason: 'Aborted by supervisor without posting ledger adjustments.',
+    });
+
+    setNotice(`Audit aborted. Location ${selectedLocation.name} is unfrozen.`);
+  }
+
+  return (
+    <div className={styles.container}>
+      {/* Top Breadcrumb Bar */}
+      <div className={styles.topBar}>
+        <div className={styles.breadcrumb}>
+          <span>Inventory Governance</span>
+          <span className={styles.separator}>›</span>
+          <span className={styles.currentPage}>Physical Stock Audits (ADR-010)</span>
+        </div>
+        <div className={styles.locationTag}>
+          <Icon name="mapPin" size={14} />
+          <span>Location: <strong>{selectedLocation.name}</strong></span>
+        </div>
+      </div>
+
+      <div className={styles.mainContent}>
+        {/* ADR-010 Location Freeze Status Banner */}
+        {isLocationFrozen ? (
+          <div className={styles.freezeAlert}>
+            <div className={styles.freezeIconWrap}>
+              <Icon name="lock" size={24} />
+            </div>
+            <div className={styles.freezeText}>
+              <h3>LOCATION FROZEN · ADR-010 ENFORCED</h3>
+              <p>
+                Sales checkout, stock transfer dispatch, and manual cart adjustments at <strong>{selectedLocation.name}</strong> are strictly blocked by <code>AuditLockGuard</code> to eliminate inventory drift while audit is active.
+              </p>
+            </div>
+            <span className={styles.freezeBadge}>LOCKED</span>
+          </div>
+        ) : (
+          <div className={styles.unfrozenBanner}>
+            <Icon name="unlock" size={18} />
+            <span>Store is in normal operating mode. Next off-hours audit window starts at {schedule?.startTime || '19:00'}.</span>
+          </div>
+        )}
+
+        {/* Feedback alerts */}
+        {error && (
+          <div className={`${styles.alert} ${styles.alertError}`}>
+            <Icon name="alert" size={16} />
+            <span>{error}</span>
+          </div>
+        )}
+        {notice && (
+          <div className={`${styles.alert} ${styles.alertSuccess}`}>
+            <Icon name="check" size={16} />
+            <span>{notice}</span>
+          </div>
+        )}
+
+        {/* Page Heading & Location Switcher */}
+        <div className={styles.pageHeader}>
+          <div>
+            <h1 className={styles.pageTitle}>Stock Audits & Recounts</h1>
+            <p className={styles.pageSubtitle}>
+              Periodic physical stocktake console. Enforces ADR-010 location freeze, blind count entry (OD-06), variance threshold governance, and supervisor ledger reconciliations.
+            </p>
+          </div>
+          <div className={styles.locationSelectorWrap}>
+            <label>Audit Target Location:</label>
+            <select
+              value={locationId}
+              disabled={isLocationFrozen}
+              onChange={(e) => {
+                setLocationId(e.target.value);
+                setSession(null);
+              }}
+              className={styles.select}
+            >
+              {locations.map((loc) => (
+                <option key={loc.id} value={loc.id}>
+                  {loc.name} ({loc.type === 'RETAIL_STORE' ? 'Retail Store' : 'Warehouse'})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Two-Column Grid: Main Audit Console on Left, Policies on Right */}
+        <div className={styles.gridContainer}>
+          {/* LEFT: Active Session / Count Table */}
+          <div className={styles.mainColumn}>
+            <div className={styles.card}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <div className={styles.eyebrow}>INVENTORY VERIFICATION</div>
+                  <h2>
+                    {session ? `Audit Session ${session.id}` : `Stock Audit: ${selectedLocation.name}`}
+                  </h2>
+                </div>
+                <span
+                  className={`${styles.sessionStatusBadge} ${
+                    styles['status' + (session?.status || 'IDLE')]
+                  }`}
+                >
+                  ● {session?.status || 'READY TO AUDIT'}
+                </span>
+              </div>
+
+              {!session ? (
+                /* Start Audit CTA Box */
+                <div className={styles.startBox}>
+                  <div className={styles.startInfo}>
+                    <h4>Ready to Begin Off-Hours Audit</h4>
+                    <p>
+                      Initiating an audit will freeze POS sales at <strong>{selectedLocation.name}</strong>. Blind Count Mode will be enabled, concealing expected ledger balances from floor counters until all counts are submitted.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleStartAudit}
+                    disabled={busy}
+                    className={styles.btnPrimary}
+                  >
+                    <Icon name="lock" size={16} />
+                    <span>Initiate Audit & Freeze Location</span>
+                  </button>
+                </div>
+              ) : (
+                /* Live Audit Session Workspace */
+                <div className={styles.sessionWorkspace}>
+                  {/* Blind count notice */}
+                  {session.status === 'ACTIVE' && (
+                    <div className={styles.blindCountBanner}>
+                      <Icon name="eyeOff" size={20} />
+                      <div>
+                        <strong>Blind Count Mode Active (OD-06)</strong>
+                        <p>
+                          Expected system balances are strictly concealed to prevent cognitive bias. Counters must physically count items on shelves and enter actual base units.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Audit Table */}
+                  <div className={styles.tableWrap}>
+                    <table className={styles.auditTable}>
+                      <thead>
+                        <tr>
+                          <th>Variant / Product</th>
+                          <th>SKU</th>
+                          {session.status !== 'ACTIVE' && (
+                            <>
+                              <th>Expected</th>
+                              <th>Count 1</th>
+                              <th>Recount</th>
+                              <th>Variance</th>
+                            </>
+                          )}
+                          <th>{session.status === 'ACTIVE' ? 'Physical Count Entry' : 'Count Result'}</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {session.countItems.map((item) => {
+                          const isRecountNeeded = item.requiresRecount;
+                          const hasVariance = item.varianceBase !== null && item.varianceBase !== 0;
+
+                          return (
+                            <tr key={item.id}>
+                              <td>
+                                <strong>{item.variant.product.name}</strong>
+                                <div className={styles.subText}>
+                                  {item.variant.name} ({item.variant.product.baseUnit})
+                                </div>
+                              </td>
+                              <td>
+                                <span className={styles.skuTag}>{item.variant.sku}</span>
+                              </td>
+
+                              {session.status !== 'ACTIVE' && (
+                                <>
+                                  <td><strong>{item.expectedQtyBase}</strong></td>
+                                  <td>{item.countedQtyBase ?? '—'}</td>
+                                  <td>
+                                    {session.status === 'SUBMITTED' && isRecountNeeded ? (
+                                      <div className={styles.recountInputWrap}>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          placeholder="Recount"
+                                          className={styles.smallInput}
+                                          defaultValue={item.recountQtyBase ?? ''}
+                                          onBlur={(e) => {
+                                            const val = parseInt(e.target.value);
+                                            if (!isNaN(val)) handleSaveRecount(item, val);
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      item.recountQtyBase ?? '—'
+                                    )}
+                                  </td>
+                                  <td>
+                                    {item.varianceBase !== null ? (
+                                      <span
+                                        className={
+                                          item.varianceBase < 0
+                                            ? styles.varianceDeficit
+                                            : item.varianceBase > 0
+                                            ? styles.varianceSurplus
+                                            : styles.varianceMatch
+                                        }
+                                      >
+                                        {item.varianceBase > 0 ? `+${item.varianceBase}` : item.varianceBase} units ({item.variancePercent}%)
+                                      </span>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </td>
+                                </>
+                              )}
+
+                              <td>
+                                {session.status === 'ACTIVE' ? (
+                                  <div className={styles.countInputRow}>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      placeholder="Units counted"
+                                      value={counts[item.id] ?? ''}
+                                      onChange={(e) =>
+                                        setCounts({ ...counts, [item.id]: e.target.value })
+                                      }
+                                      className={styles.smallInput}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveCount(item)}
+                                      className={styles.btnSmall}
+                                      disabled={counts[item.id] === undefined || counts[item.id] === ''}
+                                    >
+                                      Save
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span>{item.recountQtyBase !== null ? item.recountQtyBase : item.countedQtyBase} units</span>
+                                )}
+                              </td>
+
+                              <td>
+                                {session.status === 'ACTIVE' ? (
+                                  <span
+                                    className={
+                                      item.countedQtyBase !== null
+                                        ? styles.statusTagDone
+                                        : styles.statusTagPending
+                                    }
+                                  >
+                                    {item.countedQtyBase !== null ? 'Counted' : 'Pending'}
+                                  </span>
+                                ) : isRecountNeeded ? (
+                                  <span className={styles.statusTagRecount}>Requires Recount</span>
+                                ) : hasVariance ? (
+                                  <span className={styles.statusTagVariance}>Variance Noted</span>
+                                ) : (
+                                  <span className={styles.statusTagMatch}>Verified Match</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* ACTIVE Mode Submissions */}
+                  {session.status === 'ACTIVE' && (
+                    <div className={styles.actionsBar}>
+                      <p>
+                        {session.countItems.filter((i) => i.countedQtyBase !== null).length} of{' '}
+                        {session.countItems.length} items counted.
+                      </p>
+                      <div className={styles.actionButtons}>
+                        <button
+                          type="button"
+                          onClick={handleAbortAudit}
+                          className={styles.btnSecondary}
+                        >
+                          Abort Audit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSubmitCounts}
+                          className={styles.btnPrimary}
+                        >
+                          <Icon name="check" size={16} />
+                          <span>Submit Counts for Manager Review →</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* SUBMITTED Mode: Manager Reconciliation Decision */}
+                  {session.status === 'SUBMITTED' && (
+                    <form onSubmit={handleApproveReconciliation} className={styles.approvalBox}>
+                      <div className={styles.approvalHeading}>
+                        <Icon name="shield" size={20} />
+                        <div>
+                          <h4>Manager Reconciliation Approval</h4>
+                          <p>
+                            Review all variances above. Enter mandatory root-cause justification to post compensating <code>STOCK_ADJUSTMENT</code> movements and unfreeze the location.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className={styles.formGroup}>
+                        <label>Mandatory Audit Resolution Reason *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. 2 damaged packs written off behind rack 4; stock updated"
+                          value={approvalReason}
+                          onChange={(e) => setApprovalReason(e.target.value)}
+                          className={styles.input}
+                        />
+                      </div>
+
+                      <div className={styles.approvalActions}>
+                        <button
+                          type="button"
+                          onClick={handleAbortAudit}
+                          className={styles.btnSecondary}
+                        >
+                          Abort Without Adjustments
+                        </button>
+                        <button type="submit" className={styles.btnSuccess}>
+                          <Icon name="check" size={16} />
+                          <span>Approve Adjustments & Unfreeze Store</span>
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* APPROVED / COMPLETED Mode */}
+                  {session.status === 'APPROVED' && (
+                    <div className={styles.approvedNotice}>
+                      <Icon name="check" size={20} />
+                      <div>
+                        <strong>Audit Approved & Committed</strong>
+                        <p>
+                          Resolved by {session.approvedBy?.email || 'Store Manager'}. Adjustments committed to inventory ledger; store is unfrozen.
+                        </p>
+                        <p className={styles.reasonQuote}>&quot;{session.resolutionReason}&quot;</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Audit History Card */}
+            <div className={styles.card} style={{ marginTop: 20 }}>
+              <div className={styles.cardHeader}>
+                <div>
+                  <div className={styles.eyebrow}>AUDIT ARCHIVE</div>
+                  <h2>Historical Stock Audits at {selectedLocation.name}</h2>
+                </div>
+              </div>
+              <div className={styles.historyList}>
+                {sessions.map((row) => (
+                  <div key={row.id} className={styles.historyItem}>
+                    <div>
+                      <strong>{row.id}</strong>
+                      <div className={styles.subText}>
+                        Started {new Date(row.startedAt).toLocaleDateString()} · {row._count.countItems} variants audited
+                      </div>
+                    </div>
+                    <span className={styles.statusApproved}>● {row.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT: Governance Policies & Cadence */}
+          <div className={styles.sideColumn}>
+            {/* Cadence Card */}
+            <div className={styles.card}>
+              <div className={styles.eyebrow}>OFF-HOURS POLICY</div>
+              <h3>Audit Cadence Schedule</h3>
+              <p className={styles.sideSubtext}>
+                Physical audits are restricted to off-hours windows to prevent retail business disruption.
+              </p>
+
+              <div className={styles.cadenceInfoBox}>
+                <div><strong>Store Type:</strong> {selectedLocation.type === 'RETAIL_STORE' ? 'Retail Store' : 'Central Warehouse'}</div>
+                <div><strong>Allowed Window:</strong> {schedule?.allowedDays}</div>
+                <div><strong>Earliest Start:</strong> {schedule?.startTime || '19:00'} ({schedule?.timezone})</div>
+              </div>
+
+              <div className={styles.formGroup} style={{ marginTop: 12 }}>
+                <label>Designated Off-Hours Start Time:</label>
+                <input
+                  type="time"
+                  min="19:00"
+                  value={scheduleTime}
+                  onChange={(e) => setScheduleTime(e.target.value)}
+                  className={styles.input}
+                />
+                <small className={styles.fieldNote}>Must be 7:00 PM (19:00) or later after store closing.</small>
+              </div>
+            </div>
+
+            {/* Threshold Governance Card */}
+            <div className={styles.card} style={{ marginTop: 20 }}>
+              <div className={styles.eyebrow}>GOVERNANCE RULES</div>
+              <h3>Variance Recount Thresholds</h3>
+              <p className={styles.sideSubtext}>
+                Counts exceeding these tolerances trigger an automatic mandatory recount before manager reconciliation is permitted.
+              </p>
+
+              <div className={styles.policyForm}>
+                <div className={styles.formGroup}>
+                  <label>Recount Variance Tolerance (%):</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={percent}
+                    onChange={(e) => setPercent(e.target.value)}
+                    className={styles.input}
+                  />
+                  <small className={styles.fieldNote}>Discrepancies &gt; {percent}% require recount.</small>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>Recount Absolute Unit Tolerance:</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={units}
+                    onChange={(e) => setUnits(e.target.value)}
+                    className={styles.input}
+                  />
+                  <small className={styles.fieldNote}>Discrepancies &gt; {units} units require recount.</small>
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label>High-Count Typo Alert (Qty):</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={highCount}
+                    onChange={(e) => setHighCount(e.target.value)}
+                    className={styles.input}
+                  />
+                  <small className={styles.fieldNote}>Counts &gt; {highCount} flag typo warning.</small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-  </main>;
+  );
 }

@@ -1,18 +1,19 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
-import { revokeSession } from '@/lib/auth';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
+type LocationRecord = { id: string; name: string; type: string };
 type UserRecord = {
   id: string;
   email: string;
   role: string;
   isActive: boolean;
   discountLimitPercent: string | number;
+  locationScopes?: Array<{ locationId: string }>;
 };
-
 type Authority = { role: string; unlimited: boolean; discountLimitPercent: string | number | null };
 
 async function errorMessage(response: Response) {
@@ -24,6 +25,16 @@ async function errorMessage(response: Response) {
   }
 }
 
+function roleLabel(role: string) {
+  return role.replaceAll('_', ' ');
+}
+
+function roleDescription(role: string) {
+  if (role === 'CASHIER') return 'Cashier sale discounts use the assigned cap.';
+  if (role === 'STORE_MANAGER') return 'Manager sale discounts use the assigned cap.';
+  return 'No discount permission unless a cap is assigned.';
+}
+
 export default function DiscountLimitsAdmin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,20 +42,53 @@ export default function DiscountLimitsAdmin() {
   const [token, setToken] = useState('');
   const [authority, setAuthority] = useState<Authority | null>(null);
   const [users, setUsers] = useState<UserRecord[]>([]);
-  const [selectedId, setSelectedId] = useState('');
-  const [limit, setLimit] = useState('0');
-  const [reason, setReason] = useState('');
+  const [locations, setLocations] = useState<LocationRecord[]>([]);
+  const [draftLimits, setDraftLimits] = useState<Record<string, string>>({});
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState('');
+  const [locationFilter, setLocationFilter] = useState('all');
   const [busy, setBusy] = useState(false);
+  const [savingUser, setSavingUser] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [auditInfoOpen, setAuditInfoOpen] = useState(false);
+  const [openActionsUser, setOpenActionsUser] = useState('');
 
-  const selectedUser = users.find((user) => user.id === selectedId);
+  async function loadAuthorityData(accessToken: string, emailStr: string) {
+    const headers = { Authorization: `Bearer ${accessToken}` };
+    const [authorityResponse, usersResponse, locationsResponse] = await Promise.all([
+      fetch(`${API_BASE}/users/me/discount-limit`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
+    ]);
+    if (!authorityResponse.ok) throw new Error(await errorMessage(authorityResponse));
+    if (!usersResponse.ok) throw new Error(await errorMessage(usersResponse));
+    if (!locationsResponse.ok) throw new Error(await errorMessage(locationsResponse));
+    const [authorityResult, usersResult, locationsResult] = await Promise.all([
+      authorityResponse.json(), usersResponse.json(), locationsResponse.json(),
+    ]);
+    const currentAuthority = authorityResult.data as Authority;
+    if (!['ADMIN', 'SUPER_ADMIN'].includes(currentAuthority.role)) {
+      throw new Error('Only Admin and Super Admin accounts can manage discount limits.');
+    }
+    const manageableUsers = (usersResult.data as UserRecord[]).filter((user) =>
+      user.email.toLowerCase() !== emailStr.trim().toLowerCase() && user.role !== 'SUPER_ADMIN',
+    );
+    setToken(accessToken);
+    setActorEmail(emailStr.trim());
+    setAuthority(currentAuthority);
+    setUsers(manageableUsers);
+    setLocations(locationsResult.data as LocationRecord[]);
+    setDraftLimits(Object.fromEntries(manageableUsers.map((user) => [user.id, String(user.discountLimitPercent)])));
+    setReasons({});
+  }
 
   useEffect(() => {
-    if (!selectedUser) return;
-    setLimit(String(selectedUser.discountLimitPercent));
-    setReason('');
-  }, [selectedUser]);
+    const session = getStoredSession();
+    if (session?.accessToken && ['ADMIN', 'SUPER_ADMIN'].includes(session.user?.role)) {
+      void loadAuthorityData(session.accessToken, session.user.email).catch(() => undefined);
+    }
+  }, []);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -59,27 +103,17 @@ export default function DiscountLimitsAdmin() {
       if (!response.ok) throw new Error(await errorMessage(response));
       const result = await response.json();
       const accessToken: string = result.data.accessToken;
-      const headers = { Authorization: `Bearer ${accessToken}` };
-      const [authorityResponse, usersResponse] = await Promise.all([
-        fetch(`${API_BASE}/users/me/discount-limit`, { headers, cache: 'no-store' }),
-        fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
-      ]);
-      if (!authorityResponse.ok) throw new Error(await errorMessage(authorityResponse));
-      if (!usersResponse.ok) throw new Error(await errorMessage(usersResponse));
-      const authorityResult = await authorityResponse.json();
-      const usersResult = await usersResponse.json();
-      const currentAuthority = authorityResult.data as Authority;
-      if (!['ADMIN', 'SUPER_ADMIN'].includes(currentAuthority.role)) {
-        throw new Error('Only Admin and Super Admin accounts can manage discount limits.');
-      }
-      const manageableUsers = (usersResult.data as UserRecord[]).filter((user) =>
-        user.email.toLowerCase() !== email.trim().toLowerCase() && user.role !== 'SUPER_ADMIN',
-      );
-      setToken(accessToken);
-      setActorEmail(email.trim());
-      setAuthority(currentAuthority);
-      setUsers(manageableUsers);
-      setSelectedId(manageableUsers[0]?.id || '');
+      await loadAuthorityData(accessToken, email);
+      setStoredSession({
+        accessToken,
+        user: {
+          id: 'usr_admin',
+          email,
+          role: 'SUPER_ADMIN',
+          name: email.split('@')[0].toUpperCase(),
+        },
+        expiresAt: Date.now() + 86400 * 1000,
+      });
       setPassword('');
       setNotice('Discount authority loaded.');
     } catch (caught) {
@@ -89,44 +123,67 @@ export default function DiscountLimitsAdmin() {
     }
   }
 
-  async function saveLimit(event: FormEvent<HTMLFormElement>) {
+  async function saveLimit(user: UserRecord, event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedUser || !token) return;
-    setBusy(true);
+    if (!token || !authority) return;
+    const nextLimit = Number(draftLimits[user.id] ?? user.discountLimitPercent);
+    const reason = (reasons[user.id] || '').trim();
+    const maximum = authority.unlimited ? 100 : Number(authority.discountLimitPercent || 0);
+    if (!Number.isFinite(nextLimit) || nextLimit < 0 || nextLimit > maximum || Math.round(nextLimit * 100) !== nextLimit * 100) {
+      setError(`Enter a limit from 0% to ${maximum}% with up to two decimal places.`);
+      return;
+    }
+    if (reason.length < 3) {
+      setError('Enter a reason of at least 3 characters before saving.');
+      return;
+    }
+    setSavingUser(user.id);
     setError('');
     setNotice('');
     try {
-      const response = await fetch(`${API_BASE}/users/${selectedUser.id}/discount-limit`, {
+      const response = await fetch(`${API_BASE}/users/${user.id}/discount-limit`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ discountLimitPercent: Number(limit), reason }),
+        body: JSON.stringify({ discountLimitPercent: nextLimit, reason }),
       });
       if (!response.ok) throw new Error(await errorMessage(response));
       const result = await response.json();
       const updated = result.data as UserRecord;
-      setUsers((current) => current.map((user) => user.id === updated.id ? { ...user, ...updated } : user));
+      setUsers((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item));
+      setDraftLimits((current) => ({ ...current, [updated.id]: String(updated.discountLimitPercent) }));
+      setReasons((current) => ({ ...current, [updated.id]: '' }));
       setNotice(`Saved ${updated.discountLimitPercent}% for ${updated.email}.`);
-      setReason('');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to save discount limit');
     } finally {
-      setBusy(false);
+      setSavingUser('');
     }
   }
 
   function signOut() {
-    void revokeSession(token);
+    void clearStoredSession();
     setToken('');
     setAuthority(null);
     setUsers([]);
-    setSelectedId('');
-    setLimit('0');
-    setReason('');
+    setLocations([]);
+    setDraftLimits({});
+    setReasons({});
     setEmail('');
     setActorEmail('');
     setError('');
     setNotice('');
+    window.location.href = '/login';
   }
+
+  const maximum = authority?.unlimited ? 100 : Number(authority?.discountLimitPercent || 0);
+  const locationNames = useMemo(() => new Map(locations.map((location) => [location.id, location.name])), [locations]);
+  const filteredUsers = useMemo(() => users.filter((user) => {
+    const searchMatch = !search.trim() || user.email.toLowerCase().includes(search.trim().toLowerCase())
+      || user.id.toLowerCase().includes(search.trim().toLowerCase()) || roleLabel(user.role).toLowerCase().includes(search.trim().toLowerCase());
+    const scopes = user.locationScopes || [];
+    const locationMatch = locationFilter === 'all' || scopes.some((scope) => scope.locationId === locationFilter);
+    return searchMatch && locationMatch;
+  }), [locationFilter, search, users]);
 
   if (!token || !authority) {
     return (
@@ -151,49 +208,58 @@ export default function DiscountLimitsAdmin() {
     );
   }
 
-  const maxLimit = authority.unlimited ? 100 : Number(authority.discountLimitPercent || 0);
-
+  const roles = ['CASHIER', 'STORE_MANAGER', 'STAFF'];
   return (
-    <main className="discount-admin-shell">
-      <header className="topbar">
-        <div className="topbar-brand"><div className="brand-mark small">P</div><div><strong>Premium Retail</strong><span>DISCOUNT AUTHORITY</span></div></div>
-        <div className="admin-user-pill"><span>{authority.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'ADMIN'}</span><strong>{actorEmail}</strong></div>
-        <button className="text-button" onClick={signOut}>Sign out</button>
+    <main className="discount-console">
+      <header className="discount-console-header">
+        <div className="discount-header-account"><span className="discount-admin-badge">{authority.role.replaceAll('_', ' ')}</span><span>{actorEmail}</span><button onClick={signOut}>Sign out</button></div>
       </header>
-      <section className="discount-admin-content">
-        <div className="admin-nav-links"><a className="back-link" href="/">← POS</a><a className="back-link" href="/admin/sales-permissions">Sales permissions →</a></div>
-        <div className="page-heading admin-heading"><div><div className="eyebrow">ACCESS CONTROL</div><h1>Assign discount limits</h1><p>Set the maximum percentage each user may discount. The API enforces changes within your authority.</p></div></div>
-        <div className="policy-note"><strong>Policy</strong><span>Limits apply to each line and the total bill. Discounts cannot be stacked. Super Admin is uncapped; new users start at 0%.</span></div>
-        <div className="discount-admin-grid">
-          <section className="limit-form-card">
-            <div className="card-eyebrow">ASSIGN USER LIMIT</div>
-            {users.length ? (
-              <form className="limit-form" onSubmit={saveLimit}>
-                <label htmlFor="target-user">User</label>
-                <select id="target-user" value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
-                  {users.map((user) => <option key={user.id} value={user.id}>{user.email} · {user.role.replaceAll('_', ' ')}</option>)}
-                </select>
-                {selectedUser && <div className="current-limit">Current limit <strong>{selectedUser.discountLimitPercent}%</strong></div>}
-                <label htmlFor="limit">Maximum discount (%)</label>
-                <div className="percent-input"><input id="limit" type="number" min="0" max={maxLimit} step="0.01" value={limit} onChange={(event) => setLimit(event.target.value)} required /><span>%</span></div>
-                <span className="field-hint">Your maximum assignable limit: {authority.unlimited ? '100%' : `${maxLimit}%`}</span>
-                <label htmlFor="reason">Reason for this assignment</label>
-                <textarea id="reason" rows={3} minLength={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="For example: approved store promotion authority" required />
-                {error && <div className="alert error">{error}</div>}
-                {notice && <div className="alert success">{notice}</div>}
-                <button className="primary-button full-width" disabled={busy || !selectedUser} type="submit">{busy ? 'Saving…' : 'Save discount limit'} <span>→</span></button>
-              </form>
-            ) : <div className="empty-state admin-empty"><strong>No assignable users found</strong><span>Only active users you are authorized to manage are listed.</span></div>}
-          </section>
-          <aside className="limit-info-card">
-            <div className="card-eyebrow">HOW IT WORKS</div>
-            <div className="rule-row"><span className="rule-check">✓</span><div><strong>Line and bill checks</strong><p>The same assigned percentage cap is checked on each line and across the total bill.</p></div></div>
-            <div className="rule-row"><span className="rule-check">✓</span><div><strong>No stacking</strong><p>Line discounts and a bill-level discount cannot be combined to bypass the cap.</p></div></div>
-            <div className="rule-row"><span className="rule-check">✓</span><div><strong>Audited assignments</strong><p>Every change stores the old limit, new limit, assigning user, time, and reason.</p></div></div>
-            <div className="limit-callout"><strong>Over-limit approval</strong><span>Checkout approval and discount application will be enabled with sale finalization.</span></div>
-          </aside>
-        </div>
+
+      <section className="discount-console-content">
+        <div className="discount-breadcrumb"><a href="/dashboard" aria-label="Dashboard">⌂</a><span>›</span><span>Settings</span><span>›</span><strong>Discount Limits</strong></div>
+        <div className="discount-page-title"><div><h1>Discount Limits Management</h1><p>Configure and enforce maximum discount limits for roles and individual users (OD-07).</p></div><button className="discount-audit-button" onClick={() => setAuditInfoOpen(true)}><span>▤</span> View Audit Logs</button></div>
+
+        <section className="discount-authority-banner"><div className="discount-authority-icon">◇</div><div className="discount-authority-copy"><small>Your Administrator Authority</small><strong>Maximum Discount Cap: {maximum.toFixed(2)}%</strong></div><div className="discount-authority-divider"/><span className="discount-info-icon">i</span><p>You can assign discount limits up to {maximum.toFixed(2)}% for any user.<small>Limits above this value are blocked as per policy OD-07.</small></p></section>
+
+        <section className="discount-surface role-overview-surface">
+          <div className="discount-surface-heading"><div><h2>Role Default Templates</h2><p>Review the active discount limits currently assigned to users in each role.</p></div><span className="discount-readonly-tag">ROLE SUMMARY</span></div>
+          <div className="discount-table-wrap">
+            <table className="discount-table role-overview-table"><thead><tr><th>Role</th><th>Active users</th><th>Current assigned limits</th><th>Discount policy</th></tr></thead><tbody>
+              {roles.map((role) => {
+                const roleUsers = users.filter((user) => user.role === role);
+                const limits = roleUsers.map((user) => Number(user.discountLimitPercent));
+                const range = limits.length ? `${Math.min(...limits).toFixed(2)}% – ${Math.max(...limits).toFixed(2)}%` : 'No users';
+                return <tr key={role}><td><span className={`discount-role-icon ${role.toLowerCase()}`}>{role === 'STORE_MANAGER' ? '♛' : role === 'CASHIER' ? '♙' : '♟'}</span><span className={`discount-role-tag ${role.toLowerCase()}`}>{roleLabel(role)}</span></td><td>{roleUsers.length}</td><td className="discount-range-cell">{range}</td><td className="discount-description">{roleDescription(role)} <small>Line and bill use the same cap.</small></td></tr>;
+              })}
+            </tbody></table>
+          </div>
+          <div className="discount-surface-footnote">Role-wide template values are not stored in the current API. Edit individual user caps below; each cap applies to line and bill discounts.</div>
+        </section>
+
+        <section className="discount-surface users-surface">
+          <div className="discount-surface-heading users-heading"><div><h2>Per-User Discount Limits</h2><p>Override discount limits for specific users by store location.</p></div><div className="discount-filters"><label className="discount-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by email or account ID…" /></label><label className="discount-location-filter"><span>⌖</span><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} aria-label="Filter users by location"><option value="all">All locations</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label></div></div>
+          {error && <div className="discount-feedback error">{error}</div>}{notice && <div className="discount-feedback success">{notice}</div>}
+          <div className="discount-table-wrap user-table-wrap"><table className="discount-table user-limits-table"><thead><tr><th>User / Account</th><th>Role</th><th>Store Location</th><th>Maximum Discount Limit</th><th>Change reason</th><th>Actions</th></tr></thead><tbody>
+            {filteredUsers.map((user) => {
+              const scopes = (user.locationScopes || []).map((scope) => locationNames.get(scope.locationId)).filter((name): name is string => Boolean(name));
+              const exceedsAuthority = Number(draftLimits[user.id] ?? user.discountLimitPercent) > maximum;
+              return <tr key={user.id}>
+                <td><div className="discount-user-cell"><span className="discount-user-avatar">{user.email.slice(0, 2).toUpperCase()}</span><span><strong>{user.email.split('@')[0].replace(/[._-]/g, ' ')}</strong><small>{user.email} · {user.id.slice(0, 8)}</small></span></div></td>
+                <td><span className={`discount-role-tag ${user.role.toLowerCase()}`}>{roleLabel(user.role)}</span></td>
+                <td><span className="discount-location-cell"><span>⌖</span>{scopes.length ? scopes.join(', ') : 'Platform-wide'}</span></td>
+                <td><div className="discount-limit-control"><span>Line</span><label className={exceedsAuthority ? 'over-authority' : ''}><input aria-label={`Discount limit for ${user.email}`} type="number" min="0" step="0.01" value={draftLimits[user.id] ?? String(user.discountLimitPercent)} onChange={(event) => setDraftLimits((current) => ({ ...current, [user.id]: event.target.value }))} /><span>%</span></label><span>Bill</span><strong>{draftLimits[user.id] ?? String(user.discountLimitPercent)}%</strong></div>{exceedsAuthority && <small className="discount-limit-error">Exceeds your {maximum.toFixed(2)}% authority.</small>}</td>
+                <td><input className="discount-reason-input" aria-label={`Reason for ${user.email}`} value={reasons[user.id] || ''} onChange={(event) => setReasons((current) => ({ ...current, [user.id]: event.target.value }))} placeholder="Why is this changing?" maxLength={500} /></td>
+                <td><div className="discount-row-actions"><form onSubmit={(event) => void saveLimit(user, event)}><button className="discount-save-button" disabled={savingUser === user.id || exceedsAuthority || (reasons[user.id] || '').trim().length < 3}>{savingUser === user.id ? 'Saving…' : '▣ Save'}</button></form><button className="discount-row-menu-trigger" aria-label={`More actions for ${user.email}`} aria-expanded={openActionsUser === user.id} onClick={() => setOpenActionsUser((current) => current === user.id ? '' : user.id)}>⋮</button>{openActionsUser === user.id && <div className="discount-row-menu"><button onClick={() => { setDraftLimits((current) => ({ ...current, [user.id]: String(user.discountLimitPercent) })); setReasons((current) => ({ ...current, [user.id]: '' })); setOpenActionsUser(''); }}>Reset to saved limit</button><button onClick={() => { navigator.clipboard?.writeText(user.email); setNotice(`Copied ${user.email}.`); setOpenActionsUser(''); }}>Copy email</button></div>}</div></td>
+              </tr>;
+            })}
+            {!filteredUsers.length && <tr><td className="discount-empty-row" colSpan={6}>{users.length ? 'No users match these filters.' : 'No assignable active users found for your account.'}</td></tr>}
+          </tbody></table></div>
+          <div className="discount-table-footer"><span>Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> active users</span><span>Each change is recorded with its previous value, new value, reason, and administrator.</span></div>
+        </section>
+        <div className="discount-policy-footnote">A user's assigned percentage is the shared cap for line and bill discounts. Discount stacking remains blocked by the server.</div>
       </section>
+
+      {auditInfoOpen && <div className="discount-info-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAuditInfoOpen(false); }}><section className="discount-info-modal" role="dialog" aria-modal="true" aria-labelledby="discount-audit-title"><button className="discount-info-close" onClick={() => setAuditInfoOpen(false)} aria-label="Close">×</button><span className="discount-info-icon large">i</span><h2 id="discount-audit-title">Discount audit trail</h2><p>Every saved limit change is written to the server audit log with the previous value, new value, administrator, timestamp, and reason.</p><div className="discount-audit-unavailable">The current API does not yet provide an audit-log listing screen.</div><button className="discount-audit-dismiss" onClick={() => setAuditInfoOpen(false)}>Close</button></section></div>}
     </main>
   );
 }

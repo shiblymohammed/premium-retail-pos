@@ -9,6 +9,7 @@ build/
 .next/
 apps/web/.next-dev/
 apps/web/.next-dev-phase10/
+apps/web/.next-prod/
 out/
 
 # Environment files

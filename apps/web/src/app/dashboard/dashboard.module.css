@@ -329,6 +329,12 @@
   .transactionTable td { height: 47px; }
 }
 
+/* Navigation is rendered once by the root app frame. */
+.dashboard { width: 100%; min-height: 100vh; }
+.sidebar { display: none !important; }
+.mainArea { width: 100% !important; margin-left: 0 !important; }
+.referenceHeader { display: none; }
+
 /* Brighter solid red highlights with clear, light surfaces. */
 .dashboard { --accent: #e34f59; --accent-strong: #c93643; --accent-deep: #a92735; --accent-soft: #ffe4e4; --accent-pale: #fff3f2; background: #fff8f7; }
 .sidebar { background: #fffdfd; }
