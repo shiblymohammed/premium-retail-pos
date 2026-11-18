@@ -89,6 +89,32 @@ describe('SalesService Phase 6 rules', () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
+  it('blocks a cashier whose persisted location differs from the token location', async () => {
+    const { tx, service } = createHarness();
+    tx.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce(cashierRow('0'));
+    tx.userLocationScope.findMany.mockResolvedValue([{ locationId: 'other-store' }]);
+
+    await expect(service.createSale({
+      lines: [{ variantId: 'v-1', quantity: 1, enteredUnit: 'BASE_UNIT' as any }],
+      paymentMethod: 'CARD' as any,
+      paymentAmount: 10,
+    }, actor, 'external-store-key')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.location.findUnique).not.toHaveBeenCalled();
+    expect(tx.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks non-cashier roles from finalizing sales even with a valid location scope', async () => {
+    const { tx, service } = createHarness();
+    tx.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ role: Role.STORE_MANAGER, isActive: true, discountLimitPercent: new Prisma.Decimal(10) }]);
+
+    await expect(service.createSale({
+      lines: [{ variantId: 'v-1', quantity: 1, enteredUnit: 'BASE_UNIT' as any }],
+      paymentMethod: 'CARD' as any,
+      paymentAmount: 10,
+    }, { ...actor, role: Role.STORE_MANAGER }, 'manager-sale-key')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tx.invoice.create).not.toHaveBeenCalled();
+  });
+
   it('calculates partial refunds from the saved sale-time net line amount', async () => {
     const { tx, inventory, service } = createHarness();
     tx.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([

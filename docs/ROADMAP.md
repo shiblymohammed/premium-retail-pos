@@ -167,13 +167,13 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P2` Implement secure CSV and downloadable PDF export utilities respecting location permissions (consolidated scope restricted to Admin / Super Admin)
 
 ### Phase 11: Security, Concurrency, Automated Tests & Hardening
-- [ ] `P0` Enforce database constraints and unique indexes on SKUs, barcodes, invoice numbers, and idempotency keys
-- [ ] `P0` Implement concurrency stress tests validating atomic sales against low stock (prevent race conditions)
-- [ ] `P0` Implement comprehensive unit tests for current-release features including unit conversions and discount capping
+- [x] `P0` Enforce database constraints and unique indexes on SKUs, barcodes, invoice numbers, and idempotency keys (case-insensitive SKU/barcode indexes and unique invoice/idempotency indexes are already in migrations)
+- [x] `P0` Implement concurrency stress tests validating atomic sales against low stock (prevent race conditions). A PostgreSQL integration stress test runs 24 simultaneous sales with only 5 units initially available and verifies unique invoices/idempotency keys and the exact final ledger balance. Sales may result in negative stock per the confirmed stock policy.
+- [x] `P0` Implement comprehensive unit tests for current-release features including unit conversions and discount capping
 - [Deferred] Add loan-balance tests only if Phase 9 is reactivated
-- [ ] `P0` Implement security tests verifying that cashiers cannot access external location stock or admin APIs
-- [ ] `P0` Add rate limiting, HTTP security headers (Helmet), and strict CORS origin whitelisting
-- [ ] `P0` Protect sensitive employee financial data and attendance geolocation data
+- [x] `P0` Implement security tests verifying that cashiers cannot access external location stock or admin APIs (sales reject role/scope mismatches; existing user, employee, product, attendance, and report tests cover role/location boundaries)
+- [x] `P0` Add rate limiting, HTTP security headers (Helmet), and strict CORS origin whitelisting (login uses the shared database limiter; general API requests use configurable per-process limits; production requires explicit CORS_ORIGIN)
+- [x] `P0` Protect sensitive employee financial data and attendance geolocation data (employee responses exclude loan/financial details; GPS collection is out of current scope; attendance responses explicitly select non-GPS fields; legacy GPS columns remain nullable and are not exposed by the API)
 
 ### Phase 12: Deployment, Data Migration, Training & Handover
 - [ ] `P1` Build standardized CSV data import templates for products, variants, opening stock, locations, and staff

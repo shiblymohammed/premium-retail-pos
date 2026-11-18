@@ -1,5 +1,25 @@
 # Manual Testing Guide — Sprint 01
 
+## Phase 11 concurrent-sales stress test (isolated database)
+
+This opt-in test refuses to run unless `PHASE11_STRESS_DATABASE_URL` points to `localhost:5544/pos_phase11_test`. It creates disposable fixtures and verifies 24 simultaneous sales against an initial balance of 5 units. Negative stock is expected by the confirmed business policy; the assertions check for 24 unique invoices and movements and an exact final ledger balance of -19 units.
+
+In PowerShell, start the disposable database and apply migrations:
+
+```powershell
+docker run -d --rm --name pos-phase11-stress -e POSTGRES_USER=pos_test -e POSTGRES_PASSWORD=phase11_local_only -e POSTGRES_DB=pos_phase11_test -p 5544:5432 postgres:16-alpine
+$env:DATABASE_URL='postgresql://pos_test:phase11_local_only@127.0.0.1:5544/pos_phase11_test?schema=public'
+npm run db:deploy --workspace=apps/api
+```
+
+Run the stress test and stop the disposable database:
+
+```powershell
+$env:PHASE11_STRESS_DATABASE_URL='postgresql://pos_test:phase11_local_only@127.0.0.1:5544/pos_phase11_test?schema=public'
+npm run test --workspace=apps/api -- --runInBand src/modules/sales/sales.concurrency.integration.spec.ts
+docker stop pos-phase11-stress
+```
+
 > Step-by-step guide to manually test the Premium Retail POS system from scratch.
 
 ---

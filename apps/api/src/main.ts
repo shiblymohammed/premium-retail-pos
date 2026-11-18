@@ -2,6 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { createApiRateLimitMiddleware } from './common/middleware/api-rate-limit.middleware';
+import { resolveCorsOrigins } from './common/security/cors-origins';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,17 +15,15 @@ async function bootstrap() {
   app.use(helmet());
 
   // CORS configuration. Keep development origins explicit; production must set CORS_ORIGIN.
-  const corsOrigins = (process.env.CORS_ORIGIN || 'http://localhost:3000')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  if (process.env.NODE_ENV !== 'production') {
-    corsOrigins.push('http://localhost:3001');
-  }
+  const corsOrigins = resolveCorsOrigins(process.env.CORS_ORIGIN, process.env.NODE_ENV);
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
   });
+
+  // Broad API flood protection. Login has a stricter shared-database limiter.
+  // At multi-instance deployment, mirror this limit at the shared gateway too.
+  app.use(createApiRateLimitMiddleware());
 
   // Global validation pipe — rejects unknown/malformed DTOs
   app.useGlobalPipes(
