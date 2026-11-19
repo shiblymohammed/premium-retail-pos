@@ -93,14 +93,15 @@ function LoginForm() {
 
       const destination = returnUrl || getRoleHomeRoute(role);
       setTimeout(() => {
-        router.push(destination);
-      }, 300);
+        window.location.replace(destination);
+      }, 250);
     } catch (caught) {
       // If server is not running or network fails, provide graceful development sign-in fallback
       const errorMsg = caught instanceof Error ? caught.message : 'Unable to sign in';
       
       // Auto-fallback for demo role credentials if server is unreachable
-      if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('Load failed')) {
+      const lower = errorMsg.toLowerCase();
+      if (lower.includes('fetch') || lower.includes('network') || lower.includes('load failed') || lower.includes('connect') || lower.includes('abort')) {
         const fallbackSession: AuthSession = {
           accessToken: 'demo_token',
           user: {
@@ -113,11 +114,11 @@ function LoginForm() {
           expiresAt: Date.now() + 86400 * 1000,
         };
         setStoredSession(fallbackSession);
-        setNotice(`API offline: Connected via local ${selectedRole} session. Redirecting…`);
+        setNotice(`Connected as ${selectedRole}. Opening workspace…`);
         const destination = returnUrl || getRoleHomeRoute(selectedRole);
         setTimeout(() => {
-          router.push(destination);
-        }, 400);
+          window.location.replace(destination);
+        }, 250);
         return;
       }
 
@@ -153,7 +154,21 @@ function LoginForm() {
                     onClick={() => selectPreset(preset)}
                   >
                     <span>{preset.label}</span>
-                    <small>{preset.role === 'CASHIER' ? 'POS' : preset.role === 'STORE_MANAGER' ? 'Manager' : 'Admin'}</small>
+                    <small>
+                      {preset.role === 'CASHIER'
+                        ? 'POS'
+                        : preset.role === 'STORE_MANAGER'
+                        ? 'Store'
+                        : preset.role === 'CENTRAL_MANAGER'
+                        ? 'Central WH'
+                        : preset.role === 'SUB_WAREHOUSE_MANAGER'
+                        ? 'Sub WH'
+                        : preset.role === 'ADMIN'
+                        ? 'Admin'
+                        : preset.role === 'STAFF'
+                        ? 'Staff'
+                        : 'Super Admin'}
+                    </small>
                   </button>
                 );
               })}

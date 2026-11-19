@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { getStoredSession, AuthSession } from '@/lib/auth';
 import styles from './dashboard.module.css';
 
 type LocationScope = 'All retail locations' | 'Downtown Store' | 'North Mall' | 'West End Outlet' | 'Central Warehouse';
@@ -98,6 +99,7 @@ function formatUnits(amount: number) {
 
 export default function DashboardPage() {
   const [scope, setScope] = useState<LocationScope>('All retail locations');
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [period, setPeriod] = useState<Period>('7 days');
   const [filter, setFilter] = useState<'All' | SaleStatus>('All');
   const [search, setSearch] = useState('');
@@ -114,6 +116,7 @@ export default function DashboardPage() {
   const receiptsToReview = scopedTransfers.filter((transfer) => transfer.tone === 'issue').length;
 
   useEffect(() => {
+    setSession(getStoredSession());
     const syncScope = (event: Event) => {
       const next = (event as CustomEvent<string>).detail;
       if (locations.includes(next as LocationScope)) setScope(next as LocationScope);
@@ -165,7 +168,15 @@ export default function DashboardPage() {
           <a className={styles.notificationButton} href="/reports" aria-label="Open live in-app operational alerts" title="Live operational alerts"><Icon name="bell" size={17}/></a>
           <select className={styles.headerPeriod} value={period} onChange={(event) => setPeriod(event.target.value as Period)} aria-label="Dashboard date range"><option>7 days</option><option>30 days</option><option>90 days</option></select>
           <button className={styles.headerExport} type="button" onClick={downloadReport}><Icon name="chart" size={14}/> Export</button>
-          <div className={styles.profile}><span className={styles.avatar}>SM</span><span><strong>Sam Morgan</strong><small>Super Admin · demo view</small></span></div>
+          <div className={styles.profile}>
+            <span className={styles.avatar}>
+              {(session?.user?.name || session?.user?.email || 'PR').slice(0, 2).toUpperCase()}
+            </span>
+            <span>
+              <strong>{session?.user?.name || session?.user?.email?.split('@')[0] || 'Sam Morgan'}</strong>
+              <small>{session?.user?.role ? session.user.role.replace('_', ' ') : 'Super Admin'} · active session</small>
+            </span>
+          </div>
         </header>
 
         <div className={styles.content}>

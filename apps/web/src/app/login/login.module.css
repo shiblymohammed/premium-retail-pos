@@ -73,7 +73,7 @@
 
 .presetGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
   gap: 8px;
 }
 
@@ -107,7 +107,7 @@
 }
 
 .presetBtn small {
-  font-size: 9px;
+  font-size: 11.5px;
   font-weight: 400;
   color: #64748b;
   margin-top: 2px;

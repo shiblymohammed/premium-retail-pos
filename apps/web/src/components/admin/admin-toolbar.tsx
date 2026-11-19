@@ -1,0 +1,211 @@
+'use client';
+
+import React from 'react';
+
+export interface FilterOption {
+  value: string;
+  label: string;
+}
+
+export interface FilterDropdownConfig {
+  id: string;
+  label: string;
+  currentValue: string;
+  displayValue?: string;
+  options: FilterOption[];
+  onSelect: (value: string) => void;
+}
+
+export interface AdminToolbarProps {
+  search: string;
+  onSearchChange: (value: string) => void;
+  searchPlaceholder?: string;
+  filters?: FilterDropdownConfig[];
+  openDropdownId?: string | null;
+  onToggleDropdown?: (id: string | null) => void;
+  activeFilterCount?: number;
+  onResetFilters?: () => void;
+  extraActions?: React.ReactNode;
+}
+
+export const AdminToolbar: React.FC<AdminToolbarProps> = ({
+  search,
+  onSearchChange,
+  searchPlaceholder = 'Search records...',
+  filters = [],
+  openDropdownId = null,
+  onToggleDropdown,
+  activeFilterCount = 0,
+  onResetFilters,
+  extraActions,
+}) => {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '12px',
+        marginBottom: '16px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '320px', flexWrap: 'wrap' }}>
+        {/* Search input pill */}
+        <div style={{ position: 'relative', width: '280px', maxWidth: '100%' }}>
+          <span
+            style={{
+              position: 'absolute',
+              left: '12px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: '13px',
+              color: '#94a3b8',
+            }}
+          >
+            🔍
+          </span>
+          <input
+            type="text"
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '7px 14px 7px 32px',
+              borderRadius: '18px',
+              border: '1px solid #cbd5e1',
+              fontSize: '12px',
+              color: '#1e293b',
+              background: '#ffffff',
+              outline: 'none',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+            }}
+          />
+        </div>
+
+        {/* Dropdown filters */}
+        {filters.map((filter) => {
+          const isOpen = openDropdownId === filter.id;
+          const isFiltered = filter.currentValue !== 'ALL';
+          const currentOption = filter.options.find((o) => o.value === filter.currentValue);
+          const buttonLabel = filter.displayValue || (isFiltered ? currentOption?.label : filter.label);
+
+          return (
+            <div key={filter.id} className="custom-filter-dropdown-wrap" style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleDropdown?.(isOpen ? null : filter.id);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 14px',
+                  borderRadius: '20px',
+                  border: isFiltered ? '1px solid #93c5fd' : '1px solid #cbd5e1',
+                  background: isFiltered ? '#eff6ff' : '#ffffff',
+                  color: isFiltered ? '#1a62ea' : '#475569',
+                  fontSize: '12px',
+                  fontWeight: isFiltered ? 750 : 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
+                }}
+              >
+                <span>{buttonLabel}</span>
+                <span style={{ fontSize: '8px', color: isFiltered ? '#1a62ea' : '#94a3b8' }}>▼</span>
+              </button>
+
+              {isOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    left: 0,
+                    minWidth: '200px',
+                    background: '#ffffff',
+                    borderRadius: '12px',
+                    border: '1px solid #e2e8f0',
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.12)',
+                    padding: '6px',
+                    zIndex: 100,
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {filter.options.map((opt) => {
+                    const isSelected = filter.currentValue === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          filter.onSelect(opt.value);
+                          onToggleDropdown?.(null);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '7px',
+                          border: 'none',
+                          background: isSelected ? '#eff6ff' : 'transparent',
+                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          fontSize: '12px',
+                          fontWeight: isSelected ? 700 : 500,
+                          textAlign: 'left',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) e.currentTarget.style.background = 'transparent';
+                        }}
+                      >
+                        <span>{opt.label}</span>
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Reset Filters button */}
+        {(activeFilterCount > 0 || search.trim() !== '') && onResetFilters && (
+          <button
+            type="button"
+            onClick={onResetFilters}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#1a62ea',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              padding: '4px 6px',
+              textDecoration: 'underline',
+            }}
+          >
+            Reset Filters
+          </button>
+        )}
+      </div>
+
+      {extraActions && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {extraActions}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AdminToolbar;

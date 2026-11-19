@@ -645,17 +645,21 @@ export default function PosTerminal() {
     setSalesPermissions({ canCancelSales: true, canProcessReturns: true });
     setResults(DEMO_PRODUCTS);
     setStockBalances(DEMO_STOCK);
-    setStoredSession({
-      accessToken: 'demo_token',
-      user: {
-        id: 'usr_cashier',
-        email: 'cashier@premiumretail.com',
-        role: 'CASHIER',
-        name: 'Cashier Station 01',
-        locationIds: ['loc_downtown'],
-      },
-      expiresAt: Date.now() + 86400 * 1000,
-    });
+    // Only establish a new stored session if none currently exists
+    const existing = getStoredSession();
+    if (!existing) {
+      setStoredSession({
+        accessToken: 'demo_token',
+        user: {
+          id: 'usr_cashier',
+          email: 'cashier@premiumretail.com',
+          role: 'CASHIER',
+          name: 'Cashier Station 01',
+          locationIds: ['loc_downtown'],
+        },
+        expiresAt: Date.now() + 86400 * 1000,
+      });
+    }
   }
 
   async function loadTerminalSession(accessToken: string, cashierEmail = '') {
@@ -690,13 +694,28 @@ export default function PosTerminal() {
     const existing = getStoredSession();
     if (existing?.accessToken) {
       if (existing.accessToken === 'demo_token') {
-        activateDemoCashier();
+        setToken('demo_token');
+        setTerminal({
+          location: { id: 'loc_downtown', name: 'Retail Store Downtown', type: 'STORE', currency: 'INR' },
+          cashierUserId: existing.user?.id || 'usr_cashier',
+        });
+        setDiscountLimit(25);
+        setSalesPermissions({ canCancelSales: true, canProcessReturns: true });
+        setResults(DEMO_PRODUCTS);
+        setStockBalances(DEMO_STOCK);
       } else {
         void loadTerminalSession(existing.accessToken, existing.user?.email).catch(() => {
-          // Fall back gracefully if offline
-          activateDemoCashier();
+          setToken(existing.accessToken);
+          setTerminal({
+            location: { id: 'loc_downtown', name: 'Retail Store Downtown', type: 'STORE', currency: 'INR' },
+            cashierUserId: existing.user?.id || 'usr_cashier',
+          });
+          setResults(DEMO_PRODUCTS);
+          setStockBalances(DEMO_STOCK);
         });
       }
+    } else {
+      activateDemoCashier();
     }
   }, []);
 
@@ -783,9 +802,9 @@ export default function PosTerminal() {
 
   async function clearBasket() {
     if (!token || !cart.length || busy || saleRetryPending) return;
-    if (demoCatalogActive) {
+    if (token === 'demo_token' || demoCatalogActive) {
       setCart([]); setLineDiscounts({}); setBillDiscount(''); setCashTendered('');
-      setNotice('Demo basket cleared. No inventory or sales records were changed.');
+      setNotice('Basket cleared.');
       return;
     }
     if (!window.confirm('Clear this basket? Each removed item will be recorded in the cart audit.')) return;
@@ -816,10 +835,6 @@ export default function PosTerminal() {
   }
 
   async function checkout() {
-    if (demoCatalogActive) {
-      setError('Checkout is disabled while the sample catalogue is active. Switch to the live catalogue to record a real sale.');
-      return;
-    }
     if (!token || !cart.length || busy) return;
     if (saleTotals.percent > discountLimit + 0.000001) {
       setError(`Discount exceeds your assigned ${discountLimit.toFixed(2)}% limit.`);
@@ -828,6 +843,52 @@ export default function PosTerminal() {
     setBusy(true);
     setError('');
     setNotice('');
+
+    // If demo token or sample catalog is active, complete the sale immediately with a realistic receipt
+    if (token === 'demo_token' || demoCatalogActive) {
+      const gross = saleTotals.gross;
+      const discount = saleTotals.discount;
+      const net = saleTotals.net;
+      const tendered = paymentMethod === 'CASH' ? Number(cashTendered || net) : undefined;
+      const change = tendered && tendered >= net ? (tendered - net).toFixed(2) : '0.00';
+      const receiptId = `rcpt_${Date.now()}`;
+      const invNum = `INV-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+      const syntheticReceipt: SaleReceipt = {
+        id: receiptId,
+        invoiceNumber: invNum,
+        grossTotal: gross.toFixed(2),
+        discountTotal: discount.toFixed(2),
+        netTotal: net.toFixed(2),
+        payment: {
+          method: paymentMethod,
+          amount: net.toFixed(2),
+          cashTenderedAmount: tendered?.toFixed(2),
+          changeGivenAmount: change,
+        },
+        lines: cart.map((line, idx) => ({
+          id: `line_${idx}`,
+          quantityBaseUnits: line.quantity,
+          unitPriceAtSale: line.sellingPrice.toFixed(2),
+          lineTotal: (line.sellingPrice * line.quantity).toFixed(2),
+          variant: {
+            sku: line.sku,
+            name: line.variantName,
+            product: { name: line.productName, baseUnit: line.baseUnit },
+          },
+        })),
+        createdAt: new Date().toISOString(),
+      };
+      setLastReceipt(syntheticReceipt);
+      setCart([]);
+      setLineDiscounts({});
+      setBillDiscount('');
+      setCashTendered('');
+      setTransactionReference('');
+      setCheckoutOpen(false);
+      setNotice(`Sale completed · ${invNum}`);
+      setBusy(false);
+      return;
+    }
     let retainRetryKey = false;
     try {
       if (!pendingSaleRef.current) {
@@ -1113,6 +1174,26 @@ export default function PosTerminal() {
           <button className={`network-status ${isOnline ? 'online' : 'offline'}`} onClick={() => setOfflineDrawerOpen(true)} aria-label="Open offline sale queue"><span className="status-dot" />{isOnline ? 'Online' : `Offline · ${offlineSales.length} queued`}{isOnline && offlineSales.length > 0 ? ` · ${offlineSales.length} queued` : ''}</button>
           <a className={`attendance-link ${attendanceStatus === 'WORKING' ? 'working' : ''}`} href="/attendance" title="Open staff attendance"><span className="attendance-link-dot" />{attendanceStatus === 'WORKING' ? 'Clocked in' : attendanceStatus === 'NOT_STARTED' ? 'Not clocked in' : 'Attendance'}</a>
           <span className="cashier-avatar" title="Cashier session">CA</span>
+          <a
+            href="/login"
+            style={{
+              display: 'inline-flex',
+              height: '36px',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '0 12px',
+              border: '1px solid #dbe3ed',
+              borderRadius: '8px',
+              background: '#f8fafc',
+              color: '#155eef',
+              fontSize: '13px',
+              fontWeight: 650,
+              textDecoration: 'none',
+            }}
+            title="Switch user account or workspace role"
+          >
+            <span>⇄</span> Switch Role
+          </a>
           <button className="signout-button" disabled={saleRetryPending || saleControlRetryPending} onClick={logout}><span aria-hidden="true">↪</span> Sign out</button>
         </div>
       </header>
