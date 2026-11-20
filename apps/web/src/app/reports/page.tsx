@@ -1,61 +1,15 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
+import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './reports.module.css';
+import { Icon, formatInr, formatCompactInr, formatDay, type SalesSummary, type SalesDetails, type StockReport, type TableData } from './report-ui';
+import { SalesView, InvoicesView, StockView, SpecializedView } from './report-views';
 
 const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
 type Location = { id: string; name: string; type: string };
-
-type SalesSummary = {
-  period: { from: string; to: string };
-  totals: { netSales: string; completedInvoices: number; cancelledInvoices: number };
-  locations: Array<{ locationId: string; locationName: string; invoices: number; netSales: string; cancelled: number }>;
-  daily: Array<{ date: string; invoices: number; netSales: string; cancelled: number }>;
-  truncated: boolean;
-};
-
-type SalesDetails = {
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-  rows: Array<{
-    id: string;
-    invoiceNumber: string;
-    location: { name: string };
-    status: string;
-    netTotal: string;
-    createdAt: string;
-  }>;
-};
-
-type StockReport = {
-  totals: {
-    variants: number;
-    availableBaseUnits: number;
-    lowStockVariants: number;
-    negativeStockVariants: number;
-  };
-  rows: Array<{
-    sku: string;
-    productName: string;
-    variantName: string;
-    locationName: string;
-    baseUnit: string;
-    available: number;
-    cartons: number | null;
-    looseBaseUnits: number;
-    unitsPerCarton: number | null;
-    inTransit: number;
-    reserved: number;
-    quarantined: number;
-    reorderLevelBase: number | null;
-    lowStock: boolean;
-    negativeStock: boolean;
-  }>;
-};
 
 type NotificationItem = {
   id: string;
@@ -76,6 +30,7 @@ type Notifications = {
 };
 
 type ReportKind =
+  | 'overview'
   | 'sales'
   | 'salesDetails'
   | 'stock'
@@ -86,13 +41,6 @@ type ReportKind =
   | 'priceChanges'
   | 'cancellations'
   | 'itemDeletions';
-
-type TableData = {
-  title: string;
-  description: string;
-  headers: string[];
-  rows: string[][];
-};
 
 const DEMO_LOCATIONS: Location[] = [
   { id: 'loc_downtown', name: 'Downtown Store', type: 'RETAIL_STORE' },
@@ -183,6 +131,95 @@ const DEMO_STOCK: StockReport = {
   ],
 };
 
+/** Specialised report datasets (demo data until the matching API endpoints are wired). */
+const SPECIALIZED_REPORTS: Partial<Record<ReportKind, TableData>> = {
+  lowStock: {
+    title: 'Low Stock & Replenishment Reorder Points',
+    description: 'Variants at or below reorder threshold across stores',
+    headers: ['Location', 'SKU', 'Product & Variant', 'On Hand', 'Reorder Level', 'Replenishment Status'],
+    rows: [
+      ['North Mall', 'BEV-1056', 'Green Tea Bags (Lemon Mint - 25 bags)', '8 packs', '12 packs', 'Suggested 12 packs'],
+      ['Downtown Store', 'SNK-4172', 'Potato Chips (Classic salted - 52 g)', '9 packs', '18 packs', 'Suggested 24 packs'],
+      ['Downtown Store', 'PAN-5020', 'Olive Oil Extra Virgin (Cold Pressed - 1 L)', '4 bottles', '8 bottles', 'Suggested 8 bottles'],
+      ['West End Outlet', 'PC-2031', 'Herbal Shampoo (Aloe vera - 500 ml)', '-2 bottles', '6 bottles', 'Deficit: Audit Freeze Alert'],
+    ],
+  },
+  ledger: {
+    title: 'Immutable Inventory Movement Ledger',
+    description: 'Append-only ledger entries recording all physical inventory movements',
+    headers: ['Timestamp', 'Type', 'Location', 'SKU', 'Quantity', 'State', 'Source / Destination', 'Actor'],
+    rows: [
+      ['Today 14:10', 'SALE', 'Downtown Store', 'BEV-1048', '-2 packs', 'AVAILABLE', 'Point of Sale (INV-0842)', 'Rajesh Kumar (Cashier)'],
+      ['Today 12:45', 'RETURN_INWARD', 'North Mall', 'SNK-4172', '+1 pack', 'RESTOCKED', 'Customer Return (RET-0041)', 'Anita Sharma (Cashier)'],
+      ['Yesterday 18:00', 'STOCK_ADJUSTMENT', 'Downtown Store', 'PAN-5012', '+4 bags', 'AVAILABLE', 'Physical Audit (audit_7891)', 'Store Manager'],
+      ['16-Nov 11:30', 'TRANSFER_DISPATCH', 'Central Warehouse', 'HL-J108', '-24 boxes', 'IN_TRANSIT', 'Warehouse -> Downtown', 'Warehouse Logistics'],
+    ],
+  },
+  transferDiscrepancies: {
+    title: 'Inter-Store Transfer Discrepancies',
+    description: 'Dispatched manifests vs goods physically verified upon arrival',
+    headers: ['Transfer Manifest', 'Route', 'SKU', 'Dispatched', 'Received Good', 'Damaged (Quarantine)', 'Shortage'],
+    rows: [
+      ['TRF-2026-0182', 'Central Warehouse -> North Mall', 'BEV-1056', '24 packs', '22 packs', '2 packs (broken box)', '0 units'],
+      ['TRF-2026-0155', 'Central Warehouse -> West End', 'PC-2031', '12 bottles', '10 bottles', '0 units', '2 units missing'],
+    ],
+  },
+  auditVariances: {
+    title: 'Stocktake Audit Variance History',
+    description: 'Discrepancy logs from off-hours physical counts',
+    headers: ['Audit Session', 'Store', 'Date', 'Product & SKU', 'Expected', 'Physical Count', 'Delta Variance', 'Resolution'],
+    rows: [
+      ['audit_7891', 'Downtown Store', '12-Nov-2026', 'Basmati Royal Rice (PAN-5012)', '60 bags', '64 bags', '+4 bags (Surplus)', 'Approved by Manager (Stock In)'],
+      ['audit_6542', 'Downtown Store', '05-Nov-2026', 'Potato Chips (SNK-4172)', '12 packs', '9 packs', '-3 packs (Deficit)', 'Approved: Shelf breakage written off'],
+    ],
+  },
+  priceChanges: {
+    title: 'Master Price Alteration Audit Trail (Invariant 10)',
+    description: 'Super Admin price change log with documented business justification',
+    headers: ['Effective Date', 'SKU & Product', 'Field', 'Old Price (INR)', 'New Price (INR)', 'Authorized By', 'Mandatory Reason'],
+    rows: [
+      ['10-Nov-2026', 'BEV-1048 (Arabica Coffee)', 'Retail Selling Price', '₹450.00', '₹485.00', 'superadmin@retail.com', 'Supplier raw bean cost increase +8%'],
+      ['01-Nov-2026', 'PAN-5020 (Olive Oil 1L)', 'Retail Selling Price', '₹850.00', '₹890.00', 'superadmin@retail.com', 'Import tariff revision quarterly adjust'],
+    ],
+  },
+  cancellations: {
+    title: 'Cancelled Invoices & Void Audit Log (OD-08)',
+    description: 'Voided transaction records with manual refund tracking and ledger reversal status',
+    headers: ['Invoice #', 'Store Branch', 'Cancelled Timestamp', 'Supervisor Authorizer', 'Net Refund (INR)', 'Method', 'Cancellation Reason'],
+    rows: [
+      ['INV-2026-0600', 'West End Outlet', '15-Nov-2026 14:15', 'Vikram Mehta (Supervisor)', '₹598.00', 'Card (manual)', 'Customer billing error: Duplicate payment charged by terminal'],
+      ['INV-2026-0512', 'Downtown Store', '08-Nov-2026 18:30', 'Rajesh Manager', '₹485.00', 'Cash', 'Customer requested walkout before bagging completion'],
+    ],
+  },
+  itemDeletions: {
+    title: 'Cashier Cart Line Item Deletions',
+    description: 'POS cart deletion security audit trail to detect cashier shrinkage or tampering',
+    headers: ['Timestamp', 'Cashier', 'Terminal', 'Product Scanned & Removed', 'Qty', 'Unit Price', 'Supervisor Override'],
+    rows: [
+      ['Today 13:22', 'Rajesh Kumar (Cashier)', 'Downtown Register 1', 'Organic Dark Chocolate (SNK-4180)', '1 pack', '₹180.00', 'None (Below threshold)'],
+      ['Yesterday 17:05', 'Amit Verma (Cashier)', 'West End Register 2', 'Olive Oil 1 L (PAN-5020)', '2 bottles', '₹890.00', 'Authorized by Store Supervisor'],
+    ],
+  },
+};
+
+type RangePreset = 'last7' | 'last30' | 'custom';
+
+const SHARE_COLORS = ['#3e64a0', '#7f9cc9', '#c3d2e8', '#dce5f2'];
+
+const REPORT_TABS: Array<{ key: ReportKind; label: string }> = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'sales', label: 'Sales' },
+  { key: 'salesDetails', label: 'Invoices' },
+  { key: 'stock', label: 'Stock' },
+  { key: 'lowStock', label: 'Low stock' },
+  { key: 'ledger', label: 'Movements' },
+  { key: 'transferDiscrepancies', label: 'Transfers' },
+  { key: 'auditVariances', label: 'Audits' },
+  { key: 'priceChanges', label: 'Price history' },
+  { key: 'cancellations', label: 'Voided sales' },
+  { key: 'itemDeletions', label: 'Deletions' },
+];
+
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 
 function pdfSafe(value: string) {
@@ -247,26 +284,6 @@ function downloadPdf(title: string, description: string, headers: string[], rows
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function Icon({ name, size = 18 }: { name: string; size?: number }) {
-  const icons: Record<string, React.ReactNode> = {
-    bell: <><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></>,
-    download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>,
-    calendar: <><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>,
-    mapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
-    fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8M16 17H8M10 9H8" /></>,
-    filter: <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />,
-    check: <path d="m5 12 4 4L19 6" />,
-    x: <path d="M18 6 6 18M6 6l12 12" />,
-    alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></>,
-  };
-
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {icons[name] || <circle cx="12" cy="12" r="10" />}
-    </svg>
-  );
-}
-
 export default function ReportsPage() {
   const [token, setToken] = useState('demo_token');
   const [role] = useState('SUPER_ADMIN');
@@ -274,11 +291,11 @@ export default function ReportsPage() {
   const [locationId, setLocationId] = useState('');
   const [from, setFrom] = useState(isoDate(new Date(Date.now() - 30 * 86400000)));
   const [to, setTo] = useState(isoDate(new Date()));
-  const [report, setReport] = useState<ReportKind>('sales');
+  const [report, setReport] = useState<ReportKind>('overview');
 
-  const [sales, setSales] = useState<SalesSummary | null>(DEMO_SALES);
-  const [salesDetails, setSalesDetails] = useState<SalesDetails | null>(DEMO_SALES_DETAILS);
-  const [stock, setStock] = useState<StockReport | null>(DEMO_STOCK);
+  const [sales] = useState<SalesSummary | null>(DEMO_SALES);
+  const [salesDetails] = useState<SalesDetails | null>(DEMO_SALES_DETAILS);
+  const [stock] = useState<StockReport | null>(DEMO_STOCK);
   const [notifications, setNotifications] = useState<Notifications | null>({
     generatedAt: new Date().toISOString(),
     total: DEMO_NOTIFICATIONS.length,
@@ -288,9 +305,20 @@ export default function ReportsPage() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [tableData, setTableData] = useState<TableData | null>(null);
 
-  const [page, setPage] = useState(1);
-  const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [query, setQuery] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  // Close the export menu on outside click / Escape
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onClick = (e: MouseEvent) => { if (!exportRef.current?.contains(e.target as Node)) setExportOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setExportOpen(false); };
+    window.addEventListener('mousedown', onClick);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('mousedown', onClick); window.removeEventListener('keydown', onKey); };
+  }, [exportOpen]);
 
   // Sync selected location from global app frame if present
   useEffect(() => {
@@ -315,85 +343,22 @@ export default function ReportsPage() {
     return () => window.removeEventListener('premium-retail-location-change', syncLocation);
   }, []);
 
+  // Deep link: /reports?tab=stock opens that tab; switching tabs keeps the URL in sync.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    if (requested && REPORT_TABS.some((t) => t.key === requested)) setReport(requested as ReportKind);
+  }, []);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (report === 'overview') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', report);
+    window.history.replaceState(null, '', url);
+  }, [report]);
+
   // Load Specialized Report datasets
   useEffect(() => {
-    if (report === 'sales' || report === 'stock' || report === 'salesDetails') return;
-
-    if (report === 'lowStock') {
-      setTableData({
-        title: 'Low Stock & Replenishment Reorder Points',
-        description: 'Variants at or below reorder threshold across stores',
-        headers: ['Location', 'SKU', 'Product & Variant', 'On Hand', 'Reorder Level', 'Replenishment Status'],
-        rows: [
-          ['North Mall', 'BEV-1056', 'Green Tea Bags (Lemon Mint - 25 bags)', '8 packs', '12 packs', 'Suggested 12 packs'],
-          ['Downtown Store', 'SNK-4172', 'Potato Chips (Classic salted - 52 g)', '9 packs', '18 packs', 'Suggested 24 packs'],
-          ['Downtown Store', 'PAN-5020', 'Olive Oil Extra Virgin (Cold Pressed - 1 L)', '4 bottles', '8 bottles', 'Suggested 8 bottles'],
-          ['West End Outlet', 'PC-2031', 'Herbal Shampoo (Aloe vera - 500 ml)', '-2 bottles', '6 bottles', 'Deficit: Audit Freeze Alert'],
-        ],
-      });
-    } else if (report === 'ledger') {
-      setTableData({
-        title: 'Immutable Inventory Movement Ledger',
-        description: 'Append-only ledger entries recording all physical inventory movements',
-        headers: ['Timestamp', 'Type', 'Location', 'SKU', 'Quantity', 'State', 'Source / Destination', 'Actor'],
-        rows: [
-          ['Today 14:10', 'SALE', 'Downtown Store', 'BEV-1048', '-2 packs', 'AVAILABLE', 'Point of Sale (INV-0842)', 'Rajesh Kumar (Cashier)'],
-          ['Today 12:45', 'RETURN_INWARD', 'North Mall', 'SNK-4172', '+1 pack', 'RESTOCKED', 'Customer Return (RET-0041)', 'Anita Sharma (Cashier)'],
-          ['Yesterday 18:00', 'STOCK_ADJUSTMENT', 'Downtown Store', 'PAN-5012', '+4 bags', 'AVAILABLE', 'Physical Audit (audit_7891)', 'Store Manager'],
-          ['16-Nov 11:30', 'TRANSFER_DISPATCH', 'Central Warehouse', 'HL-J108', '-24 boxes', 'IN_TRANSIT', 'Warehouse -> Downtown', 'Warehouse Logistics'],
-        ],
-      });
-    } else if (report === 'transferDiscrepancies') {
-      setTableData({
-        title: 'Inter-Store Transfer Discrepancies',
-        description: 'Dispatched manifests vs goods physically verified upon arrival',
-        headers: ['Transfer Manifest', 'Route', 'SKU', 'Dispatched', 'Received Good', 'Damaged (Quarantine)', 'Shortage'],
-        rows: [
-          ['TRF-2026-0182', 'Central Warehouse -> North Mall', 'BEV-1056', '24 packs', '22 packs', '2 packs (broken box)', '0 units'],
-          ['TRF-2026-0155', 'Central Warehouse -> West End', 'PC-2031', '12 bottles', '10 bottles', '0 units', '2 units missing'],
-        ],
-      });
-    } else if (report === 'auditVariances') {
-      setTableData({
-        title: 'Stocktake Audit Variance History',
-        description: 'Discrepancy logs from off-hours physical counts',
-        headers: ['Audit Session', 'Store', 'Date', 'Product & SKU', 'Expected', 'Physical Count', 'Delta Variance', 'Resolution'],
-        rows: [
-          ['audit_7891', 'Downtown Store', '12-Nov-2026', 'Basmati Royal Rice (PAN-5012)', '60 bags', '64 bags', '+4 bags (Surplus)', 'Approved by Manager (Stock In)'],
-          ['audit_6542', 'Downtown Store', '05-Nov-2026', 'Potato Chips (SNK-4172)', '12 packs', '9 packs', '-3 packs (Deficit)', 'Approved: Shelf breakage written off'],
-        ],
-      });
-    } else if (report === 'priceChanges') {
-      setTableData({
-        title: 'Master Price Alteration Audit Trail (Invariant 10)',
-        description: 'Super Admin price change log with documented business justification',
-        headers: ['Effective Date', 'SKU & Product', 'Field', 'Old Price (INR)', 'New Price (INR)', 'Authorized By', 'Mandatory Reason'],
-        rows: [
-          ['10-Nov-2026', 'BEV-1048 (Arabica Coffee)', 'Retail Selling Price', '₹450.00', '₹485.00', 'superadmin@retail.com', 'Supplier raw bean cost increase +8%'],
-          ['01-Nov-2026', 'PAN-5020 (Olive Oil 1L)', 'Retail Selling Price', '₹850.00', '₹890.00', 'superadmin@retail.com', 'Import tariff revision quarterly adjust'],
-        ],
-      });
-    } else if (report === 'cancellations') {
-      setTableData({
-        title: 'Cancelled Invoices & Void Audit Log (OD-08)',
-        description: 'Voided transaction records with manual refund tracking and ledger reversal status',
-        headers: ['Invoice #', 'Store Branch', 'Cancelled Timestamp', 'Supervisor Authorizer', 'Net Refund (INR)', 'Method', 'Cancellation Reason'],
-        rows: [
-          ['INV-2026-0600', 'West End Outlet', '15-Nov-2026 14:15', 'Vikram Mehta (Supervisor)', '₹598.00', 'Card (manual)', 'Customer billing error: Duplicate payment charged by terminal'],
-          ['INV-2026-0512', 'Downtown Store', '08-Nov-2026 18:30', 'Rajesh Manager', '₹485.00', 'Cash', 'Customer requested walkout before bagging completion'],
-        ],
-      });
-    } else if (report === 'itemDeletions') {
-      setTableData({
-        title: 'Cashier Cart Line Item Deletions',
-        description: 'POS cart deletion security audit trail to detect cashier shrinkage or tampering',
-        headers: ['Timestamp', 'Cashier', 'Terminal', 'Product Scanned & Removed', 'Qty', 'Unit Price', 'Supervisor Override'],
-        rows: [
-          ['Today 13:22', 'Rajesh Kumar (Cashier)', 'Downtown Register 1', 'Organic Dark Chocolate (SNK-4180)', '1 pack', '₹180.00', 'None (Below threshold)'],
-          ['Yesterday 17:05', 'Amit Verma (Cashier)', 'West End Register 2', 'Olive Oil 1 L (PAN-5020)', '2 bottles', '₹890.00', 'Authorized by Store Supervisor'],
-        ],
-      });
-    }
+    if (report === 'overview' || report === 'sales' || report === 'stock' || report === 'salesDetails') return;
+    setTableData(SPECIALIZED_REPORTS[report] ?? null);
   }, [report]);
 
   function markRead(id: string) {
@@ -421,7 +386,10 @@ export default function ReportsPage() {
     let headers: string[] = [];
     let rows: unknown[][] = [];
 
-    if (report === 'sales') {
+    if (report === 'overview') {
+      headers = ['Location', 'Invoices', 'Cancelled', 'Net Sales (INR)', 'Average Bill (INR)'];
+      rows = (sales?.locations ?? []).map(r => [r.locationName, r.invoices, r.cancelled, r.netSales, r.invoices ? (Number(r.netSales) / r.invoices).toFixed(2) : '0.00']);
+    } else if (report === 'sales') {
       headers = ['Date', 'Invoices', 'Cancelled', 'Net Sales (INR)'];
       rows = (sales?.daily ?? []).map(r => [r.date, r.invoices, r.cancelled, r.netSales]);
     } else if (report === 'salesDetails') {
@@ -453,428 +421,347 @@ export default function ReportsPage() {
 
   function handleExportPdf() {
     const { headers, rows } = getExportData();
-    const reportTitle = tableData ? tableData.title : report.toUpperCase() + ' REPORT';
+    const reportTitle = report === 'overview' ? 'REPORTS OVERVIEW - STORE PERFORMANCE' : tableData && !['sales', 'salesDetails', 'stock'].includes(report) ? tableData.title : report.toUpperCase() + ' REPORT';
     const description = `${rows.length} records · ${locationId ? locations.find(l => l.id === locationId)?.name : 'All retail locations'}`;
     downloadPdf(reportTitle, description, headers, rows, `Premium-Retail-Report-${report}-${from}-to-${to}.csv`);
     setNotice(`Exported ${rows.length} records to vector PDF.`);
   }
 
-  return (
-    <div className={styles.container}>
-      {/* Top Breadcrumb Bar with Notifications Bell */}
-      <div className={styles.topBar}>
-        <div className={styles.breadcrumb}>
-          <span>Intelligence</span>
-          <span className={styles.separator}>›</span>
-          <span className={styles.currentPage}>Enterprise Reports & Export Center</span>
-        </div>
+  // ---------- Derived overview data (scoped by the selected location) ----------
+  const q = query.trim().toLowerCase();
+  const matches = (...values: Array<string | number>) => !q || values.join(' ').toLowerCase().includes(q);
+  const scopeName = locationId ? locations.find((l) => l.id === locationId)?.name ?? 'Selected location' : 'All retail locations';
+  const scopedStores = (sales?.locations ?? []).filter((l) => !locationId || l.locationId === locationId);
+  const netRevenue = scopedStores.reduce((sum, l) => sum + Number(l.netSales), 0);
+  const invoiceCount = scopedStores.reduce((sum, l) => sum + l.invoices, 0);
+  const cancelledCount = scopedStores.reduce((sum, l) => sum + l.cancelled, 0);
+  const avgBill = invoiceCount ? netRevenue / invoiceCount : 0;
+  const cancelRate = invoiceCount + cancelledCount ? (cancelledCount / (invoiceCount + cancelledCount)) * 100 : 0;
+  const networkRevenue = (sales?.locations ?? []).reduce((sum, l) => sum + Number(l.netSales), 0);
+  const maxStoreRevenue = Math.max(...scopedStores.map((l) => Number(l.netSales)), 1);
+  const byAvg = scopedStores.filter((s) => s.invoices).map((s) => ({ store: s, avg: Number(s.netSales) / s.invoices })).sort((a, b) => b.avg - a.avg);
+  const avgSpread = byAvg.length > 1 ? { high: byAvg[0].store, highAvg: byAvg[0].avg, low: byAvg[byAvg.length - 1].store, lowAvg: byAvg[byAvg.length - 1].avg } : null;
+  const topStore = [...scopedStores].sort((a, b) => Number(b.netSales) - Number(a.netSales))[0];
 
-        <div className={styles.topBarRight}>
+  const scopedStockRows = (stock?.rows ?? []).filter((r) => !locationId || r.locationName === scopeName);
+  const lowStockCount = locationId ? scopedStockRows.filter((r) => r.lowStock).length : stock?.totals.lowStockVariants ?? 0;
+  const negativeCount = locationId ? scopedStockRows.filter((r) => r.negativeStock).length : stock?.totals.negativeStockVariants ?? 0;
+  const coverRows = scopedStockRows
+    .filter((r) => r.reorderLevelBase)
+    .map((r) => ({ ...r, cover: (r.available / (r.reorderLevelBase || 1)) * 100 }))
+    .sort((a, b) => a.cover - b.cover)
+    .filter((r) => matches(r.productName, r.sku, r.locationName));
+  const worstRow = coverRows.find((r) => r.negativeStock) ?? coverRows.find((r) => r.lowStock);
+
+  const daily = sales?.daily ?? [];
+  const maxDaily = Math.max(...daily.map((d) => Number(d.netSales)), 1);
+  const bestDay = [...daily].sort((a, b) => Number(b.netSales) - Number(a.netSales))[0];
+
+  const STOCK_STATES = [
+    { key: 'available', label: 'Available' },
+    { key: 'inTransit', label: 'In transit' },
+    { key: 'reserved', label: 'Reserved' },
+    { key: 'quarantined', label: 'Quarantined' },
+  ] as const;
+  const heatLocations = Array.from(new Set(scopedStockRows.map((r) => r.locationName)));
+  const heat = heatLocations.map((loc) => {
+    const rows = scopedStockRows.filter((r) => r.locationName === loc);
+    return { loc, values: STOCK_STATES.map((s) => rows.reduce((sum, r) => sum + Math.max(0, r[s.key]), 0)) };
+  });
+  const heatMax = STOCK_STATES.map((_, col) => Math.max(...heat.map((h) => h.values[col]), 1));
+  const heatLevel = (value: number, col: number) => (value <= 0 ? -1 : Math.min(4, Math.floor((value / heatMax[col]) * 4.999)));
+
+  const rangeDays = Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
+  const rangePreset: RangePreset = to === isoDate(new Date()) && (rangeDays === 7 || rangeDays === 30) ? (rangeDays === 7 ? 'last7' : 'last30') : 'custom';
+  const rangeLabel = `${formatDay(from)} – ${formatDay(to)}`;
+  const reportLabel = REPORT_TABS.find((t) => t.key === report)?.label ?? 'Overview';
+
+  return (
+    <div className={styles.page}>
+      {/* ---------- Header ---------- */}
+      <header className={styles.header}>
+        <div>
+          <h1>Reports</h1>
+          <p>{rangeLabel} · {scopeName} · {reportLabel}</p>
+        </div>
+        <div className={styles.headerActions}>
+          <label className={styles.search}>
+            <Icon name="search" size={16} />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search stores, SKUs, invoices…" aria-label="Search reports" />
+            {query && <button type="button" onClick={() => setQuery('')} aria-label="Clear search"><Icon name="x" size={13} /></button>}
+          </label>
           <button
             type="button"
-            className={`${styles.notificationBtn} ${showNotifications ? styles.active : ''}`}
+            className={`${styles.circleButton} ${showNotifications ? styles.circleActive : ''}`}
             onClick={() => setShowNotifications(!showNotifications)}
-            title="Operational Notifications Drawer"
+            aria-label="Operational alerts"
+            title="Operational alerts"
           >
             <Icon name="bell" size={18} />
-            {notifications && notifications.unread > 0 && (
-              <span className={styles.unreadBadge}>{notifications.unread}</span>
-            )}
+            {notifications && notifications.unread > 0 && <span className={styles.badgeDot}>{notifications.unread}</span>}
           </button>
-        </div>
-      </div>
-
-      <div className={styles.mainContent}>
-        {/* Notification Drawer (Collapsible) */}
-        {showNotifications && notifications && (
-          <div className={styles.notificationsDrawer}>
-            <div className={styles.drawerHeader}>
-              <div>
-                <h3>In-App Operational Alerts</h3>
-                <p>Real-time inventory alerts, transfer discrepancies, and audit lock events</p>
+          <div className={styles.exportWrap} ref={exportRef}>
+            <button type="button" className={styles.primaryButton} onClick={() => setExportOpen((o) => !o)} aria-haspopup="menu" aria-expanded={exportOpen}>
+              <Icon name="download" size={16} /> Export report
+            </button>
+            {exportOpen && (
+              <div className={styles.exportMenu} role="menu">
+                <div className={styles.exportHeading}>EXPORT {reportLabel.toUpperCase()}</div>
+                <button type="button" role="menuitem" onClick={() => { handleExportPdf(); setExportOpen(false); }}><Icon name="fileText" size={15} /> Download PDF</button>
+                <button type="button" role="menuitem" onClick={() => { handleExportCsv(); setExportOpen(false); }}><Icon name="download" size={15} /> Export CSV</button>
               </div>
-              <div className={styles.drawerActions}>
-                {notifications.unread > 0 && (
-                  <button type="button" onClick={markAllRead} className={styles.btnSmallText}>
-                    Mark all as read
-                  </button>
-                )}
-                <button type="button" onClick={() => setShowNotifications(false)} className={styles.iconBtn}>
-                  <Icon name="x" size={16} />
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.alertList}>
-              {notifications.items.map((item) => (
-                <div key={item.id} className={`${styles.alertCard} ${item.readAt ? styles.alertRead : ''}`}>
-                  <div className={styles.alertDot} />
-                  <div className={styles.alertBody}>
-                    <div className={styles.alertTitleRow}>
-                      <strong>{item.title}</strong>
-                      <small>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small>
-                    </div>
-                    <p>{item.message}</p>
-                    <div className={styles.alertFooter}>
-                      <a href={item.href} className={styles.alertLink}>View details →</a>
-                      {!item.readAt && (
-                        <button type="button" onClick={() => markRead(item.id)} className={styles.markReadBtn}>
-                          Dismiss
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Feedback notice */}
-        {notice && (
-          <div className={styles.noticeAlert}>
-            <Icon name="check" size={16} />
-            <span>{notice}</span>
-            <button onClick={() => setNotice('')} className={styles.iconBtn}>
-              <Icon name="x" size={14} />
-            </button>
-          </div>
-        )}
-
-        {/* Page Header with Export Buttons */}
-        <div className={styles.pageHeader}>
-          <div>
-            <h1 className={styles.pageTitle}>Enterprise Intelligence & Reports</h1>
-            <p className={styles.pageSubtitle}>
-              Audited retail business data across stores: turnover, carton conversions, ledger movements, and discrepancy logs with client-side PDF/CSV document generation.
-            </p>
-          </div>
-          <div className={styles.exportGroup}>
-            <button type="button" onClick={handleExportPdf} className={styles.btnSecondary}>
-              <Icon name="download" size={16} />
-              <span>Download PDF</span>
-            </button>
-            <button type="button" onClick={handleExportCsv} className={styles.btnPrimary}>
-              <Icon name="fileText" size={16} />
-              <span>Export CSV</span>
-            </button>
+            )}
           </div>
         </div>
+      </header>
 
-        {/* Filters Bar: Location Scoping & Date Range */}
-        <div className={styles.filterCard}>
-          <div className={styles.filterItem}>
-            <label>Location Boundary:</label>
-            <select
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
-              className={styles.select}
-            >
-              <option value="">All Assigned Locations</option>
-              {locations.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name} ({loc.type === 'RETAIL_STORE' ? 'Store' : 'Warehouse'})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className={styles.filterItem}>
-            <label>From Date:</label>
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className={styles.input}
-            />
-          </div>
-
-          <div className={styles.filterItem}>
-            <label>To Date:</label>
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className={styles.input}
-            />
-          </div>
-
-          <div className={styles.filterPresets}>
-            <button
-              type="button"
-              className={styles.presetChip}
-              onClick={() => {
-                setFrom(isoDate(new Date(Date.now() - 7 * 86400000)));
-                setTo(isoDate(new Date()));
-              }}
-            >
-              Last 7 Days
-            </button>
-            <button
-              type="button"
-              className={styles.presetChip}
-              onClick={() => {
-                setFrom(isoDate(new Date(Date.now() - 30 * 86400000)));
-                setTo(isoDate(new Date()));
-              }}
-            >
-              Last 30 Days
-            </button>
-          </div>
-        </div>
-
-        {/* 9 Core Report Tabs */}
-        <div className={styles.reportTabsWrap}>
-          {[
-            ['sales', '1. Sales Summary'],
-            ['salesDetails', '2. Invoices Detail'],
-            ['stock', '3. Stock Ledger'],
-            ['lowStock', '4. Low Stock Alerts'],
-            ['ledger', '5. Movement Ledger'],
-            ['transferDiscrepancies', '6. Transfer Discrepancies'],
-            ['auditVariances', '7. Audit Variances'],
-            ['priceChanges', '8. Price History'],
-            ['cancellations', '9. Voided Sales'],
-            ['itemDeletions', '10. Item Deletions'],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={`${styles.reportTab} ${report === key ? styles.active : ''}`}
-              onClick={() => setReport(key as ReportKind)}
-            >
-              {label}
+      {/* ---------- Tabs + filters ---------- */}
+      <div className={styles.toolbar}>
+        <div className={styles.tabs} role="tablist" aria-label="Report type">
+          {REPORT_TABS.map((tab) => (
+            <button key={tab.key} type="button" role="tab" aria-selected={report === tab.key} className={report === tab.key ? styles.tabActive : ''} onClick={() => setReport(tab.key)}>
+              {tab.label}
             </button>
           ))}
         </div>
-
-        {/* REPORT VIEW 1: Sales Summary */}
-        {report === 'sales' && sales && (
-          <div className={styles.reportContainer}>
-            <div className={styles.kpiGrid}>
-              <div className={styles.kpiCard}>
-                <span className={styles.kpiLabel}>Net Revenue</span>
-                <strong className={styles.kpiValue}>
-                  ₹{Number(sales.totals.netSales).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                </strong>
-                <span className={styles.kpiSub}>Completed transactions</span>
+        <div className={styles.filters}>
+          <PillDropdown<RangePreset>
+            value={rangePreset}
+            heading="Reporting period"
+            ariaLabel="Reporting period"
+            icon={<Icon name="calendar" size={14} />}
+            buttonLabel={rangeLabel}
+            options={[
+              { value: 'last7', label: 'Last 7 days' },
+              { value: 'last30', label: 'Last 30 days' },
+              { value: 'custom', label: 'Custom range' },
+            ]}
+            onChange={(next) => {
+              if (next === 'custom') return;
+              setFrom(isoDate(new Date(Date.now() - (next === 'last7' ? 7 : 30) * 86400000)));
+              setTo(isoDate(new Date()));
+            }}
+            footer={
+              <div className={styles.rangeInputs}>
+                <label>From<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
+                <label>To<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label>
               </div>
-              <div className={styles.kpiCard}>
-                <span className={styles.kpiLabel}>Finalized Invoices</span>
-                <strong className={styles.kpiValue}>
-                  {sales.totals.completedInvoices.toLocaleString('en-IN')}
-                </strong>
-                <span className={styles.kpiSub}>Billed at POS</span>
-              </div>
-              <div className={styles.kpiCard}>
-                <span className={styles.kpiLabel}>Cancelled Voids</span>
-                <strong className={styles.kpiValue} style={{ color: '#dc2626' }}>
-                  {sales.totals.cancelledInvoices}
-                </strong>
-                <span className={styles.kpiSub}>Compensated ledger entries</span>
-              </div>
-              <div className={styles.kpiCard}>
-                <span className={styles.kpiLabel}>Stores in Scope</span>
-                <strong className={styles.kpiValue}>{sales.locations.length}</strong>
-                <span className={styles.kpiSub}>Retail outlets</span>
-              </div>
-            </div>
-
-            <div className={styles.gridTwoColumns}>
-              {/* Daily Sales Table */}
-              <div className={styles.card}>
-                <div className={styles.cardHeader}>
-                  <h3>Daily Sales Turnover</h3>
-                  <small>Timeline for {from} to {to}</small>
-                </div>
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Invoices</th>
-                        <th>Cancelled</th>
-                        <th style={{ textAlign: 'right' }}>Net Sales (INR)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sales.daily.map((row) => (
-                        <tr key={row.date}>
-                          <td><strong>{row.date}</strong></td>
-                          <td>{row.invoices}</td>
-                          <td>{row.cancelled}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <strong>₹{Number(row.netSales).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Location Breakdown Table */}
-              <div className={styles.card}>
-                <div className={styles.cardHeader}>
-                  <h3>Turnover by Store Branch</h3>
-                  <small>Store performance in selected window</small>
-                </div>
-                <div className={styles.tableWrap}>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Location</th>
-                        <th>Billed Invoices</th>
-                        <th style={{ textAlign: 'right' }}>Net Revenue (INR)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sales.locations.map((loc) => (
-                        <tr key={loc.locationId}>
-                          <td><strong>{loc.locationName}</strong></td>
-                          <td>{loc.invoices}</td>
-                          <td style={{ textAlign: 'right' }}>
-                            <strong>₹{Number(loc.netSales).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* REPORT VIEW 2: Invoices Detail */}
-        {report === 'salesDetails' && salesDetails && (
-          <div className={styles.card}>
-            <div className={styles.cardHeader}>
-              <h3>Itemized Sales Transactions</h3>
-              <small>{salesDetails.total} invoices recorded</small>
-            </div>
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Invoice Number</th>
-                    <th>Store Branch</th>
-                    <th>Status</th>
-                    <th>Timestamp</th>
-                    <th style={{ textAlign: 'right' }}>Net Total (INR)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {salesDetails.rows.map((row) => (
-                    <tr key={row.id}>
-                      <td><span className={styles.monoTag}>{row.invoiceNumber}</span></td>
-                      <td>{row.location.name}</td>
-                      <td>
-                        <span className={row.status === 'FINALIZED' ? styles.tagSuccess : styles.tagDanger}>
-                          ● {row.status}
-                        </span>
-                      </td>
-                      <td>{new Date(row.createdAt).toLocaleString()}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <strong>₹{Number(row.netTotal).toFixed(2)}</strong>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* REPORT VIEW 3: Stock Ledger Balances */}
-        {report === 'stock' && stock && (
-          <div className={styles.card}>
-            <div className={styles.cardHeader}>
-              <h3>Current Stock Balances & Packaging Breakdown (OD-02)</h3>
-              <small>{stock.totals.variants} variants tracked</small>
-            </div>
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Location</th>
-                    <th>Product & Variant</th>
-                    <th>SKU</th>
-                    <th>Available (Base)</th>
-                    <th>Carton Breakdown (OD-02)</th>
-                    <th>In-Transit (OD-05)</th>
-                    <th>Reserved</th>
-                    <th>Quarantined</th>
-                    <th>Health Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stock.rows.map((row) => (
-                    <tr key={`${row.locationName}-${row.sku}`}>
-                      <td>{row.locationName}</td>
-                      <td>
-                        <strong>{row.productName}</strong>
-                        <div className={styles.subText}>{row.variantName}</div>
-                      </td>
-                      <td><span className={styles.monoTag}>{row.sku}</span></td>
-                      <td><strong>{row.available} {row.baseUnit}</strong></td>
-                      <td>
-                        {row.cartons !== null ? `${row.cartons} ctn + ${row.looseBaseUnits} loose` : 'Packet-Only'}
-                      </td>
-                      <td><span className={row.inTransit > 0 ? styles.inTransitText : ''}>+{row.inTransit}</span></td>
-                      <td>{row.reserved}</td>
-                      <td>{row.quarantined}</td>
-                      <td>
-                        {row.negativeStock ? (
-                          <span className={styles.tagDanger}>Negative (OD-03)</span>
-                        ) : row.lowStock ? (
-                          <span className={styles.tagWarning}>Low Stock</span>
-                        ) : (
-                          <span className={styles.tagSuccess}>Healthy</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* REPORT VIEW 4+: Specialized Reports (4 - 10) */}
-        {report !== 'sales' && report !== 'salesDetails' && report !== 'stock' && tableData && (
-          <div className={styles.card}>
-            <div className={styles.cardHeader}>
-              <div>
-                <h3>{tableData.title}</h3>
-                <small>{tableData.description}</small>
-              </div>
-            </div>
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    {tableData.headers.map((h, i) => (
-                      <th key={i}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {tableData.rows.map((r, rowIndex) => (
-                    <tr key={rowIndex}>
-                      {r.map((cell, colIndex) => (
-                        <td key={colIndex}>
-                          {colIndex === 0 ? <strong>{cell}</strong> : cell}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+            }
+          />
+          <PillDropdown<string>
+            value={locationId || 'all'}
+            heading="Location boundary"
+            ariaLabel="Location boundary"
+            icon={<Icon name="mapPin" size={14} />}
+            options={[{ value: 'all', label: 'All locations' }, ...locations.map((l) => ({ value: l.id, label: `${l.name}${l.type === 'WAREHOUSE' ? ' (Warehouse)' : ''}` }))]}
+            onChange={(next) => setLocationId(next === 'all' ? '' : next)}
+          />
+        </div>
       </div>
+
+      {/* ---------- Alerts drawer ---------- */}
+      {showNotifications && notifications && (
+        <section className={`${styles.card} ${styles.alerts}`}>
+          <div className={styles.cardHead}>
+            <div>
+              <h2>Operational alerts</h2>
+              <p>Inventory alerts, transfer discrepancies and audit lock events</p>
+            </div>
+            <div className={styles.cardHeadActions}>
+              {notifications.unread > 0 && <button type="button" onClick={markAllRead} className={styles.textButton}>Mark all as read</button>}
+              <button type="button" onClick={() => setShowNotifications(false)} className={styles.iconButton} aria-label="Close alerts"><Icon name="x" size={16} /></button>
+            </div>
+          </div>
+          <div className={styles.alertList}>
+            {notifications.items.map((item) => (
+              <div key={item.id} className={`${styles.alertItem} ${item.readAt ? styles.alertRead : ''}`}>
+                <span className={`${styles.alertIcon} ${item.type === 'NEGATIVE_STOCK' ? styles.toneRed : item.type === 'LOW_STOCK' ? styles.toneAmber : styles.toneBlue}`}><Icon name="alert" size={15} /></span>
+                <div className={styles.alertBody}>
+                  <div className={styles.alertTop}><strong>{item.title}</strong><small>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></div>
+                  <p>{item.message}</p>
+                  <div className={styles.alertFoot}>
+                    <a href={item.href}>View details →</a>
+                    {!item.readAt && <button type="button" onClick={() => markRead(item.id)}>Dismiss</button>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {notice && (
+        <div className={styles.notice} role="status">
+          <Icon name="check" size={16} />
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
+        </div>
+      )}
+
+      {/* ---------- OVERVIEW ---------- */}
+      {report === 'overview' && (
+        <>
+          <section className={styles.kpiGrid} aria-label="Key figures">
+            <article className={styles.kpi}>
+              <div className={styles.kpiTop}><span>Net revenue</span><i><Icon name="rupee" size={15} /></i></div>
+              <strong>{formatInr(netRevenue)}</strong>
+              <span className={`${styles.chip} ${styles.chipGood}`}>{scopedStores.length} {scopedStores.length === 1 ? 'store' : 'stores'}</span>
+            </article>
+            <article className={styles.kpi}>
+              <div className={styles.kpiTop}><span>Average bill</span><i><Icon name="receipt" size={15} /></i></div>
+              <strong>{formatInr(avgBill)}</strong>
+              <span className={`${styles.chip} ${styles.chipGood}`}>per invoice</span>
+            </article>
+            <article className={`${styles.kpi} ${styles.kpiTeal}`}>
+              <div className={styles.kpiTop}><span>Completed invoices</span><i><Icon name="check" size={15} /></i></div>
+              <strong>{invoiceCount.toLocaleString('en-IN')}</strong>
+              <span className={styles.chip}>billed at POS</span>
+            </article>
+            <article className={styles.kpi}>
+              <div className={styles.kpiTop}><span>Cancellation rate</span><i><Icon name="x" size={15} /></i></div>
+              <strong>{cancelRate.toFixed(1)}%</strong>
+              <span className={`${styles.chip} ${cancelledCount ? styles.chipBad : styles.chipGood}`}>{cancelledCount} voided</span>
+            </article>
+            <article className={`${styles.kpi} ${styles.kpiPink}`}>
+              <div className={styles.kpiTop}><span>Low stock variants</span><i><Icon name="alert" size={15} /></i></div>
+              <strong>{lowStockCount}</strong>
+              <span className={`${styles.chip} ${styles.chipBad}`}>{negativeCount} negative</span>
+            </article>
+          </section>
+
+          <section className={styles.rowGrid}>
+            <article className={styles.card}>
+              <div className={styles.cardHead}>
+                <div>
+                  <h2>Revenue by store</h2>
+                  <p>{topStore && netRevenue ? `${topStore.locationName} drives ${Math.round((Number(topStore.netSales) / netRevenue) * 100)}% of net sales in scope` : 'No retail sales recorded for this location'}</p>
+                </div>
+                <button type="button" className={styles.iconButton} onClick={() => setReport('sales')} aria-label="Open sales report" title="Open sales report"><Icon name="arrow" size={15} /></button>
+              </div>
+              <div className={styles.barList}>
+                {scopedStores.filter((s) => matches(s.locationName)).map((store) => {
+                  const value = Number(store.netSales);
+                  const share = networkRevenue ? Math.round((value / networkRevenue) * 100) : 0;
+                  return (
+                    <div className={styles.barRow} key={store.locationId}>
+                      <span className={styles.rowIcon}><Icon name="store" size={15} /></span>
+                      <span className={styles.rowLabel}><strong>{store.locationName}</strong><small>{store.invoices} invoices · {formatInr(store.invoices ? value / store.invoices : 0)} avg</small></span>
+                      <span className={styles.track}><i style={{ width: `${(value / maxStoreRevenue) * 100}%` }} /></span>
+                      <b className={styles.rowValue}>{formatCompactInr(value)}</b>
+                      <span className={`${styles.chip} ${styles.chipGood}`}>{share}%</span>
+                    </div>
+                  );
+                })}
+                {!scopedStores.length && <div className={styles.empty}>Warehouses do not record POS sales.</div>}
+              </div>
+              {scopedStores.length > 0 && netRevenue > 0 && (
+                <div className={styles.shareBlock}>
+                  <small className={styles.shareCaption}>Share of net sales</small>
+                  <div className={styles.shareBar} role="img" aria-label={scopedStores.map((s) => `${s.locationName} ${Math.round((Number(s.netSales) / netRevenue) * 100)}%`).join(', ')}>
+                    {scopedStores.map((s, i) => <i key={s.locationId} style={{ width: `${(Number(s.netSales) / netRevenue) * 100}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }} title={`${s.locationName}: ${formatInr(Number(s.netSales))}`} />)}
+                  </div>
+                  <div className={styles.shareLegend}>
+                    {scopedStores.map((s, i) => <span key={s.locationId}><i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />{s.locationName}<b>{formatCompactInr(Number(s.netSales))}</b></span>)}
+                  </div>
+                </div>
+              )}
+              {avgSpread && (
+                <button type="button" className={styles.insight} onClick={() => setReport('sales')}>
+                  <Icon name="spark" size={14} />
+                  <span>{avgSpread.low.locationName} averages {formatInr(avgSpread.lowAvg)} per bill, {formatInr(avgSpread.highAvg - avgSpread.lowAvg)} below {avgSpread.high.locationName}.</span>
+                  <Icon name="arrow" size={13} />
+                </button>
+              )}            </article>
+
+            <article className={styles.card}>
+              <div className={styles.cardHead}>
+                <div>
+                  <h2>Stock cover vs. reorder level</h2>
+                  <p>Available units ÷ reorder level · lowest cover first</p>
+                </div>
+              </div>
+              <div className={styles.barList}>
+                {coverRows.slice(0, 5).map((row) => (
+                  <div className={styles.coverRow} key={`${row.locationName}-${row.sku}`}>
+                    <span className={`${styles.skuBadge} ${row.negativeStock ? styles.toneRed : row.lowStock ? styles.toneAmber : styles.toneTeal}`}>{row.productName.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span>
+                    <span className={styles.rowLabel}><strong>{row.productName}</strong><small>{row.locationName} · {row.available} / {row.reorderLevelBase} {row.baseUnit}s</small></span>
+                    <span className={styles.track}><i className={row.negativeStock ? styles.fillRed : row.lowStock ? styles.fillAmber : ''} style={{ width: `${Math.max(0, Math.min(100, row.cover / 3))}%` }} /></span>
+                    <b className={styles.rowValue}>{Math.round(row.cover)}%</b>
+                  </div>
+                ))}
+                {!coverRows.length && <div className={styles.empty}>No tracked variants for this location.</div>}
+              </div>
+              {worstRow && (
+                <button type="button" className={styles.insight} onClick={() => setReport('lowStock')}>
+                  <Icon name="spark" size={14} />
+                  <span>{worstRow.negativeStock
+                    ? `${worstRow.productName} at ${worstRow.locationName} is at ${worstRow.available} ${worstRow.baseUnit}s. Reconcile the ledger before the next transfer.`
+                    : `${worstRow.productName} at ${worstRow.locationName} is below its reorder level. Raise a replenishment transfer.`}</span>
+                  <Icon name="arrow" size={13} />
+                </button>
+              )}
+            </article>
+          </section>
+
+          <section className={styles.rowGrid}>
+            <article className={styles.card}>
+              <div className={styles.cardHead}>
+                <div>
+                  <h2>Daily turnover</h2>
+                  <p>Network net sales for the last {daily.length} trading days</p>
+                </div>
+                {bestDay && <span className={styles.highlightPill}>Best day: {formatDay(bestDay.date)} · {formatCompactInr(Number(bestDay.netSales))}</span>}
+              </div>
+              <div className={styles.columns}>
+                {daily.map((day) => {
+                  const value = Number(day.netSales);
+                  const isBest = day.date === bestDay?.date;
+                  return (
+                    <div className={styles.column} key={day.date} title={`${formatDay(day.date)}: ${formatInr(value)} · ${day.invoices} invoices · ${day.cancelled} cancelled`}>
+                      <b>{formatCompactInr(value)}</b>
+                      <span className={styles.columnTrack}><i className={isBest ? styles.columnBest : ''} style={{ height: `${(value / maxDaily) * 100}%` }} /></span>
+                      <strong>{formatDay(day.date)}</strong>
+                      <small>{day.invoices} invoices{day.cancelled ? ` · ${day.cancelled} void` : ''}</small>
+                    </div>
+                  );
+                })}
+              </div>
+            </article>
+
+            <article className={styles.card}>
+              <div className={styles.cardHead}>
+                <div>
+                  <h2>Stock by location &amp; state</h2>
+                  <p>Base units of tracked variants · shaded per column</p>
+                </div>
+              </div>
+              {heat.length ? (
+                <div className={styles.heat} style={{ gridTemplateColumns: `minmax(110px, 1.2fr) repeat(${STOCK_STATES.length}, minmax(0, 1fr))` }}>
+                  <span />
+                  {STOCK_STATES.map((s) => <span key={s.key} className={styles.heatHead}>{s.label}</span>)}
+                  {heat.map((row) => (
+                    <div key={row.loc} className={styles.heatRow}>
+                      <span className={styles.heatLabel}>{row.loc}</span>
+                      {row.values.map((value, col) => {
+                        const level = heatLevel(value, col);
+                        return <span key={STOCK_STATES[col].key} className={`${styles.heatCell} ${level < 0 ? styles.heatEmpty : styles[`heat${level}`]}`} title={`${row.loc} · ${STOCK_STATES[col].label}: ${value} units`}>{value > 0 ? value.toLocaleString('en-IN') : '—'}</span>;
+                      })}
+                    </div>
+                  ))}
+                </div>
+              ) : <div className={styles.empty}>No stock rows for this location.</div>}
+              <div className={styles.heatLegend}><span>Low</span>{[0, 1, 2, 3, 4].map((l) => <i key={l} className={styles[`heat${l}`]} />)}<span>High</span></div>
+            </article>
+          </section>
+        </>
+      )}
+
+      {/* ---------- Report tabs ---------- */}
+      {report === 'sales' && sales && <SalesView sales={sales} matches={matches} rangeLabel={rangeLabel} />}
+      {report === 'salesDetails' && salesDetails && <InvoicesView details={salesDetails} matches={matches} />}
+      {report === 'stock' && stock && <StockView stock={stock} matches={matches} />}
+      {!['overview', 'sales', 'salesDetails', 'stock'].includes(report) && tableData && <SpecializedView kind={report} data={tableData} matches={matches} />}
     </div>
   );
 }
+

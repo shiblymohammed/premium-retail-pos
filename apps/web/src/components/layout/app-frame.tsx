@@ -132,28 +132,19 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
 
   const isLocationLocked = ['CASHIER', 'STAFF'].includes(rawRole);
 
-  const primaryActionHref = pathname.startsWith('/admin/users')
-    ? '#create-user'
-    : isSuperUser
-    ? '/admin/users'
-    : homeRoute;
-
-  const primaryActionLabel = pathname.startsWith('/admin/users')
-    ? 'Provision New User'
-    : isSuperUser
-    ? 'Manage Directory'
-    : 'Quick Workspace';
-
-  const handleActionPillClick = (e: React.MouseEvent) => {
-    if (pathname.startsWith('/admin/users')) {
-      e.preventDefault();
-      window.dispatchEvent(new CustomEvent('open-user-modal'));
-    }
-  };
-
   return (
     <div className={`app-frame${collapsed ? ' is-collapsed' : ''}`}>
-      {/* TopBar Component */}
+      {/* Sidebar sits on the coloured shell; the active tab merges into the white panel */}
+      <Sidebar
+        collapsed={collapsed}
+        homeRoute={homeRoute}
+        visibleGroups={visibleGroups}
+        pathname={pathname}
+        handleSignOut={handleSignOut}
+      />
+
+      {/* White rounded content panel: topbar + page canvas */}
+      <div className="drive-body-container">
       <TopBar
         homeRoute={homeRoute}
         location={location}
@@ -169,23 +160,8 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
         handleSignOut={handleSignOut}
         collapsed={collapsed}
         toggleSidebar={toggleSidebar}
+        showSearch={!['/dashboard', '/reports', '/products', '/operations', '/sales-controls', '/attendance/manage'].includes(pathname)}
       />
-
-      {/* Main Body */}
-      <div className="drive-body-container">
-        {/* Sidebar Component */}
-        <Sidebar
-          collapsed={collapsed}
-          primaryActionHref={primaryActionHref}
-          primaryActionLabel={primaryActionLabel}
-          handleActionPillClick={handleActionPillClick}
-          visibleGroups={visibleGroups}
-          pathname={pathname}
-          session={session}
-          userInitials={userInitials}
-          rawRole={rawRole}
-          handleSignOut={handleSignOut}
-        />
 
         {/* Content Canvas */}
         <main className="drive-main-canvas">
@@ -217,7 +193,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
                   style={{
                     padding: '9px 18px',
                     borderRadius: '8px',
-                    background: '#1a62ea',
+                    background: '#3e64a0',
                     color: '#ffffff',
                     fontSize: '13px',
                     fontWeight: 700,

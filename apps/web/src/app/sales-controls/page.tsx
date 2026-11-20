@@ -1,7 +1,7 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { clearStoredSession, getStoredSession, revokeSession, setStoredSession } from '@/lib/auth';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { getStoredSession } from '@/lib/auth';
 import styles from './sales-controls.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
@@ -208,27 +208,51 @@ const DEMO_INVOICES: Record<string, Invoice> = {
 
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const icons: Record<string, React.ReactNode> = {
-    search: <><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></>,
-    shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="m9 12 2 2 4-4" /></>,
-    alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
+    shield: <><path d="M12 3 19 6v5c0 4.8-3 8.1-7 10-4-1.9-7-5.2-7-10V6z" /><path d="m9 12 2 2 4-4" /></>,
+    alert: <><path d="M12 3 2.5 20h19z" /><path d="M12 10v4M12 17h.01" /></>,
     check: <path d="m5 12 4 4L19 6" />,
     x: <path d="M18 6 6 18M6 6l12 12" />,
-    rotateCcw: <><path d="M3 2v6h6M3 13a9 9 0 1 0 3-7.7L3 8" /></>,
-    receipt: <><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1-2-1z" /><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8M12 18V6" /></>,
-    dollarSign: <><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>,
-    user: <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
-    mapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
-    chevronRight: <path d="m9 18 6-6-6-6" />,
-    fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8M16 17H8M10 9H8" /></>,
-    clock: <><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></>,
+    return: <><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>,
+    ban: <><circle cx="12" cy="12" r="9" /><path d="m5.7 5.7 12.6 12.6" /></>,
+    receipt: <><path d="M6 3.5h12v17l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6M9 16h3" /></>,
+    rupee: <path d="M7 5h10M7 9.5h10M10 5c5 0 5 9 0 9H7l7 6" />,
+    user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    store: <><path d="M4 10v10h16V10" /><path d="M3 10 5 4h14l2 6c0 1.4-1.1 2.5-2.5 2.5S16 11.4 16 10c0 1.4-1.1 2.5-2.5 2.5h-3C9.1 12.5 8 11.4 8 10c0 1.4-1.1 2.5-2.5 2.5S3 11.4 3 10Z" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    card: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h3" /></>,
+    cash: <><rect x="3" y="6" width="18" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></>,
+    phone: <><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M11 17h2" /></>,
+    dots: <><circle cx="6" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="18" cy="12" r="1.3" /></>,
+    box: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" /><path d="m4.5 7.7 7.5 4.2 7.5-4.2M12 12v9" /></>,
+    minus: <path d="M5 12h14" />,
+    plus: <path d="M12 5v14M5 12h14" />,
+    logout: <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l4-4-4-4M14 12H3" />,
+    info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
   };
-
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {icons[name] || <circle cx="12" cy="12" r="10" />}
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {icons[name] || <circle cx="12" cy="12" r="9" />}
     </svg>
   );
 }
+
+type RefundMethod = 'CASH' | 'CARD' | 'ONLINE' | 'OTHER';
+
+const REFUND_METHODS: Array<{ value: RefundMethod; label: string; icon: string }> = [
+  { value: 'CASH', label: 'Cash', icon: 'cash' },
+  { value: 'CARD', label: 'Card', icon: 'card' },
+  { value: 'ONLINE', label: 'UPI / Online', icon: 'phone' },
+  { value: 'OTHER', label: 'Other', icon: 'dots' },
+];
+
+const CANCEL_REASONS = [
+  'Customer billing error',
+  'Cashier input mistake',
+  'Defective goods on purchase',
+  'System duplicate charge',
+  'Other (specify below)',
+];
 
 export default function SalesControlsPage() {
   // Auth state
@@ -241,24 +265,25 @@ export default function SalesControlsPage() {
     canProcessReturns: true,
   });
 
-  // Invoice lookup state
-  const [invoiceNumber, setInvoiceNumber] = useState('INV-2026-0842');
-  const [invoice, setInvoice] = useState<Invoice | null>(DEMO_INVOICES['INV-2026-0842']);
+  // Bills seen in this session (demo bills + any loaded from the server), newest first
+  const [knownInvoices, setKnownInvoices] = useState<Invoice[]>(Object.values(DEMO_INVOICES));
 
-  // Action Mode tabs: 'return' | 'cancel'
+  // Invoice lookup state
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoice, setInvoiceState] = useState<Invoice | null>(DEMO_INVOICES['INV-2026-0842']);
+
   const [activeTab, setActiveTab] = useState<'return' | 'cancel'>('return');
 
   // Cancellation state
-  const [cancelReasonCategory, setCancelReasonCategory] = useState('Customer billing error');
+  const [cancelReasonCategory, setCancelReasonCategory] = useState(CANCEL_REASONS[0]);
   const [cancelDetailedNotes, setCancelDetailedNotes] = useState('');
-  const [cancelRefundMethod, setCancelRefundMethod] = useState<'CASH' | 'CARD' | 'ONLINE' | 'OTHER'>('CASH');
+  const [cancelRefundMethod, setCancelRefundMethod] = useState<RefundMethod>('CASH');
   const [cancelRefundRef, setCancelRefundRef] = useState('');
   const [confirmedGoodsReturned, setConfirmedGoodsReturned] = useState(false);
   const [cancelConfirmModalOpen, setCancelConfirmModalOpen] = useState(false);
 
   // Return state
-  const [returnReason, setReturnReason] = useState('Customer requested return');
-  const [returnRefundMethod, setReturnRefundMethod] = useState<'CASH' | 'CARD' | 'ONLINE' | 'OTHER'>('CASH');
+  const [returnRefundMethod, setReturnRefundMethod] = useState<RefundMethod>('CASH');
   const [returnRefundRef, setReturnRefundRef] = useState('');
   const [returnLines, setReturnLines] = useState<Record<string, ReturnLineSelection>>({});
 
@@ -268,7 +293,15 @@ export default function SalesControlsPage() {
   const [notice, setNotice] = useState('');
 
   const currency = (amount: number | string, code = invoice?.location.company.currency || 'INR') =>
-    new Intl.NumberFormat(undefined, { style: 'currency', currency: code }).format(Number(amount) || 0);
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: code }).format(Number(amount) || 0);
+  const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+  /** Shows a bill and keeps the "recent bills" list in sync with any change to it. */
+  function setInvoice(next: Invoice | null) {
+    setInvoiceState(next);
+    if (!next) return;
+    setKnownInvoices((list) => [next, ...list.filter((i) => i.invoiceNumber !== next.invoiceNumber)]);
+  }
 
   // Sync with global auth session
   useEffect(() => {
@@ -276,167 +309,144 @@ export default function SalesControlsPage() {
     if (session?.accessToken) {
       setToken(session.accessToken);
       if (session.user.role === 'SUPER_ADMIN' || session.user.role === 'STORE_MANAGER') {
-        setPermissions({
-          role: session.user.role,
-          canCancelSales: true,
-          canProcessReturns: true,
-        });
+        setPermissions({ role: session.user.role, canCancelSales: true, canProcessReturns: true });
       }
     }
   }, []);
 
-  // Initialize return lines when invoice changes
+  // Reset the forms whenever a different bill is opened
   useEffect(() => {
-    if (invoice) {
-      const initialLines: Record<string, ReturnLineSelection> = {};
-      invoice.lines.forEach((line) => {
-        const remaining = line.quantityBaseUnits - line.returnedQuantityBaseUnits;
-        initialLines[line.id] = {
-          selected: false,
-          quantity: remaining > 0 ? 1 : 0,
-          disposition: 'RESTOCKED',
-          inspectionNotes: 'Packaging intact, unopened, eligible for resale.',
-        };
-      });
-      setReturnLines(initialLines);
-      setConfirmedGoodsReturned(false);
-      setCancelDetailedNotes('');
-      setCancelRefundRef('');
-      setReturnRefundRef('');
-    }
-  }, [invoice]);
+    if (!invoice) return;
+    const initialLines: Record<string, ReturnLineSelection> = {};
+    invoice.lines.forEach((line) => {
+      const remaining = line.quantityBaseUnits - line.returnedQuantityBaseUnits;
+      initialLines[line.id] = {
+        selected: false,
+        quantity: remaining > 0 ? 1 : 0,
+        disposition: 'RESTOCKED',
+        inspectionNotes: 'Packaging intact, unopened, eligible for resale.',
+      };
+    });
+    setReturnLines(initialLines);
+    setConfirmedGoodsReturned(false);
+    setCancelDetailedNotes('');
+    setCancelRefundRef('');
+    setReturnRefundRef('');
+    setActiveTab('return');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoice?.invoiceNumber]);
 
-  // Handle Sign In
+  // Escape closes the confirmation dialog; notices fade after a while
+  useEffect(() => {
+    if (!cancelConfirmModalOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCancelConfirmModalOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cancelConfirmModalOpen]);
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(''), 6000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
+
   async function signIn(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError('');
     setNotice('');
-
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-
       if (!res.ok) {
-        // Fallback for offline demonstration
         if (email.toLowerCase().includes('manager') || email.toLowerCase().includes('admin')) {
           setToken('demo_token');
-          setPermissions({
-            role: 'STORE_MANAGER',
-            canCancelSales: true,
-            canProcessReturns: true,
-          });
-          setNotice('Operating in supervisor demonstration mode (local permissions active).');
+          setPermissions({ role: 'STORE_MANAGER', canCancelSales: true, canProcessReturns: true });
+          setNotice('Signed in with demo supervisor permissions.');
           return;
         }
         throw new Error('Invalid credentials');
       }
-
       const data = await res.json();
       const accessToken: string = data.data.accessToken;
-
       const permRes = await fetch(`${API_BASE}/users/me/sales-permissions`, {
         headers: { Authorization: `Bearer ${accessToken}` },
         cache: 'no-store',
       });
-
       if (!permRes.ok) throw new Error('Could not verify sales control permissions');
       const ownPerms = (await permRes.json()).data as SalePermissions;
-
       if (!ownPerms.canCancelSales && !ownPerms.canProcessReturns) {
-        throw new Error('Access Restricted: Your account has no assigned cancellation or return permission. Contact an Administrator.');
+        throw new Error('Your account cannot process returns or cancellations. Ask an administrator for access.');
       }
-
       setToken(accessToken);
       setPermissions(ownPerms);
       setPassword('');
-      setNotice('Supervisor permissions verified by backend.');
-    } catch (err) {
-      // Allow demo sign in
+      setNotice('Signed in. Your permissions were checked by the server.');
+    } catch {
       setToken('demo_token');
-      setPermissions({
-        role: 'STORE_MANAGER',
-        canCancelSales: true,
-        canProcessReturns: true,
-      });
-      setNotice('Backend offline. Demo supervisor mode activated for testing.');
+      setPermissions({ role: 'STORE_MANAGER', canCancelSales: true, canProcessReturns: true });
+      setNotice('Server unavailable. Demo supervisor mode is on for testing.');
     } finally {
       setBusy(false);
     }
   }
 
-  // Handle Find Invoice
-  async function findInvoice(e?: FormEvent) {
+  async function findInvoice(e?: FormEvent, number?: string) {
     e?.preventDefault();
-    const query = invoiceNumber.trim().toUpperCase();
+    const query = (number ?? invoiceNumber).trim().toUpperCase();
     if (!query) return;
-
     setBusy(true);
     setError('');
     setNotice('');
-
     try {
       const res = await fetch(`${API_BASE}/sales/invoice/${encodeURIComponent(query)}`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       });
-
       if (res.ok) {
         const found = (await res.json()).data as Invoice;
         setInvoice(found);
-        setNotice(`Loaded invoice ${found.invoiceNumber} from server.`);
+        setInvoiceNumber('');
+        setNotice(`Opened ${found.invoiceNumber} from the server.`);
+        setBusy(false);
         return;
       }
     } catch {
-      // Backend unavailable, fallback to demo invoices
+      // Server unavailable: fall back to bills already on this page
     }
-
-    if (DEMO_INVOICES[query]) {
-      setInvoice(DEMO_INVOICES[query]);
-      setNotice(`Loaded sample invoice ${query}.`);
+    const local = knownInvoices.find((i) => i.invoiceNumber === query) ?? DEMO_INVOICES[query];
+    if (local) {
+      setInvoice(local);
+      setInvoiceNumber('');
     } else {
-      setError(`Invoice "${query}" not found. Try sample invoices: INV-2026-0842, INV-2026-0711, or INV-2026-0600.`);
+      setError(`No bill called "${query}" was found. Check the number on the receipt.`);
     }
-
     setBusy(false);
   }
 
-  // Calculate return refund total
   const calculatedReturnRefund = useMemo(() => {
     if (!invoice) return 0;
-    let sum = 0;
-    invoice.lines.forEach((line) => {
+    const discountRatio = Number(invoice.discountTotal) / Number(invoice.grossTotal) || 0;
+    return invoice.lines.reduce((sum, line) => {
       const sel = returnLines[line.id];
-      if (sel && sel.selected && sel.quantity > 0) {
-        // Compute effective price per unit considering discounts
-        const discountRatio = Number(invoice.discountTotal) / Number(invoice.grossTotal) || 0;
-        const effectiveUnitPrice = line.unitPrice * (1 - discountRatio);
-        sum += effectiveUnitPrice * sel.quantity;
-      }
-    });
-    return sum;
+      return sel && sel.selected && sel.quantity > 0 ? sum + line.unitPrice * (1 - discountRatio) * sel.quantity : sum;
+    }, 0);
   }, [invoice, returnLines]);
 
-  // Execute Full Cancellation
+  const selectedCount = Object.values(returnLines).filter((s) => s.selected && s.quantity > 0).reduce((s, l) => s + l.quantity, 0);
+
   async function handleCancelSale() {
     if (!invoice || !confirmedGoodsReturned) return;
     const finalReason = `${cancelReasonCategory}: ${cancelDetailedNotes.trim() || 'No additional notes'}`;
-
     setBusy(true);
     setError('');
-
     try {
       if (token !== 'demo_token') {
         const res = await fetch(`${API_BASE}/sales/${invoice.id}/cancel`, {
           method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Idempotency-Key': crypto.randomUUID(),
-          },
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
           body: JSON.stringify({
             reason: finalReason,
             refundMethod: cancelRefundMethod,
@@ -444,14 +454,11 @@ export default function SalesControlsPage() {
             ...(cancelRefundRef.trim() ? { refundReference: cancelRefundRef.trim() } : {}),
           }),
         });
-
         if (!res.ok) {
           const body = await res.json();
-          throw new Error(body.message || 'Failed to cancel invoice on server');
+          throw new Error(body.message || 'The server could not cancel this bill');
         }
       }
-
-      // Update state locally
       setInvoice({
         ...invoice,
         status: 'CANCELLED',
@@ -459,670 +466,394 @@ export default function SalesControlsPage() {
         cancelledByUserId: permissions?.role || 'STORE_SUPERVISOR',
         cancellationReason: finalReason,
       });
-
       setCancelConfirmModalOpen(false);
-      setNotice(`Invoice ${invoice.invoiceNumber} has been successfully CANCELLED. Manual refund of ${currency(invoice.netTotal)} logged; inventory returned to ledger.`);
+      setNotice(`${invoice.invoiceNumber} is cancelled. Refund of ${currency(invoice.netTotal)} recorded and all items are back in stock.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error cancelling sale');
+      setError(err instanceof Error ? err.message : 'Could not cancel this bill');
     } finally {
       setBusy(false);
     }
   }
 
-  // Execute Partial Return
   async function handleRecordReturn() {
     if (!invoice) return;
-
-    // Validate selections
-    const selectedLineEntries = Object.entries(returnLines).filter(([_, sel]) => sel.selected && sel.quantity > 0);
+    const selectedLineEntries = Object.entries(returnLines).filter(([, sel]) => sel.selected && sel.quantity > 0);
     if (selectedLineEntries.length === 0) {
-      setError('Please select at least one item and enter a quantity to return.');
+      setError('Choose at least one item the customer is bringing back.');
       return;
     }
-
-    for (const [lineId, sel] of selectedLineEntries) {
-      if (!sel.inspectionNotes || sel.inspectionNotes.trim().length < 5) {
-        setError(`Inspection notes (minimum 5 characters) are required for all returned items.`);
-        return;
-      }
+    if (selectedLineEntries.some(([, sel]) => !sel.inspectionNotes || sel.inspectionNotes.trim().length < 5)) {
+      setError('Add a short condition note (at least 5 characters) for each returned item.');
+      return;
     }
-
     setBusy(true);
     setError('');
-
     try {
       const returnNumber = `RET-2026-${Math.floor(1000 + Math.random() * 9000)}`;
       const refundAmount = calculatedReturnRefund.toFixed(2);
-
       const itemsSummaryList: string[] = [];
       const updatedLines = invoice.lines.map((line) => {
         const sel = returnLines[line.id];
         if (sel && sel.selected) {
-          itemsSummaryList.push(`${sel.quantity}x ${line.variant.product.name} (${sel.disposition})`);
-          return {
-            ...line,
-            returnedQuantityBaseUnits: line.returnedQuantityBaseUnits + sel.quantity,
-          };
+          itemsSummaryList.push(`${sel.quantity}x ${line.variant.product.name} (${sel.disposition === 'RESTOCKED' ? 'back on shelf' : 'set aside'})`);
+          return { ...line, returnedQuantityBaseUnits: line.returnedQuantityBaseUnits + sel.quantity };
         }
         return line;
       });
-
       const newReturnRecord: SaleReturnRecord = {
         returnNumber,
         createdAt: new Date().toISOString(),
         itemsSummary: itemsSummaryList.join(', '),
-        refund: {
-          amount: refundAmount,
-          method: returnRefundMethod,
-          reference: returnRefundRef.trim() || undefined,
-        },
+        refund: { amount: refundAmount, method: returnRefundMethod, reference: returnRefundRef.trim() || undefined },
       };
-
-      setInvoice({
-        ...invoice,
-        lines: updatedLines,
-        returns: [newReturnRecord, ...invoice.returns],
-      });
-
-      setNotice(`Return voucher ${returnNumber} created! Manual refund of ${currency(refundAmount)} recorded. Restocked / quarantined ledger entries updated.`);
+      setInvoice({ ...invoice, lines: updatedLines, returns: [newReturnRecord, ...invoice.returns] });
+      setNotice(`Return ${returnNumber} saved. Give the customer ${currency(refundAmount)} back.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error recording return');
+      setError(err instanceof Error ? err.message : 'Could not record the return');
     } finally {
       setBusy(false);
     }
   }
 
-  function signOut() {
-    void clearStoredSession();
-    setToken('');
-    setPermissions(null);
-    setInvoice(null);
-    setError('');
-    setNotice('');
-    window.location.href = '/login';
+  // ---------- Derived figures for the summary cards ----------
+  const summary = useMemo(() => {
+    const returns = knownInvoices.flatMap((i) => i.returns);
+    const returnedValue = returns.reduce((s, r) => s + Number(r.refund?.amount || 0), 0);
+    const cancelled = knownInvoices.filter((i) => i.status === 'CANCELLED');
+    const cancelledValue = cancelled.reduce((s, i) => s + Number(i.netTotal), 0);
+    return { returns: returns.length, returnedValue, cancelled: cancelled.length, cancelledValue, total: returnedValue + cancelledValue, bills: knownInvoices.length };
+  }, [knownInvoices]);
+
+  const updateLine = (id: string, patch: Partial<ReturnLineSelection>) => setReturnLines((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+  const isFinal = invoice?.status === 'FINALIZED';
+  const cancelBlockedReason = !invoice ? '' : !permissions?.canCancelSales ? 'Your role cannot cancel bills.' : invoice.returns.length > 0 ? 'Items from this bill were already returned, so the whole bill can no longer be cancelled.' : '';
+  const soldUnits = invoice ? invoice.lines.reduce((s, l) => s + l.quantityBaseUnits, 0) : 0;
+  const returnedUnits = invoice ? invoice.lines.reduce((s, l) => s + l.returnedQuantityBaseUnits, 0) : 0;
+
+  // ---------- Sign-in gate ----------
+  if (!token) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.gate}>
+          <span className={styles.gateIcon}><Icon name="shield" size={26} /></span>
+          <h1>Supervisor sign-in</h1>
+          <p>Returns and cancellations need a manager or supervisor account.</p>
+          {error && <div className={`${styles.alert} ${styles.alertError}`}><Icon name="alert" size={16} /><span>{error}</span></div>}
+          <form onSubmit={signIn} className={styles.gateForm}>
+            <label className={styles.field}><span>Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
+            <label className={styles.field}><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+            <button type="submit" disabled={busy} className={styles.primaryButton}>{busy ? 'Signing in…' : 'Sign in'}</button>
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={() => {
+                setToken('demo_token');
+                setPermissions({ role: 'STORE_MANAGER', canCancelSales: true, canProcessReturns: true });
+                setInvoice(DEMO_INVOICES['INV-2026-0842']);
+                setNotice('Demo supervisor mode is on.');
+              }}
+            >
+              Continue with demo store manager
+            </button>
+          </form>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className={styles.container}>
-      {/* Top Breadcrumb Bar */}
-      <div className={styles.topBar}>
-        <div className={styles.breadcrumb}>
-          <span>Operations</span>
-          <span className={styles.separator}>›</span>
-          <span className={styles.currentPage}>Sales Controls & Returns</span>
+    <div className={styles.page}>
+      {/* ---------- Header ---------- */}
+      <header className={styles.header}>
+        <div>
+          <h1>Returns &amp; Cancellations</h1>
+          <p>Find a bill, then take back some items or cancel the whole sale.</p>
         </div>
-        {token && permissions && (
-          <div className={styles.operatorPill}>
-            <Icon name="shield" size={15} />
-            <span>Role: <strong>{permissions.role.replace('_', ' ')}</strong></span>
-            <span className={styles.pillPerms}>
-              {[
-                permissions.canCancelSales && 'Void Sales',
-                permissions.canProcessReturns && 'Process Returns',
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </span>
-            <button onClick={signOut} className={styles.signOutBtn} title="Sign Out">
-              <Icon name="x" size={14} />
-            </button>
+      </header>
+
+      {error && (
+        <div className={`${styles.alert} ${styles.alertError}`} role="alert">
+          <Icon name="alert" size={16} /><span>{error}</span>
+          <button type="button" onClick={() => setError('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
+        </div>
+      )}
+      {notice && (
+        <div className={`${styles.alert} ${styles.alertSuccess}`} role="status">
+          <Icon name="check" size={16} /><span>{notice}</span>
+          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
+        </div>
+      )}
+
+      {/* ---------- Summary cards ---------- */}
+      <section className={styles.summaryGrid} aria-label="Returns and cancellations summary">
+        <article className={styles.summaryCard}>
+          <div className={styles.summaryTop}><span>Returns recorded</span><i className={styles.toneBlue}><Icon name="return" size={16} /></i></div>
+          <strong className={styles.summaryValue}>{summary.returns}</strong>
+          <span className={styles.summaryFoot}><b className={`${styles.chip} ${styles.chipBlue}`}>{currency(summary.returnedValue)}</b> refunded</span>
+        </article>
+        <article className={styles.summaryCard}>
+          <div className={styles.summaryTop}><span>Bills cancelled</span><i className={styles.toneRed}><Icon name="ban" size={16} /></i></div>
+          <strong className={styles.summaryValue}>{summary.cancelled}</strong>
+          <span className={styles.summaryFoot}><b className={`${styles.chip} ${styles.chipRed}`}>{currency(summary.cancelledValue)}</b> voided</span>
+        </article>
+        <article className={`${styles.summaryCard} ${styles.summaryHighlight}`}>
+          <div className={styles.summaryTop}><span>Total paid back</span><i><Icon name="rupee" size={16} /></i></div>
+          <strong className={styles.summaryValue}>{currency(summary.total)}</strong>
+          <span className={styles.summaryFoot}>returns + cancellations</span>
+        </article>
+        <article className={styles.summaryCard}>
+          <div className={styles.summaryTop}><span>Bills on this screen</span><i><Icon name="receipt" size={16} /></i></div>
+          <strong className={styles.summaryValue}>{summary.bills}</strong>
+          <span className={styles.summaryFoot}><b className={styles.chip}>{knownInvoices.filter((i) => i.status === 'FINALIZED').length} open</b> can still be changed</span>
+        </article>
+      </section>
+
+      {/* ---------- Find a bill + "return or cancel?" explainer ---------- */}
+      <section className={styles.findRow}>
+        <div className={styles.card}>
+          <div className={styles.cardHead}>
+            <div><h2>Find a bill</h2><p>Type the bill number printed on the customer&apos;s receipt.</p></div>
           </div>
-        )}
-      </div>
-
-      <div className={styles.mainContent}>
-        {/* Alerts and Notices */}
-        {error && (
-          <div className={`${styles.alert} ${styles.alertError}`}>
-            <Icon name="alert" size={16} />
-            <span>{error}</span>
+          <form onSubmit={findInvoice} className={styles.findForm}>
+            <label className={styles.findInput}>
+              <Icon name="receipt" size={17} />
+              <input type="text" placeholder="e.g. INV-2026-0842" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} aria-label="Bill number" />
+            </label>
+            <button type="submit" disabled={busy || !invoiceNumber.trim()} className={styles.primaryButton}><Icon name="search" size={16} /> Find bill</button>
+          </form>
+          <div className={styles.recentLabel}>Recent bills</div>
+          <div className={styles.recentGrid}>
+            {knownInvoices.map((inv) => {
+              const hasReturns = inv.returns.length > 0;
+              const tone = inv.status === 'CANCELLED' ? styles.badgeRed : hasReturns ? styles.badgeAmber : styles.badgeGreen;
+              return (
+                <button key={inv.invoiceNumber} type="button" className={`${styles.recent} ${invoice?.invoiceNumber === inv.invoiceNumber ? styles.recentOn : ''}`} onClick={() => setInvoice(inv)}>
+                  <span className={styles.recentTop}><b>{inv.invoiceNumber}</b><span className={`${styles.badge} ${tone}`}>{inv.status === 'CANCELLED' ? 'Cancelled' : hasReturns ? 'Part returned' : 'Paid'}</span></span>
+                  <span className={styles.recentMeta}>{inv.location.name} · {currency(inv.netTotal, inv.location.company.currency)}</span>
+                </button>
+              );
+            })}
           </div>
-        )}
-        {notice && (
-          <div className={`${styles.alert} ${styles.alertSuccess}`}>
-            <Icon name="check" size={16} />
-            <span>{notice}</span>
+        </div>
+
+        <div className={`${styles.card} ${styles.explainer}`}>
+          <div className={styles.cardHead}><div><h2>Return or cancel?</h2><p>Pick the one that matches what happened.</p></div></div>
+          <div className={styles.explainItem}>
+            <span className={styles.toneBlue}><Icon name="return" size={16} /></span>
+            <div><strong>Return items</strong><p>The customer brings back <b>some</b> items. You refund only those items.</p></div>
           </div>
-        )}
-
-        {/* View 1: Sign in Gate if no token */}
-        {!token ? (
-          <div className={styles.loginCard}>
-            <div className={styles.loginHeader}>
-              <div className={styles.loginBadge}>
-                <Icon name="shield" size={24} />
-              </div>
-              <h2>Supervisor Authorization Required</h2>
-              <p>Sign in with an account authorized to void invoices or process customer returns.</p>
-            </div>
-
-            <form onSubmit={signIn} className={styles.loginForm}>
-              <div className={styles.formGroup}>
-                <label>Supervisor Email</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className={styles.input}
-                />
-              </div>
-
-              <div className={styles.formGroup}>
-                <label>Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className={styles.input}
-                />
-              </div>
-
-              <button type="submit" disabled={busy} className={styles.btnPrimary}>
-                {busy ? 'Authenticating…' : 'Sign in to Sales Controls'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setToken('demo_token');
-                  setPermissions({
-                    role: 'STORE_MANAGER',
-                    canCancelSales: true,
-                    canProcessReturns: true,
-                  });
-                  setInvoice(DEMO_INVOICES['INV-2026-0842']);
-                  setNotice('Demo supervisor mode activated.');
-                }}
-                className={styles.btnSecondary}
-                style={{ marginTop: 8 }}
-              >
-                Quick Demo: Continue as Store Manager
-              </button>
-            </form>
+          <div className={styles.explainItem}>
+            <span className={styles.toneRed}><Icon name="ban" size={16} /></span>
+            <div><strong>Cancel bill</strong><p>The <b>whole</b> sale is undone, for example a billing mistake. Everything is refunded.</p></div>
           </div>
-        ) : (
-          /* View 2: Sales Controls Main Console */
-          <>
-            {/* Page Header */}
-            <div className={styles.pageHeader}>
-              <div>
-                <h1 className={styles.pageTitle}>Invoice Cancellations & Returns</h1>
-                <p className={styles.pageSubtitle}>
-                  Supervisor interface to lookup past transactions, record line-item returns with physical inspection notes, and void bills with automated ledger compensations.
-                </p>
-              </div>
-            </div>
+          <p className={styles.explainNote}><Icon name="info" size={13} /> After any return, the bill can&apos;t be fully cancelled.</p>
+        </div>
+      </section>
 
-            {/* Invoice Lookup Bar */}
-            <div className={styles.searchSection}>
-              <form onSubmit={findInvoice} className={styles.searchForm}>
-                <div className={styles.searchBox}>
-                  <Icon name="receipt" size={18} />
-                  <input
-                    type="text"
-                    placeholder="Enter Invoice Number (e.g. INV-2026-0842)"
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
-                  />
-                  <button type="submit" disabled={busy} className={styles.btnSearch}>
-                    <Icon name="search" size={16} />
-                    <span>Find Invoice</span>
+      {/* ---------- Selected bill ---------- */}
+      {invoice ? (
+        <section className={styles.workArea}>
+          {/* Left: bill details */}
+          <div className={styles.column}>
+            <article className={styles.card}>
+              <div className={styles.billHead}>
+                <span className={`${styles.billIcon} ${invoice.status === 'CANCELLED' ? styles.toneRed : styles.toneBlue}`}><Icon name="receipt" size={20} /></span>
+                <div className={styles.billTitle}>
+                  <h2>{invoice.invoiceNumber}</h2>
+                  <span className={`${styles.badge} ${invoice.status === 'CANCELLED' ? styles.badgeRed : invoice.returns.length ? styles.badgeAmber : styles.badgeGreen}`}>
+                    {invoice.status === 'CANCELLED' ? 'Cancelled' : invoice.returns.length ? 'Partly returned' : 'Paid'}
+                  </span>
+                </div>
+                <strong className={styles.billTotal}>{currency(invoice.netTotal)}</strong>
+              </div>
+
+              <div className={styles.facts}>
+                <span><Icon name="store" size={14} /><small>Store</small><b>{invoice.location.name}</b></span>
+                <span><Icon name="user" size={14} /><small>Cashier</small><b>{invoice.cashierName || 'Staff'}</b></span>
+                <span><Icon name="clock" size={14} /><small>Sold</small><b>{when(invoice.createdAt)}</b></span>
+                <span><Icon name="card" size={14} /><small>Paid by</small><b>{invoice.payment?.method || 'Cash'}</b></span>
+              </div>
+
+              <div className={styles.lines}>
+                <div className={styles.linesHead}><span>Item</span><span className={styles.num}>Sold</span><span className={styles.num}>Returned</span><span className={styles.num}>Price</span></div>
+                {invoice.lines.map((line) => (
+                  <div key={line.id} className={styles.lineRow}>
+                    <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{line.variant.product.name}</strong><small>{line.variant.name} · {line.variant.sku}</small></span></span>
+                    <span className={styles.num}>{line.quantityBaseUnits}</span>
+                    <span className={`${styles.num} ${line.returnedQuantityBaseUnits ? styles.amberText : styles.mutedText}`}>{line.returnedQuantityBaseUnits}</span>
+                    <span className={styles.num}>{currency(line.unitPrice)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className={styles.totals}>
+                <div><span>Subtotal</span><span>{currency(invoice.grossTotal)}</span></div>
+                {Number(invoice.discountTotal) > 0 && <div><span>Discount</span><span className={styles.greenText}>−{currency(invoice.discountTotal)}</span></div>}
+                <div className={styles.totalNet}><span>Customer paid</span><span>{currency(invoice.netTotal)}</span></div>
+                <div className={styles.totalMeta}><span>{soldUnits} items sold · {returnedUnits} returned</span></div>
+              </div>
+            </article>
+
+            <article className={styles.card}>
+              <div className={styles.cardHead}><div><h2>Return history</h2><p>{invoice.returns.length ? `${invoice.returns.length} return${invoice.returns.length === 1 ? '' : 's'} on this bill` : 'Nothing has been returned from this bill yet.'}</p></div></div>
+              {invoice.returns.length > 0 && (
+                <ul className={styles.history}>
+                  {invoice.returns.map((ret) => (
+                    <li key={ret.returnNumber}>
+                      <span className={`${styles.historyIcon} ${styles.toneBlue}`}><Icon name="return" size={14} /></span>
+                      <div>
+                        <strong>{ret.returnNumber}</strong>
+                        <small>{ret.itemsSummary || 'Returned items'}{ret.createdAt ? ` · ${when(ret.createdAt)}` : ''}</small>
+                      </div>
+                      <span className={styles.historyAmount}><b>{currency(ret.refund?.amount || '0')}</b><small>{ret.refund?.method}{ret.refund?.reference ? ` · ${ret.refund.reference}` : ''}</small></span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </article>
+          </div>
+
+          {/* Right: what to do */}
+          <div className={styles.column}>
+            {invoice.status === 'CANCELLED' ? (
+              <article className={`${styles.card} ${styles.cancelledCard}`}>
+                <span className={styles.cancelledIcon}><Icon name="ban" size={24} /></span>
+                <h2>This bill is cancelled</h2>
+                <p>Cancelled {invoice.cancelledAt ? when(invoice.cancelledAt) : ''} by {invoice.cancelledByUserId || 'a supervisor'}. No more returns or changes can be made.</p>
+                <div className={styles.reasonBox}><small>Reason</small><span>{invoice.cancellationReason}</span></div>
+              </article>
+            ) : (
+              <article className={styles.card}>
+                <div className={styles.segmented} role="tablist" aria-label="Action">
+                  <button type="button" role="tab" aria-selected={activeTab === 'return'} className={activeTab === 'return' ? styles.segOn : ''} onClick={() => setActiveTab('return')} disabled={!permissions?.canProcessReturns}>
+                    <Icon name="return" size={15} /> Return items
+                  </button>
+                  <button type="button" role="tab" aria-selected={activeTab === 'cancel'} className={activeTab === 'cancel' ? styles.segOnDanger : ''} onClick={() => setActiveTab('cancel')} disabled={!!cancelBlockedReason} title={cancelBlockedReason || undefined}>
+                    <Icon name="ban" size={15} /> Cancel bill
                   </button>
                 </div>
-              </form>
+                {cancelBlockedReason && activeTab === 'return' && <p className={styles.blockedNote}><Icon name="info" size={13} /> {cancelBlockedReason}</p>}
 
-              {/* Quick sample chips */}
-              <div className={styles.sampleChips}>
-                <span className={styles.chipsLabel}>Quick Samples:</span>
-                <button
-                  type="button"
-                  className={styles.sampleChip}
-                  onClick={() => {
-                    setInvoiceNumber('INV-2026-0842');
-                    setInvoice(DEMO_INVOICES['INV-2026-0842']);
-                    setNotice('Switched to INV-2026-0842 (Finalized, no returns).');
-                  }}
-                >
-                  INV-2026-0842 (Finalized)
-                </button>
-                <button
-                  type="button"
-                  className={styles.sampleChip}
-                  onClick={() => {
-                    setInvoiceNumber('INV-2026-0711');
-                    setInvoice(DEMO_INVOICES['INV-2026-0711']);
-                    setNotice('Switched to INV-2026-0711 (Has prior return voucher).');
-                  }}
-                >
-                  INV-2026-0711 (Partial Return)
-                </button>
-                <button
-                  type="button"
-                  className={styles.sampleChip}
-                  onClick={() => {
-                    setInvoiceNumber('INV-2026-0600');
-                    setInvoice(DEMO_INVOICES['INV-2026-0600']);
-                    setNotice('Switched to INV-2026-0600 (Already voided/cancelled).');
-                  }}
-                >
-                  INV-2026-0600 (Voided)
-                </button>
-              </div>
-            </div>
+                {activeTab === 'return' && isFinal && (
+                  <div className={styles.panel}>
+                    <h3 className={styles.step}><span>1</span> What is coming back?</h3>
+                    <div className={styles.returnList}>
+                      {invoice.lines.map((line) => {
+                        const remaining = line.quantityBaseUnits - line.returnedQuantityBaseUnits;
+                        const sel = returnLines[line.id];
+                        if (!sel) return null;
+                        const eligible = remaining > 0;
+                        return (
+                          <div key={line.id} className={`${styles.returnItem} ${sel.selected ? styles.returnOn : ''} ${!eligible ? styles.returnOff : ''}`}>
+                            <button type="button" className={styles.returnPick} onClick={() => eligible && updateLine(line.id, { selected: !sel.selected })} disabled={!eligible} aria-pressed={sel.selected}>
+                              <span className={styles.check}>{sel.selected && <Icon name="check" size={12} />}</span>
+                              <span className={styles.returnName}><strong>{line.variant.product.name}</strong><small>{eligible ? `${remaining} of ${line.quantityBaseUnits} can be returned` : 'Already fully returned'}</small></span>
+                              <span className={styles.returnPrice}>{currency(line.unitPrice)}</span>
+                            </button>
+                            {sel.selected && (
+                              <div className={styles.returnDetail}>
+                                <div className={styles.returnRow}>
+                                  <label><small>How many</small>
+                                    <span className={styles.stepper}>
+                                      <button type="button" onClick={() => updateLine(line.id, { quantity: Math.max(1, sel.quantity - 1) })} disabled={sel.quantity <= 1} aria-label="One less"><Icon name="minus" size={13} /></button>
+                                      <input type="number" min="1" max={remaining} value={sel.quantity} onChange={(e) => updateLine(line.id, { quantity: Math.min(remaining, Math.max(1, parseInt(e.target.value, 10) || 1)) })} aria-label="Quantity to return" />
+                                      <button type="button" onClick={() => updateLine(line.id, { quantity: Math.min(remaining, sel.quantity + 1) })} disabled={sel.quantity >= remaining} aria-label="One more"><Icon name="plus" size={13} /></button>
+                                    </span>
+                                  </label>
+                                  <div className={styles.condition}>
+                                    <small>Condition</small>
+                                    <div className={styles.toggle} role="group" aria-label="Item condition">
+                                      <button type="button" className={sel.disposition === 'RESTOCKED' ? styles.toggleGood : ''} onClick={() => updateLine(line.id, { disposition: 'RESTOCKED', inspectionNotes: sel.inspectionNotes || 'Packaging intact, unopened, eligible for resale.' })} aria-pressed={sel.disposition === 'RESTOCKED'}>Good, back on shelf</button>
+                                      <button type="button" className={sel.disposition === 'QUARANTINED' ? styles.toggleBad : ''} onClick={() => updateLine(line.id, { disposition: 'QUARANTINED', inspectionNotes: sel.inspectionNotes === 'Packaging intact, unopened, eligible for resale.' ? '' : sel.inspectionNotes })} aria-pressed={sel.disposition === 'QUARANTINED'}>Damaged, set aside</button>
+                                    </div>
+                                  </div>
+                                </div>
+                                <input className={styles.noteInput} type="text" placeholder="Condition note, e.g. seal intact" value={sel.inspectionNotes} onChange={(e) => updateLine(line.id, { inspectionNotes: e.target.value })} aria-label="Condition note" />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
 
-            {/* Active Invoice Card */}
-            {invoice && (
-              <div className={styles.invoiceCard}>
-                <div className={styles.invoiceHeader}>
-                  <div className={styles.invoiceMainInfo}>
-                    <div className={styles.invoiceIconWrap}>
-                      <Icon name="receipt" size={22} />
-                    </div>
-                    <div>
-                      <div className={styles.invoiceTitleRow}>
-                        <h2>{invoice.invoiceNumber}</h2>
-                        <span
-                          className={`${styles.statusBadge} ${
-                            invoice.status === 'FINALIZED' ? styles.statusFinalized : styles.statusCancelled
-                          }`}
-                        >
-                          ● {invoice.status}
-                        </span>
-                      </div>
-                      <div className={styles.invoiceMeta}>
-                        <span><Icon name="mapPin" size={13} /> {invoice.location.name}</span>
-                        <span><Icon name="user" size={13} /> Cashier: {invoice.cashierName || 'Staff'}</span>
-                        <span><Icon name="clock" size={13} /> {new Date(invoice.createdAt).toLocaleString()}</span>
-                        <span><Icon name="dollarSign" size={13} /> Paid via: {invoice.payment?.method || 'Cash'}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={styles.invoiceTotalsBox}>
-                    <div className={styles.totalRow}>
-                      <span>Gross Subtotal:</span>
-                      <span>{currency(invoice.grossTotal)}</span>
-                    </div>
-                    <div className={styles.totalRow}>
-                      <span>Discounts:</span>
-                      <span style={{ color: '#16a34a' }}>-{currency(invoice.discountTotal)}</span>
-                    </div>
-                    <div className={`${styles.totalRow} ${styles.totalRowNet}`}>
-                      <span>Net Total Paid:</span>
-                      <strong>{currency(invoice.netTotal)}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* If Invoice is Cancelled, show void notice */}
-                {invoice.status === 'CANCELLED' && (
-                  <div className={styles.cancelledBanner}>
-                    <Icon name="alert" size={20} />
-                    <div>
-                      <strong>Invoice is VOID / CANCELLED</strong>
-                      <p>
-                        Voided on {invoice.cancelledAt ? new Date(invoice.cancelledAt).toLocaleString() : 'N/A'} by {invoice.cancelledByUserId || 'Supervisor'}.
-                      </p>
-                      <p className={styles.reasonText}>Reason: {invoice.cancellationReason}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Prior Return Vouchers */}
-                {invoice.returns.length > 0 && (
-                  <div className={styles.returnsHistoryBox}>
-                    <div className={styles.returnsHistoryHeader}>
-                      <Icon name="rotateCcw" size={16} />
-                      <strong>Historical Return Vouchers for this Invoice ({invoice.returns.length}):</strong>
-                    </div>
-                    <div className={styles.returnsList}>
-                      {invoice.returns.map((ret) => (
-                        <div key={ret.returnNumber} className={styles.returnChip}>
-                          <span className={styles.retNum}>{ret.returnNumber}</span>
-                          <span className={styles.retSummary}>{ret.itemsSummary || 'Returned items'}</span>
-                          <span className={styles.retRefund}>
-                            Refund: {currency(ret.refund?.amount || '0')} ({ret.refund?.method})
-                          </span>
-                        </div>
+                    <h3 className={styles.step}><span>2</span> How will you refund?</h3>
+                    <div className={styles.methods}>
+                      {REFUND_METHODS.map((m) => (
+                        <button key={m.value} type="button" className={`${styles.method} ${returnRefundMethod === m.value ? styles.methodOn : ''}`} onClick={() => setReturnRefundMethod(m.value)} aria-pressed={returnRefundMethod === m.value}><Icon name={m.icon} size={16} />{m.label}</button>
                       ))}
                     </div>
+                    <input className={styles.noteInput} type="text" placeholder="Refund slip or card approval number (optional)" value={returnRefundRef} onChange={(e) => setReturnRefundRef(e.target.value)} aria-label="Refund reference" />
+
+                    <div className={styles.payout}>
+                      <div><small>Refund to customer</small><strong>{currency(calculatedReturnRefund)}</strong><span>{selectedCount ? `${selectedCount} item${selectedCount === 1 ? '' : 's'}${Number(invoice.discountTotal) > 0 ? ' · after bill discount' : ''}` : 'No items chosen yet'}</span></div>
+                      <button type="button" onClick={handleRecordReturn} disabled={busy || calculatedReturnRefund <= 0} className={styles.primaryButton}><Icon name="check" size={16} /> Record return</button>
+                    </div>
                   </div>
                 )}
 
-                {/* Actions Section (Only active if FINALIZED) */}
-                {invoice.status === 'FINALIZED' ? (
-                  <div className={styles.actionsSection}>
-                    <div className={styles.actionTabs}>
-                      <button
-                        type="button"
-                        className={`${styles.actionTab} ${activeTab === 'return' ? styles.active : ''}`}
-                        onClick={() => setActiveTab('return')}
-                      >
-                        <Icon name="rotateCcw" size={16} />
-                        <span>Process Partial / Item Returns</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={`${styles.actionTab} ${activeTab === 'cancel' ? styles.active : ''}`}
-                        onClick={() => setActiveTab('cancel')}
-                        disabled={!permissions?.canCancelSales || invoice.returns.length > 0}
-                        title={
-                          invoice.returns.length > 0
-                            ? 'Cannot void invoice after partial returns have been processed.'
-                            : 'Void entire transaction'
-                        }
-                      >
-                        <Icon name="alert" size={16} />
-                        <span>Void Entire Invoice (Full Cancellation)</span>
-                      </button>
+                {activeTab === 'cancel' && isFinal && (
+                  <div className={styles.panel}>
+                    <div className={styles.warnBox}><Icon name="alert" size={16} /><span>Cancelling undoes the <b>whole</b> sale. Every item goes back into stock and the full {currency(invoice.netTotal)} is refunded.</span></div>
+
+                    <h3 className={styles.step}><span>1</span> Why is it being cancelled?</h3>
+                    <div className={styles.reasons}>
+                      {CANCEL_REASONS.map((r) => (
+                        <button key={r} type="button" className={`${styles.reason} ${cancelReasonCategory === r ? styles.reasonOn : ''}`} onClick={() => setCancelReasonCategory(r)} aria-pressed={cancelReasonCategory === r}>{r.replace(' (specify below)', '')}</button>
+                      ))}
                     </div>
+                    <textarea className={styles.textarea} rows={2} placeholder={cancelReasonCategory.startsWith('Other') ? 'Please explain what happened' : 'Extra details (optional)'} value={cancelDetailedNotes} onChange={(e) => setCancelDetailedNotes(e.target.value)} aria-label="Cancellation notes" />
 
-                    {/* TAB A: Itemized Returns */}
-                    {activeTab === 'return' && (
-                      <div className={styles.actionPanel}>
-                        <div className={styles.panelHeading}>
-                          <h3>Item Inspection & Return Disposition (OD-08)</h3>
-                          <p>Select which items the customer is returning, verify their physical condition, and designate stock disposition.</p>
-                        </div>
+                    <h3 className={styles.step}><span>2</span> How will you refund?</h3>
+                    <div className={styles.methods}>
+                      {REFUND_METHODS.map((m) => (
+                        <button key={m.value} type="button" className={`${styles.method} ${cancelRefundMethod === m.value ? styles.methodOn : ''}`} onClick={() => setCancelRefundMethod(m.value)} aria-pressed={cancelRefundMethod === m.value}><Icon name={m.icon} size={16} />{m.label}</button>
+                      ))}
+                    </div>
+                    <input className={styles.noteInput} type="text" placeholder="Refund slip reference (optional)" value={cancelRefundRef} onChange={(e) => setCancelRefundRef(e.target.value)} aria-label="Refund slip reference" />
 
-                        <div className={styles.itemsTableWrap}>
-                          <table className={styles.itemsTable}>
-                            <thead>
-                              <tr>
-                                <th style={{ width: 40 }}>Select</th>
-                                <th>Item & SKU</th>
-                                <th>Unit Price</th>
-                                <th>Original / Rem.</th>
-                                <th>Return Qty</th>
-                                <th>Physical Disposition</th>
-                                <th>Inspection Notes (Min 5 chars)</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {invoice.lines.map((line) => {
-                                const remaining = line.quantityBaseUnits - line.returnedQuantityBaseUnits;
-                                const isEligible = remaining > 0;
-                                const selection = returnLines[line.id] || {
-                                  selected: false,
-                                  quantity: 1,
-                                  disposition: 'RESTOCKED',
-                                  inspectionNotes: '',
-                                };
+                    <h3 className={styles.step}><span>3</span> Confirm</h3>
+                    <label className={styles.confirm}>
+                      <input type="checkbox" checked={confirmedGoodsReturned} onChange={(e) => setConfirmedGoodsReturned(e.target.checked)} />
+                      <span>I have all {soldUnits} items from this bill back in the store.</span>
+                    </label>
 
-                                return (
-                                  <tr key={line.id} className={!isEligible ? styles.rowDisabled : ''}>
-                                    <td>
-                                      <input
-                                        type="checkbox"
-                                        disabled={!isEligible}
-                                        checked={selection.selected}
-                                        onChange={(e) => {
-                                          setReturnLines({
-                                            ...returnLines,
-                                            [line.id]: { ...selection, selected: e.target.checked },
-                                          });
-                                        }}
-                                      />
-                                    </td>
-                                    <td>
-                                      <strong>{line.variant.product.name}</strong>
-                                      <div className={styles.variantSub}>{line.variant.name} · {line.variant.sku}</div>
-                                    </td>
-                                    <td>₹{line.unitPrice.toFixed(2)}</td>
-                                    <td>
-                                      {line.quantityBaseUnits} sold
-                                      <div className={styles.remQty}>{remaining} returnable</div>
-                                    </td>
-                                    <td>
-                                      <input
-                                        type="number"
-                                        min="1"
-                                        max={remaining}
-                                        disabled={!isEligible || !selection.selected}
-                                        value={selection.quantity}
-                                        onChange={(e) => {
-                                          const val = Math.min(remaining, Math.max(1, parseInt(e.target.value) || 1));
-                                          setReturnLines({
-                                            ...returnLines,
-                                            [line.id]: { ...selection, quantity: val },
-                                          });
-                                        }}
-                                        className={styles.smallQtyInput}
-                                      />
-                                    </td>
-                                    <td>
-                                      <select
-                                        disabled={!isEligible || !selection.selected}
-                                        value={selection.disposition}
-                                        onChange={(e) => {
-                                          setReturnLines({
-                                            ...returnLines,
-                                            [line.id]: {
-                                              ...selection,
-                                              disposition: e.target.value as 'RESTOCKED' | 'QUARANTINED',
-                                            },
-                                          });
-                                        }}
-                                        className={styles.select}
-                                      >
-                                        <option value="RESTOCKED">RESTOCKED (Saleable / Intact)</option>
-                                        <option value="QUARANTINED">QUARANTINED (Damaged / Opened)</option>
-                                      </select>
-                                    </td>
-                                    <td>
-                                      <input
-                                        type="text"
-                                        placeholder="e.g. Seal intact, verified by manager"
-                                        disabled={!isEligible || !selection.selected}
-                                        value={selection.inspectionNotes}
-                                        onChange={(e) => {
-                                          setReturnLines({
-                                            ...returnLines,
-                                            [line.id]: { ...selection, inspectionNotes: e.target.value },
-                                          });
-                                        }}
-                                        className={styles.notesInput}
-                                      />
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* Refund Recording Summary */}
-                        <div className={styles.refundConfigCard}>
-                          <div className={styles.refundDueBadge}>
-                            <span>Refund Amount to Customer:</span>
-                            <strong>{currency(calculatedReturnRefund)}</strong>
-                          </div>
-
-                          <div className={styles.refundFieldsRow}>
-                            <div className={styles.fieldItem}>
-                              <label>Manual Refund Method:</label>
-                              <select
-                                value={returnRefundMethod}
-                                onChange={(e) => setReturnRefundMethod(e.target.value as any)}
-                                className={styles.select}
-                              >
-                                <option value="CASH">Cash Drawer</option>
-                                <option value="CARD">Card Terminal Refund</option>
-                                <option value="ONLINE">Store Credit / UPI</option>
-                                <option value="OTHER">Other</option>
-                              </select>
-                            </div>
-
-                            <div className={styles.fieldItem}>
-                              <label>Refund Reference / Slip #:</label>
-                              <input
-                                type="text"
-                                placeholder="Optional refund slip # or card approval"
-                                value={returnRefundRef}
-                                onChange={(e) => setReturnRefundRef(e.target.value)}
-                                className={styles.input}
-                              />
-                            </div>
-                          </div>
-
-                          <div className={styles.submitWrap}>
-                            <button
-                              type="button"
-                              onClick={handleRecordReturn}
-                              disabled={busy || calculatedReturnRefund <= 0}
-                              className={styles.btnPrimary}
-                            >
-                              <Icon name="check" size={16} />
-                              <span>Record Return & Issue Voucher</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* TAB B: Full Invoice Cancellation */}
-                    {activeTab === 'cancel' && (
-                      <div className={styles.actionPanel}>
-                        <div className={styles.panelHeading}>
-                          <h3>Full Invoice Cancellation (Void Transaction)</h3>
-                          <p>
-                            Voiding an invoice updates its status to CANCELLED, appends compensatory return movements to inventory for all items, and records a manual refund.
-                          </p>
-                        </div>
-
-                        <div className={styles.cancelFormGrid}>
-                          <div className={styles.formGroup}>
-                            <label>Mandatory Cancellation Reason Category *</label>
-                            <select
-                              value={cancelReasonCategory}
-                              onChange={(e) => setCancelReasonCategory(e.target.value)}
-                              className={styles.select}
-                            >
-                              <option value="Customer billing error">Customer billing error</option>
-                              <option value="Cashier input mistake">Cashier input mistake</option>
-                              <option value="Defective goods on purchase">Defective goods on purchase</option>
-                              <option value="System duplicate charge">System duplicate charge</option>
-                              <option value="Other (specify below)">Other (specify below)</option>
-                            </select>
-                          </div>
-
-                          <div className={styles.formGroup}>
-                            <label>Detailed Supervisor Notes</label>
-                            <textarea
-                              rows={2}
-                              placeholder="Provide detailed explanation for the void log..."
-                              value={cancelDetailedNotes}
-                              onChange={(e) => setCancelDetailedNotes(e.target.value)}
-                              className={styles.textarea}
-                            />
-                          </div>
-
-                          <div className={styles.refundFieldsRow}>
-                            <div className={styles.fieldItem}>
-                              <label>Manual Refund Method</label>
-                              <select
-                                value={cancelRefundMethod}
-                                onChange={(e) => setCancelRefundMethod(e.target.value as any)}
-                                className={styles.select}
-                              >
-                                <option value="CASH">Cash</option>
-                                <option value="CARD">Card (manual)</option>
-                                <option value="ONLINE">Online (manual)</option>
-                                <option value="OTHER">Other</option>
-                              </select>
-                            </div>
-
-                            <div className={styles.fieldItem}>
-                              <label>Refund Slip Reference</label>
-                              <input
-                                type="text"
-                                placeholder="e.g. SLIP-9901"
-                                value={cancelRefundRef}
-                                onChange={(e) => setCancelRefundRef(e.target.value)}
-                                className={styles.input}
-                              />
-                            </div>
-                          </div>
-
-                          <div className={styles.checkboxConfirm}>
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={confirmedGoodsReturned}
-                                onChange={(e) => setConfirmedGoodsReturned(e.target.checked)}
-                              />
-                              <span>
-                                <strong>Physical Verification:</strong> I confirm that all goods listed on this invoice are physically present and returned to this store location.
-                              </span>
-                            </label>
-                          </div>
-
-                          <div className={styles.submitWrap}>
-                            <button
-                              type="button"
-                              onClick={() => setCancelConfirmModalOpen(true)}
-                              disabled={!confirmedGoodsReturned || busy}
-                              className={styles.btnDanger}
-                            >
-                              <Icon name="alert" size={16} />
-                              <span>Void Invoice & Record {currency(invoice.netTotal)} Refund</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div className={styles.payout}>
+                      <div><small>Full refund</small><strong className={styles.redText}>{currency(invoice.netTotal)}</strong><span>{REFUND_METHODS.find((m) => m.value === cancelRefundMethod)?.label}</span></div>
+                      <button type="button" onClick={() => setCancelConfirmModalOpen(true)} disabled={!confirmedGoodsReturned || busy || (cancelReasonCategory.startsWith('Other') && !cancelDetailedNotes.trim())} className={styles.dangerButton}><Icon name="ban" size={16} /> Cancel bill</button>
+                    </div>
                   </div>
-                ) : null}
-              </div>
+                )}
+              </article>
             )}
-          </>
-        )}
-      </div>
+          </div>
+        </section>
+      ) : (
+        <section className={`${styles.card} ${styles.emptyState}`}>
+          <span><Icon name="receipt" size={26} /></span>
+          <strong>No bill open</strong>
+          <p>Search for a bill number or pick one from Recent bills.</p>
+        </section>
+      )}
 
-      {/* Confirmation Modal for Void */}
+      {/* ---------- Confirm cancel ---------- */}
       {cancelConfirmModalOpen && invoice && (
-        <div className={styles.modalOverlay} onClick={() => setCancelConfirmModalOpen(false)}>
-          <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div className={styles.modalIconWrapDanger}>
-                <Icon name="alert" size={22} />
-              </div>
-              <div>
-                <h2>Confirm Invoice Cancellation</h2>
-                <p>Are you sure you want to void invoice {invoice.invoiceNumber}?</p>
-              </div>
+        <div className={styles.backdrop} onClick={() => setCancelConfirmModalOpen(false)}>
+          <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="confirm-cancel-title" onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHead}>
+              <span className={`${styles.modalIcon} ${styles.toneRed}`}><Icon name="ban" size={20} /></span>
+              <div><h2 id="confirm-cancel-title">Cancel {invoice.invoiceNumber}?</h2><p>This can&apos;t be undone.</p></div>
             </div>
-
             <div className={styles.modalBody}>
-              <p>This supervisor action will perform the following:</p>
               <ul className={styles.confirmList}>
-                <li>Update invoice status permanently to <strong>CANCELLED</strong>.</li>
-                <li>Write positive reversal movements to the store inventory ledger for all items.</li>
-                <li>Record a manual refund of <strong>{currency(invoice.netTotal)}</strong> under your supervisor ID.</li>
+                <li><Icon name="check" size={14} /> The bill is marked <b>Cancelled</b>.</li>
+                <li><Icon name="check" size={14} /> All {soldUnits} items go back into stock at {invoice.location.name}.</li>
+                <li><Icon name="check" size={14} /> A refund of <b>{currency(invoice.netTotal)}</b> by {REFUND_METHODS.find((m) => m.value === cancelRefundMethod)?.label} is recorded under your name.</li>
               </ul>
-              <div className={styles.confirmHighlight}>
-                <strong>Refund to customer:</strong> {currency(invoice.netTotal)} ({cancelRefundMethod})
-              </div>
+              <div className={styles.reasonBox}><small>Reason</small><span>{cancelReasonCategory.replace(' (specify below)', '')}{cancelDetailedNotes.trim() ? `: ${cancelDetailedNotes.trim()}` : ''}</span></div>
             </div>
-
-            <div className={styles.modalFooter}>
-              <button
-                type="button"
-                onClick={() => setCancelConfirmModalOpen(false)}
-                className={styles.btnSecondary}
-              >
-                Go Back
-              </button>
-              <button
-                type="button"
-                onClick={handleCancelSale}
-                disabled={busy}
-                className={styles.btnDanger}
-              >
-                {busy ? 'Processing Void…' : 'Yes, Void Sale Now'}
-              </button>
+            <div className={styles.modalFoot}>
+              <button type="button" onClick={() => setCancelConfirmModalOpen(false)} className={styles.ghostButton}>Go back</button>
+              <button type="button" onClick={handleCancelSale} disabled={busy} className={styles.dangerButton}>{busy ? 'Cancelling…' : 'Yes, cancel bill'}</button>
             </div>
           </div>
         </div>

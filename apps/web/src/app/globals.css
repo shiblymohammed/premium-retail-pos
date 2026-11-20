@@ -700,59 +700,174 @@ button:disabled { cursor: not-allowed; }
   .product-tile { padding: 7px; }
   .product-tile-art { height: 60px; flex-basis: 60px; }
 }
-/* One shared application shell keeps navigation consistent across routes. */
-.app-frame { --shared-sidebar-width: 256px; min-height: 100vh; background: #ffffff; display: flex; flex-direction: column; }
-.app-frame.is-collapsed { --shared-sidebar-width: 76px; }
+/* One shared application shell keeps navigation consistent across routes.
+   Layout follows the reference: coloured shell + sidebar, white rounded content panel,
+   and the active nav item rendered as a white tab that merges into the panel. */
+.app-frame {
+  --shell-bg: #44679f;          /* sidebar / shell colour: muted steel blue */
+  --shell-bg-dark: #3a5a8c;
+  --shell-panel: #f5f7fa;       /* content panel, topbar and active tab share one colour */
+  --shell-ink: #1f2f4d;         /* active tab text */
+  --shell-accent: #fbe07a;      /* sidebar card button */
+  --shell-gap: 14px;            /* space around the content panel */
+  --shell-tab-radius: 22px;
+  --shared-sidebar-width: 240px;
+  /* The frame fills the viewport exactly; only the content panel scrolls. */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--shell-bg);
+  display: flex;
+}
+.app-frame.is-collapsed { --shared-sidebar-width: 84px; }
 
-/* Google Drive-inspired Topbar */
-.drive-topbar {
-  position: sticky;
+/* ---------- Sidebar ---------- */
+.drive-sidebar {
+  position: fixed;
   top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--shared-sidebar-width);
+  background: var(--shell-bg);
+  display: flex;
+  flex-direction: column;
+  padding: 22px 0 18px 14px;   /* no right padding: active tab must reach the panel */
+  z-index: 80;
+  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+}
+.drive-sidebar::-webkit-scrollbar { display: none; }
+
+.drive-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 18px;
+  margin-right: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.drive-sidebar-brand-icon { display: grid; place-items: center; color: #f2d58a; flex-shrink: 0; }
+
+.drive-nav-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding-top: 10px;
+}
+
+.drive-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 0;
+}
+.drive-nav-group + .drive-nav-group { border-top: 1px solid rgba(255, 255, 255, 0.22); margin-right: 14px; }
+/* Dividers stop short of the edge, but items in later groups still need to reach it */
+.drive-nav-group + .drive-nav-group .drive-nav-item { margin-right: -14px; }
+
+.drive-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 42px;
+  padding: 0 16px;
+  border: none;
+  border-radius: var(--shell-tab-radius) 0 0 var(--shell-tab-radius);
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.drive-nav-label { overflow: hidden; text-overflow: ellipsis; }
+
+.drive-nav-item:hover:not(.active) { background: rgba(255, 255, 255, 0.12); }
+
+/* Selected tab: white pill flowing into the content panel with concave corners */
+.drive-nav-item.active {
+  background: var(--shell-panel);
+  color: var(--shell-ink);
+  font-weight: 700;
+  z-index: 1;
+}
+.drive-nav-item.active::before,
+.drive-nav-item.active::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  width: var(--shell-tab-radius);
+  height: var(--shell-tab-radius);
+  pointer-events: none;
+}
+.drive-nav-item.active::before {
+  top: calc(var(--shell-tab-radius) * -1);
+  background: radial-gradient(circle at 0 0, transparent calc(var(--shell-tab-radius) - 0.5px), var(--shell-panel) var(--shell-tab-radius));
+}
+.drive-nav-item.active::after {
+  bottom: calc(var(--shell-tab-radius) * -1);
+  background: radial-gradient(circle at 0 100%, transparent calc(var(--shell-tab-radius) - 0.5px), var(--shell-panel) var(--shell-tab-radius));
+}
+
+.drive-nav-icon {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: #d3def0;               /* soft blue-white: calmer than yellow on the muted shell */
+}
+.drive-nav-item.active .drive-nav-icon { color: var(--shell-bg); }
+
+.app-frame.is-collapsed .drive-sidebar-brand { justify-content: center; padding-left: 0; padding-right: 0; }
+.app-frame.is-collapsed .drive-nav-item { justify-content: center; padding: 0; padding-right: 14px; }
+
+/* ---------- White content panel ---------- */
+.drive-body-container {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  margin: var(--shell-gap) var(--shell-gap) var(--shell-gap) var(--shared-sidebar-width);
+  height: calc(100% - var(--shell-gap) * 2);
+  overflow: hidden;           /* keeps the rounded corners and teal frame visible on all sides */
+  background: var(--shell-panel);
+  border-radius: 28px;
+  transition: margin-left 0.2s ease;
+}
+
+.drive-topbar {
+  position: relative;
+  flex-shrink: 0;
   z-index: 90;
-  height: 64px;
-  background: #ffffff;
+  height: 68px;
+  background: transparent;    /* blends with the content area below */
   border-bottom: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  gap: 18px;
+  padding: 0 28px;
+  gap: 16px;
 }
 
 .drive-topbar-left {
   display: flex;
   align-items: center;
   gap: 16px;
-  min-width: 230px;
-}
-
-.drive-brand-link {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-decoration: none;
-  color: #1e293b;
-}
-
-.drive-brand-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #1a62ea 0%, #1557d0 100%);
-  color: #ffffff;
-  display: grid;
-  place-items: center;
-  font-size: 19px;
-  font-weight: 800;
-  box-shadow: 0 3px 10px rgba(26, 98, 234, 0.28);
-}
-
-.drive-brand-title {
-  font-family: 'Manrope', -apple-system, sans-serif;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: #1e293b;
+  margin-left: auto;
 }
 
 .drive-location-badge {
@@ -778,45 +893,35 @@ button:disabled { cursor: not-allowed; }
   cursor: pointer;
 }
 
-/* Center Pill Search */
+/* Plain search like the reference (icon + "Search...") */
 .drive-search-pill {
   flex: 1;
-  max-width: 520px;
-  height: 42px;
-  background: #f1f4f9;
-  border-radius: 24px;
+  max-width: 420px;
+  height: 40px;
   display: flex;
   align-items: center;
-  padding: 0 16px;
   gap: 10px;
-  transition: all 0.2s ease;
-  border: 1px solid transparent;
+  padding: 0 4px;
+  color: var(--shell-ink);
+  border-radius: 12px;
+  transition: background 0.2s ease, padding 0.2s ease;
 }
-
-.drive-search-pill:focus-within {
-  background: #ffffff;
-  border-color: #cbd5e1;
-  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.08);
-}
-
+.drive-search-pill:focus-within { background: #f4f6f8; padding: 0 12px; }
 .drive-search-pill input {
   width: 100%;
   border: none;
   background: transparent;
   outline: none;
   font-size: 13.5px;
-  color: #1e293b;
+  font-weight: 500;
+  color: var(--shell-ink);
 }
+.drive-search-pill input::placeholder { color: var(--shell-ink); opacity: 0.85; }
 
-.drive-search-pill input::placeholder {
-  color: #718096;
-}
-
-/* Topbar Right Actions */
 .drive-topbar-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .drive-icon-button {
@@ -857,195 +962,27 @@ button:disabled { cursor: not-allowed; }
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: #1a62ea;
+  background: var(--shell-bg);
   color: #ffffff;
   display: grid;
   place-items: center;
   font-size: 13px;
   font-weight: 750;
-}
-
-/* Lower Container: Sidebar + Content Canvas */
-.drive-body-container {
-  display: flex;
-  flex: 1;
-  min-height: calc(100vh - 64px);
-  position: relative;
-}
-
-/* Royal Blue Curved Sidebar */
-.drive-sidebar {
-  position: fixed;
-  top: 64px;
-  bottom: 0;
-  left: 0;
-  width: var(--shared-sidebar-width);
-  background: linear-gradient(180deg, #1960ec 0%, #114ec8 100%);
-  border-top-right-radius: 40px;
-  display: flex;
-  flex-direction: column;
-  padding: 20px 14px 18px;
-  z-index: 80;
-  box-shadow: 4px 0 24px rgba(17, 78, 200, 0.14);
-  transition: width 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-}
-
-.drive-sidebar::-webkit-scrollbar {
-  width: 4px;
-}
-.drive-sidebar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-}
-
-/* White Action Pill Button at top of sidebar */
-.drive-action-pill {
-  width: 100%;
-  height: 46px;
-  background: #ffffff;
-  color: #1a62ea;
-  border-radius: 23px;
-  border: none;
-  font-size: 13.5px;
-  font-weight: 750;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  margin-bottom: 20px;
-  text-decoration: none;
-  flex-shrink: 0;
-}
-
-.drive-action-pill:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-}
-
-/* Nav Links inside Royal Blue Sidebar */
-.drive-nav-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-}
-
-.drive-nav-group-title {
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: 0.12em;
-  color: rgba(255, 255, 255, 0.55);
-  padding: 12px 12px 4px;
-  text-transform: uppercase;
-}
-
-.drive-nav-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 38px;
-  padding: 0 12px;
-  border-radius: 10px;
-  color: rgba(255, 255, 255, 0.88);
-  font-size: 13px;
-  font-weight: 550;
-  text-decoration: none;
-  transition: background 0.14s ease, color 0.14s ease, transform 0.12s ease;
-}
-
-.drive-nav-item:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #ffffff;
-}
-
-.drive-nav-item.active {
-  background: rgba(255, 255, 255, 0.24);
-  color: #ffffff;
-  font-weight: 750;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-}
-
-.drive-nav-icon {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  font-size: 16px;
-  flex-shrink: 0;
-  color: #ffffff;
-}
-
-/* Storage & Diagnostics Widget at bottom */
-.drive-storage-widget {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
-  color: #ffffff;
-}
-
-.drive-storage-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.7);
-  margin-bottom: 8px;
-  text-transform: uppercase;
-}
-
-.drive-storage-line {
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.9);
-  margin-bottom: 4px;
-}
-
-.drive-progress-track {
-  width: 100%;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.24);
-  border-radius: 2px;
-  overflow: hidden;
-  margin-bottom: 10px;
-}
-
-.drive-progress-fill {
-  height: 100%;
-  background: #ffffff;
-  border-radius: 2px;
-}
-
-.drive-storage-link {
-  display: inline-block;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 700;
-  text-decoration: none;
-  margin-top: 4px;
-  opacity: 0.92;
-}
-
-.drive-storage-link:hover {
-  text-decoration: underline;
-  opacity: 1;
 }
 
 /* Main Content Area */
 .drive-main-canvas {
   flex: 1;
-  margin-left: var(--shared-sidebar-width);
-  min-height: calc(100vh - 64px);
-  background: #ffffff;
-  transition: margin-left 0.2s ease;
-  overflow-x: clip;
+  min-width: 0;
+  min-height: 0;              /* allow the flex child to shrink so it can scroll */
+  background: transparent;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* legacy Edge */
 }
+.drive-main-canvas::-webkit-scrollbar { display: none; }
 
 /* Folder Tabbed Card Cutouts */
 .drive-folder-card {
@@ -1160,14 +1097,23 @@ button:disabled { cursor: not-allowed; }
   border-radius: 8px;
 }
 
+/* Shorter screens: tighten the sidebar so the bottom card stays fully visible */
+@media (max-height: 860px) {
+  .drive-sidebar { padding-top: 16px; padding-bottom: 12px; }
+  .drive-sidebar-brand { padding-bottom: 12px; }
+  .drive-nav-list { padding-top: 4px; }
+  .drive-nav-group { padding: 6px 0; }
+  .drive-nav-item { min-height: 36px; }
+}
+
 @media (max-width: 900px) {
+  .app-frame { --shared-sidebar-width: 84px; --shell-gap: 8px; }
   .drive-search-pill { display: none; }
-  .drive-sidebar { width: 72px; padding: 18px 10px; }
-  .drive-sidebar .drive-nav-item span:not(.drive-nav-icon),
-  .drive-sidebar .drive-action-pill span:not(.drive-pill-plus),
-  .drive-sidebar .drive-nav-group-title,
-  .drive-sidebar .drive-storage-widget { display: none; }
-  .drive-main-canvas { margin-left: 72px; }
+  .drive-sidebar .drive-nav-label,
+  .drive-sidebar .drive-sidebar-brand span:not(.drive-sidebar-brand-icon) { display: none; }
+  .drive-sidebar .drive-sidebar-brand { justify-content: center; padding-left: 0; padding-right: 0; }
+  .drive-sidebar .drive-nav-item { justify-content: center; padding: 0 14px 0 0; }
+  .drive-topbar { padding: 0 14px; }
 }
 .discount-sidebar { display: none !important; }
 .discount-console-header { margin-left: 0 !important; }

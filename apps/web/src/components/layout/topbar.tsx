@@ -19,10 +19,11 @@ export interface TopBarProps {
   handleSignOut: () => void;
   collapsed: boolean;
   toggleSidebar: () => void;
+  /** Hide the global search on pages that provide their own (e.g. the dashboard). */
+  showSearch?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
-  homeRoute,
   location,
   isLocationLocked,
   isLocationOpen,
@@ -36,20 +37,34 @@ export const TopBar: React.FC<TopBarProps> = ({
   handleSignOut,
   collapsed,
   toggleSidebar,
+  showSearch = true,
 }) => {
   return (
     <header className="drive-topbar" aria-label="Global navigation header">
-      <div className="drive-topbar-left">
-        <a className="drive-brand-link" href={homeRoute} aria-label="Premium Retail workspace">
-          <div className="drive-brand-icon">◈</div>
-          <div>
-            <span className="drive-brand-title">Premium Retail</span>
-            <small style={{ display: 'block', fontSize: '10px', color: '#64748b', fontWeight: 750, letterSpacing: '0.08em' }}>
-              ENTERPRISE POS
-            </small>
-          </div>
-        </a>
+      {/* Search (left, like the reference layout) */}
+      {showSearch && (
+      <div className="drive-search-pill" role="search">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <circle cx="10.8" cy="10.8" r="6.3" />
+          <path d="m16 16 4.5 4.5" />
+        </svg>
+        <input
+          type="text"
+          placeholder="Search..."
+          aria-label="Search across workspace"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const target = (e.target as HTMLInputElement).value;
+              if (target) {
+                window.location.href = `/admin/users?q=${encodeURIComponent(target)}`;
+              }
+            }
+          }}
+        />
+      </div>
+      )}
 
+      <div className="drive-topbar-left">
         {/* Premium Custom Location Dropdown */}
         <div className="drive-location-wrap" style={{ position: 'relative' }}>
           <button
@@ -64,7 +79,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               gap: '8px',
               padding: '6px 14px',
               borderRadius: '20px',
-              background: '#f1f5f9',
+              background: '#ffffff',
               border: '1px solid #e2e8f0',
               color: '#334155',
               fontSize: '12.5px',
@@ -74,7 +89,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             }}
             title={isLocationLocked ? 'Store location fixed to assigned terminal' : 'Switch viewing location scope'}
           >
-            <span style={{ color: isLocationLocked ? '#64748b' : '#1a62ea', fontSize: '13px' }}>
+            <span style={{ color: isLocationLocked ? '#64748b' : '#3e64a0', fontSize: '13px' }}>
               {isLocationLocked ? '🔒' : '⌖'}
             </span>
             <span>{isLocationLocked ? 'Downtown Store' : location}</span>
@@ -116,8 +131,8 @@ export const TopBar: React.FC<TopBarProps> = ({
                       padding: '8px 12px',
                       borderRadius: '8px',
                       border: 'none',
-                      background: isSelected ? '#eff6ff' : 'transparent',
-                      color: isSelected ? '#1a62ea' : '#1e293b',
+                      background: isSelected ? '#eef3fa' : 'transparent',
+                      color: isSelected ? '#3e64a0' : '#1e293b',
                       fontSize: '12.5px',
                       fontWeight: isSelected ? 700 : 550,
                       textAlign: 'left',
@@ -135,34 +150,16 @@ export const TopBar: React.FC<TopBarProps> = ({
                     }}
                   >
                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ color: isSelected ? '#1a62ea' : '#94a3b8', fontSize: '13px' }}>⌖</span>
+                      <span style={{ color: isSelected ? '#3e64a0' : '#94a3b8', fontSize: '13px' }}>⌖</span>
                       {item}
                     </span>
-                    {isSelected && <span style={{ color: '#1a62ea', fontSize: '13px', fontWeight: 800 }}>✓</span>}
+                    {isSelected && <span style={{ color: '#3e64a0', fontSize: '13px', fontWeight: 800 }}>✓</span>}
                   </button>
                 );
               })}
             </div>
           )}
         </div>
-      </div>
-
-      {/* Center Pill Search Bar */}
-      <div className="drive-search-pill" role="search">
-        <span style={{ fontSize: '16px', color: '#718096' }}>🔍</span>
-        <input
-          type="text"
-          placeholder="Search users, inventory, stores, orders..."
-          aria-label="Search across workspace"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              const target = (e.target as HTMLInputElement).value;
-              if (target) {
-                window.location.href = `/admin/users?q=${encodeURIComponent(target)}`;
-              }
-            }
-          }}
-        />
       </div>
 
       {/* Topbar Right Actions */}
@@ -207,7 +204,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               gap: '10px',
               padding: '4px 8px 4px 14px',
               borderRadius: '24px',
-              background: '#f8fafc',
+              background: '#ffffff',
               border: '1px solid #e2e8f0',
               color: '#1e293b',
               fontSize: '13px',
@@ -245,7 +242,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     width: '40px',
                     height: '40px',
                     borderRadius: '50%',
-                    background: '#1a62ea',
+                    background: '#3e64a0',
                     color: '#ffffff',
                     display: 'grid',
                     placeItems: 'center',
@@ -268,8 +265,8 @@ export const TopBar: React.FC<TopBarProps> = ({
                       marginTop: '4px',
                       padding: '2px 7px',
                       borderRadius: '6px',
-                      background: '#eff6ff',
-                      color: '#1a62ea',
+                      background: '#eef3fa',
+                      color: '#3e64a0',
                       fontSize: '10.5px',
                       fontWeight: 700,
                     }}
@@ -306,7 +303,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   style={{
                     padding: '8px 10px',
                     borderRadius: '8px',
-                    color: '#1a62ea',
+                    color: '#3e64a0',
                     fontSize: '12.5px',
                     fontWeight: 600,
                     textDecoration: 'none',

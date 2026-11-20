@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './products.module.css';
 
 interface ProductItem {
@@ -205,6 +206,20 @@ const initialProducts: ProductItem[] = [
   }
 ];
 
+type SortKey = 'name' | 'sku' | 'price' | 'stock' | 'category' | 'status';
+
+/** Sort order for stock health: problems first when ascending. */
+const STATUS_RANK: Record<ProductItem['status'], number> = { Negative: 0, 'Low Stock': 1, Healthy: 2 };
+
+/** Tile colours per category (product thumbnail placeholder). */
+const CATEGORY_TONE: Record<string, string> = {
+  Beverages: 'toneTeal',
+  'Personal care': 'toneViolet',
+  'Home & living': 'toneBlue',
+  Snacks: 'toneAmber',
+  Pantry: 'toneRose',
+};
+
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const icons: Record<string, React.ReactNode> = {
     box: <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z M4.5 7.7 12 11.9l7.5-4.2M12 12v9" />,
@@ -216,6 +231,10 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     chevronDown: <path d="m6 9 6 6 6-6" />,
     chevronLeft: <path d="m15 18-6-6 6-6" />,
     chevronRight: <path d="m9 18 6-6-6-6" />,
+    chevronUp: <path d="m18 15-6-6-6 6" />,
+    filter: <path d="M4 5h16l-6.3 7.2v5.3l-3.4 1.7v-7z" />,
+    copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></>,
+    more: <><circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" /></>,
     upload: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />,
     plus: <path d="M12 5v14M5 12h14" />,
     shoppingCart: <><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" /></>,
@@ -246,7 +265,12 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(6);
+  const [itemsPerPage, setItemsPerPage] = useState(6);
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [menuFor, setMenuFor] = useState<number | null>(null);
+  const filterRef = useRef<HTMLDivElement>(null);
 
   // Modal States
   const [replenishModalOpen, setReplenishModalOpen] = useState(false);
@@ -347,12 +371,65 @@ export default function ProductsPage() {
     };
   }, [filteredProducts]);
 
+  // Sorting (applied after filtering, before pagination)
+  const sortedProducts = useMemo(() => {
+    const value = (p: ProductItem): string | number => {
+      switch (sortKey) {
+        case 'sku': return p.sku;
+        case 'price': return p.price;
+        case 'stock': return p.totalUnits;
+        case 'category': return p.category;
+        case 'status': return STATUS_RANK[p.status];
+        default: return p.name.toLowerCase();
+      }
+    };
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filteredProducts].sort((a, b) => {
+      const va = value(a);
+      const vb = value(b);
+      return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+    });
+  }, [filteredProducts, sortKey, sortDir]);
+
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / itemsPerPage));
+  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / itemsPerPage));
   const paginatedProducts = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
-    return filteredProducts.slice(start, start + itemsPerPage);
-  }, [filteredProducts, currentPage, itemsPerPage]);
+    return sortedProducts.slice(start, start + itemsPerPage);
+  }, [sortedProducts, currentPage, itemsPerPage]);
+
+  // Keep the current page valid when filters shrink the list
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  // Close the filter popover and row menus on outside click / Escape
+  useEffect(() => {
+    if (!filterOpen && menuFor === null) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (filterOpen && !filterRef.current?.contains(target)) setFilterOpen(false);
+      if (menuFor !== null && !target.closest('[data-row-menu]')) setMenuFor(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setFilterOpen(false); setMenuFor(null); } };
+    window.addEventListener('mousedown', onClick);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('mousedown', onClick); window.removeEventListener('keydown', onKey); };
+  }, [filterOpen, menuFor]);
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+
+  const copySku = async (product: ProductItem) => {
+    try {
+      await navigator.clipboard.writeText(product.sku);
+      showToast(`SKU ${product.sku} copied to clipboard.`, 'info');
+    } catch {
+      showToast(`SKU: ${product.sku}`, 'info');
+    }
+  };
 
   const showToast = (message: string, type: 'success' | 'info' = 'success') => {
     setNotification({ message, type });
@@ -471,471 +548,357 @@ export default function ProductsPage() {
 
   const categories = ['All categories', 'Beverages', 'Personal care', 'Home & living', 'Snacks', 'Pantry'];
 
+  // ---------- Derived figures for the statistic strip ----------
+  const healthyCount = filteredProducts.filter((p) => p.status === 'Healthy').length;
+  const healthPct = filteredProducts.length ? Math.round((healthyCount / filteredProducts.length) * 100) : 0;
+  const healthLabel = healthPct >= 75 ? 'Good' : healthPct >= 50 ? 'Fair' : 'Needs attention';
+  const topValueProduct = [...filteredProducts].sort((a, b) => Math.max(0, b.totalUnits) * b.price - Math.max(0, a.totalUnits) * a.price)[0];
+  const activeFilterCount = [selectedHealth !== 'All items', selectedCategory !== 'All categories', !['All retail locations', 'All locations'].includes(selectedLocation)].filter(Boolean).length;
+  const firstRow = sortedProducts.length ? (currentPage - 1) * itemsPerPage + 1 : 0;
+  const lastRow = Math.min(currentPage * itemsPerPage, sortedProducts.length);
+  const formatPrice = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const statusTone = (s: ProductItem['status']) => (s === 'Healthy' ? styles.pillGood : s === 'Low Stock' ? styles.pillWarn : styles.pillBad);
+  const unitWord = (n: number) => (Math.abs(n) === 1 ? 'pack' : 'packs');
+  const pageNumbers = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
+    const list = [...pages].filter((n) => n >= 1 && n <= totalPages).sort((a, b) => a - b);
+    return list.flatMap((n, i) => (i && n - list[i - 1] > 1 ? ['gap' as const, n] : [n]));
+  })();
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSelectedCategory('All categories');
+    setSelectedHealth('All items');
+    handleLocationChange('All retail locations');
+    setCurrentPage(1);
+  };
+
+  const SortHead = ({ label, k, className = '' }: { label: string; k: SortKey; className?: string }) => (
+    <button type="button" className={`${styles.sortHead} ${sortKey === k ? styles.sortActive : ''} ${className}`} onClick={() => toggleSort(k)} aria-label={`Sort by ${label}`}>
+      {label}
+      <span className={styles.sortIcon} aria-hidden="true">{sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+    </button>
+  );
+
+  /** Segmented semicircle: share of units already on the shelf vs. still in transit. */
+  const Gauge = ({ product }: { product: ProductItem }) => {
+    const onHand = Math.max(0, product.totalUnits);
+    const pipeline = onHand + product.inTransit;
+    const ratio = pipeline ? onHand / pipeline : 0;
+    const segments = 12;
+    const filled = Math.round(ratio * segments);
+    const color = product.status === 'Healthy' ? '#22a559' : product.status === 'Low Stock' ? '#f2a93b' : '#e05252';
+    return (
+      <svg viewBox="0 0 64 36" className={styles.gauge} role="img" aria-label={`${Math.round(ratio * 100)}% of pipeline on shelf`}>
+        {Array.from({ length: segments }).map((_, i) => {
+          const angle = Math.PI - (i + 0.5) * (Math.PI / segments);
+          const x1 = 32 + Math.cos(angle) * 20;
+          const y1 = 32 - Math.sin(angle) * 20;
+          const x2 = 32 + Math.cos(angle) * 29;
+          const y2 = 32 - Math.sin(angle) * 29;
+          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={i < filled ? color : '#e5e7eb'} strokeWidth="3.2" strokeLinecap="round" />;
+        })}
+      </svg>
+    );
+  };
+
   return (
     <div className={styles.appWrapper}>
-      <div className={styles.pageContainer}>
-        {/* Toast Feedback Notification */}
+      <div className={styles.page}>
         {notification && (
-          <div className={`${styles.toastNotification} ${styles[notification.type]}`}>
+          <div className={`${styles.toastNotification} ${styles[notification.type]}`} role="status">
             <Icon name="check" size={16} />
             <span>{notification.message}</span>
-            <button onClick={() => setNotification(null)} className={styles.toastCloseBtn}>
-              <Icon name="x" size={14} />
-            </button>
+            <button onClick={() => setNotification(null)} className={styles.toastCloseBtn} aria-label="Dismiss"><Icon name="x" size={14} /></button>
           </div>
         )}
 
-        {/* Top Breadcrumb Bar */}
-        <div className={styles.topBar}>
-          <div className={styles.breadcrumb}>
-            <span>Catalog & Inventory</span>
-            <span className={styles.separator}>›</span>
-            <span className={styles.currentPage}>Products Catalogue</span>
+        {/* ---------- Header ---------- */}
+        <header className={styles.header}>
+          <div>
+            <h1>Products &amp; Stock</h1>
+            <p>{selectedLocation} · {sortedProducts.length} of {products.length} variants · prices are fixed by HQ</p>
           </div>
-          <div className={styles.topBarRight}>
-            <div className={styles.scopeIndicator}>
-              <Icon name="mapPin" size={14} />
-              <span>Scope: <strong>{selectedLocation}</strong></span>
+          <div className={styles.headerActions}>
+            <label className={styles.search}>
+              <Icon name="search" size={16} />
+              <input
+                type="text"
+                placeholder="Search product, variant, SKU or barcode…"
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                aria-label="Search products"
+              />
+              {searchQuery && <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear search"><Icon name="x" size={13} /></button>}
+            </label>
+
+            <div className={styles.filterWrap} ref={filterRef}>
+              <button type="button" className={`${styles.ghostButton} ${filterOpen ? styles.ghostActive : ''}`} onClick={() => setFilterOpen((o) => !o)} aria-expanded={filterOpen}>
+                <Icon name="filter" size={15} /> Filter
+                {activeFilterCount > 0 && <span className={styles.countBadge}>{activeFilterCount}</span>}
+              </button>
+              {filterOpen && (
+                <div className={styles.filterMenu} role="dialog" aria-label="Filter products">
+                  <div className={styles.menuHeading}>LOCATION</div>
+                  <div className={styles.optionGrid}>
+                    {['All retail locations', 'Downtown Store', 'North Mall', 'West End Outlet', 'Central Warehouse'].map((loc) => (
+                      <button key={loc} type="button" className={selectedLocation === loc ? styles.optionActive : ''} onClick={() => { handleLocationChange(loc); setCurrentPage(1); }}>{loc === 'All retail locations' ? 'All locations' : loc}</button>
+                    ))}
+                  </div>
+                  <div className={styles.menuHeading}>STOCK HEALTH</div>
+                  <div className={styles.optionGrid}>
+                    {['All items', 'Healthy', 'Low Stock', 'Negative'].map((h) => (
+                      <button key={h} type="button" className={selectedHealth === h ? styles.optionActive : ''} onClick={() => { setSelectedHealth(h); setCurrentPage(1); }}>{h}</button>
+                    ))}
+                  </div>
+                  <div className={styles.menuFoot}>
+                    <button type="button" onClick={resetFilters} className={styles.linkButton}>Reset all filters</button>
+                    <button type="button" onClick={() => setFilterOpen(false)} className={styles.smallPrimary}>Done</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button type="button" onClick={handleExportCSV} className={styles.ghostButton} title="Download CSV inventory export">
+              <Icon name="upload" size={15} /> Export
+            </button>
+            <button type="button" onClick={() => setAddProductModalOpen(true)} className={styles.primaryButton}>
+              <Icon name="plus" size={16} /> Add New Product
+            </button>
+          </div>
+        </header>
+
+        {/* ---------- Summary cards (same style as dashboard / reports) ---------- */}
+        <section className={styles.summaryGrid} aria-label="Product summary">
+          <article className={styles.summaryCard}>
+            <div className={styles.summaryTop}>
+              <span>Products tracked</span>
+              <i><Icon name="package" size={16} /></i>
+            </div>
+            <strong className={styles.summaryValue}>{kpiStats.totalCount} <em>variants</em></strong>
+            <div className={styles.summaryFoot}>
+              <span className={`${styles.chip} ${styles.chipNeutral}`}>{new Set(filteredProducts.map((p) => p.category)).size} categories</span>
+              <span>{new Set(filteredProducts.map((p) => p.location)).size} locations</span>
+            </div>
+          </article>
+
+          <article className={`${styles.summaryCard} ${styles.summaryTeal}`}>
+            <div className={styles.summaryTop}>
+              <span>Stock valuation</span>
+              <i><Icon name="dollarSign" size={16} /></i>
+            </div>
+            <strong className={styles.summaryValue}>{formatPrice(kpiStats.totalValuation)}</strong>
+            <div className={styles.summaryFoot}>
+              {topValueProduct ? (
+                <>
+                  <span className={`${styles.thumb} ${styles.thumbXs} ${styles[CATEGORY_TONE[topValueProduct.category] ?? 'toneTeal']}`}>{topValueProduct.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>
+                  <span className={styles.ellipsis} title={topValueProduct.name}>Top: <b>{topValueProduct.name}</b> · {formatPrice(Math.max(0, topValueProduct.totalUnits) * topValueProduct.price).replace(/\.00$/, '')}</span>
+                </>
+              ) : <span>On-hand units × selling price</span>}
+            </div>
+          </article>
+
+          <article className={styles.summaryCard}>
+            <div className={styles.summaryTop}>
+              <span>Stock health</span>
+              <i><Icon name="check" size={16} /></i>
+            </div>
+            <div className={styles.healthSummary}>
+              <div>
+                <strong className={styles.summaryValue}>{healthPct}% <em>{healthLabel.toLowerCase()}</em></strong>
+                <small className={styles.summarySub}>{healthyCount} of {filteredProducts.length} variants healthy</small>
+              </div>
+              <svg viewBox="0 0 80 46" className={styles.healthGauge} role="img" aria-label={`${healthPct}% of variants healthy`}>
+                <path d="M8 40a32 32 0 0 1 64 0" className={styles.gaugeTrack} />
+                <path d="M8 40a32 32 0 0 1 64 0" className={styles.gaugeFill} style={{ strokeDasharray: `${(healthPct / 100) * 100.5} 100.5` }} />
+              </svg>
+            </div>
+            <div className={styles.summaryFoot}>
+              <button type="button" className={`${styles.chip} ${styles.chipWarn}`} onClick={() => { setSelectedHealth('Low Stock'); setCurrentPage(1); }}>{kpiStats.lowStockCount} low stock</button>
+              <button type="button" className={`${styles.chip} ${styles.chipBad}`} onClick={() => { setSelectedHealth('Negative'); setCurrentPage(1); }}>{kpiStats.negativeStockCount} negative</button>
+            </div>
+          </article>
+
+          <article className={`${styles.summaryCard} ${styles.summaryWide}`}>
+            {(() => {
+              const states = [
+                { label: 'Available', value: kpiStats.availableTotal, cls: styles.stAvailable },
+                { label: 'In transit', value: kpiStats.inTransitTotal, cls: styles.stTransit },
+                { label: 'Reserved', value: kpiStats.reservedTotal, cls: styles.stReserved },
+                { label: 'Quarantined', value: kpiStats.quarantinedTotal, cls: styles.stQuarantine },
+              ];
+              const total = states.reduce((s, x) => s + x.value, 0);
+              return (
+                <>
+                  <div className={styles.summaryTop}>
+                    <span>Units by state</span>
+                    <i><Icon name="truck" size={16} /></i>
+                  </div>
+                  <strong className={styles.summaryValue}>{total.toLocaleString('en-IN')} <em>packs in the pipeline</em></strong>
+                  <div className={styles.stateBar} role="img" aria-label={states.map((s) => `${s.label} ${s.value}`).join(', ')}>
+                    {states.map((s) => <i key={s.label} className={s.cls} style={{ width: `${total ? (s.value / total) * 100 : 0}%` }} title={`${s.label}: ${s.value} packs`} />)}
+                  </div>
+                  <div className={styles.stateLegend}>
+                    {states.map((s) => (
+                      <span key={s.label}><i className={s.cls} />{s.label}<b>{s.value.toLocaleString('en-IN')}</b></span>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </article>
+        </section>
+        {/* ---------- Toolbar: categories, page size, view ---------- */}
+        <div className={styles.toolbar}>
+          <div className={styles.categoryTabs} role="tablist" aria-label="Category">
+            {categories.map((cat) => (
+              <button key={cat} type="button" role="tab" aria-selected={selectedCategory === cat} className={selectedCategory === cat ? styles.tabActive : ''} onClick={() => { setSelectedCategory(cat); setCurrentPage(1); }}>
+                {cat === 'All categories' ? 'All' : cat}
+                <span className={styles.tabCount}>{cat === 'All categories' ? products.length : products.filter((p) => p.category === cat).length}</span>
+              </button>
+            ))}
+          </div>
+          <div className={styles.toolbarRight}>
+            <span className={styles.showingLabel}>Showing</span>
+            <PillDropdown<string>
+              value={String(itemsPerPage)}
+              heading="Rows per page"
+              ariaLabel="Rows per page"
+              options={[{ value: '6', label: '6' }, { value: '10', label: '10' }, { value: '20', label: '20' }]}
+              onChange={(v) => { setItemsPerPage(Number(v)); setCurrentPage(1); }}
+            />
+            <div className={styles.viewToggle} role="group" aria-label="View mode">
+              <button type="button" className={viewMode === 'list' ? styles.viewActive : ''} onClick={() => setViewMode('list')} aria-pressed={viewMode === 'list'} title="List view"><Icon name="list" size={15} /></button>
+              <button type="button" className={viewMode === 'grid' ? styles.viewActive : ''} onClick={() => setViewMode('grid')} aria-pressed={viewMode === 'grid'} title="Grid view"><Icon name="grid" size={15} /></button>
             </div>
           </div>
         </div>
 
-        {/* Main Content Area */}
-        <div className={styles.mainContent}>
-          {/* Header with Title and Global Actions */}
-          <div className={styles.pageHeader}>
-            <div>
-              <h1 className={styles.pageTitle}>Products & Inventory Catalogue</h1>
-              <p className={styles.pageSubtitle}>
-                Master inventory view of SKU variants, retail pricing, mixed carton-to-loose packaging levels, and stock health across stores.
-              </p>
-            </div>
-            <div className={styles.headerActions}>
-              <button onClick={handleExportCSV} className={styles.btnSecondary} title="Download CSV inventory export">
-                <Icon name="download" size={17} />
-                <span>Export CSV</span>
-              </button>
-              <button onClick={() => setAddProductModalOpen(true)} className={styles.btnPrimary} title="Register new product variant">
-                <Icon name="plus" size={17} />
-                <span>Add Product</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Section 2: Header & KPI Summary Bar */}
-          <div className={styles.statsGrid}>
-            <div className={styles.statCard}>
-              <div className={styles.statIcon} style={{ backgroundColor: '#e0f2fe', color: '#0284c7' }}>
-                <Icon name="package" size={24} />
-              </div>
-              <div className={styles.statContent}>
-                <div className={styles.statLabel}>Products Tracked</div>
-                <div className={styles.statValue}>
-                  {kpiStats.totalCount} <span className={styles.statSubtext}>variants</span>
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.statCard}>
-              <div className={styles.statIcon} style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>
-                <Icon name="dollarSign" size={24} />
-              </div>
-              <div className={styles.statContent}>
-                <div className={styles.statLabel}>Total Stock Valuation</div>
-                <div className={styles.statValue}>
-                  ₹{kpiStats.totalValuation.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.statCard}>
-              <div className={styles.statIcon} style={{ backgroundColor: '#fef3c7', color: '#d97706' }}>
-                <Icon name="alert" size={24} />
-              </div>
-              <div className={styles.statContent}>
-                <div className={styles.statLabel}>Low Stock Alerts</div>
-                <div className={styles.statValue}>
-                  {kpiStats.lowStockCount} <span className={styles.statSubtext}>reorder soon</span>
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.statCard}>
-              <div className={styles.statIcon} style={{ backgroundColor: '#fee2e2', color: '#dc2626' }}>
-                <Icon name="alert" size={24} />
-              </div>
-              <div className={styles.statContent}>
-                <div className={styles.statLabel}>Negative Stock (OD-03)</div>
-                <div className={styles.statValue}>
-                  {kpiStats.negativeStockCount} <span className={styles.statSubtext} style={{ color: '#dc2626' }}>reconcile audit</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Stock State Breakdown */}
-            <div className={styles.stockBreakdown}>
-              <div className={styles.breakdownHeader}>
-                <span className={styles.breakdownTitle}>Stock State Breakdown (Base Packs)</span>
-              </div>
-              <div className={styles.breakdownGrid}>
-                <div className={styles.breakdownItem}>
-                  <div className={styles.breakdownDot} style={{ backgroundColor: '#22c55e' }} />
-                  <span className={styles.breakdownLabel}>Available</span>
-                  <span className={styles.breakdownValue}>{kpiStats.availableTotal}</span>
-                </div>
-                <div className={styles.breakdownItem}>
-                  <div className={styles.breakdownDot} style={{ backgroundColor: '#3b82f6' }} />
-                  <span className={styles.breakdownLabel}>In-Transit (OD-05)</span>
-                  <span className={styles.breakdownValue}>{kpiStats.inTransitTotal}</span>
-                </div>
-                <div className={styles.breakdownItem}>
-                  <div className={styles.breakdownDot} style={{ backgroundColor: '#a855f7' }} />
-                  <span className={styles.breakdownLabel}>Reserved</span>
-                  <span className={styles.breakdownValue}>{kpiStats.reservedTotal}</span>
-                </div>
-                <div className={styles.breakdownItem}>
-                  <div className={styles.breakdownDot} style={{ backgroundColor: '#94a3b8' }} />
-                  <span className={styles.breakdownLabel}>Quarantined</span>
-                  <span className={styles.breakdownValue}>{kpiStats.quarantinedTotal}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 3: Search & Multi-Filter Controls */}
-          <div className={styles.filtersSection}>
-            <div className={styles.searchBox}>
-              <Icon name="search" size={18} />
-              <input
-                type="text"
-                placeholder="Search product, variant, SKU or barcode..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className={styles.clearSearchBtn}>
-                  <Icon name="x" size={14} />
-                </button>
-              )}
-            </div>
-
-            <div className={styles.filterGroup}>
-              {/* Location Selector */}
-              <div className={styles.filterSelect}>
-                <Icon name="mapPin" size={16} />
-                <select
-                  value={selectedLocation}
-                  onChange={(e) => {
-                    handleLocationChange(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                >
-                  <option>All retail locations</option>
-                  <option>Downtown Store</option>
-                  <option>North Mall</option>
-                  <option>West End Outlet</option>
-                  <option>Central Warehouse</option>
-                </select>
-                <Icon name="chevronDown" size={14} />
-              </div>
-
-              {/* Health Filter */}
-              <div className={styles.filterSelect}>
-                <Icon name="alert" size={16} />
-                <select
-                  value={selectedHealth}
-                  onChange={(e) => {
-                    setSelectedHealth(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                >
-                  <option>All items</option>
-                  <option>Healthy</option>
-                  <option>Low Stock</option>
-                  <option>Negative</option>
-                </select>
-                <Icon name="chevronDown" size={14} />
-              </div>
-
-              {/* Table / Grid Toggle */}
-              <div className={styles.viewToggle}>
-                <button
-                  type="button"
-                  className={`${styles.viewBtn} ${viewMode === 'list' ? styles.active : ''}`}
-                  onClick={() => setViewMode('list')}
-                  title="Table List View"
-                >
-                  <Icon name="list" size={16} />
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.viewBtn} ${viewMode === 'grid' ? styles.active : ''}`}
-                  onClick={() => setViewMode('grid')}
-                  title="Grid Card View"
-                >
-                  <Icon name="grid" size={16} />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Category Filter Chips */}
-          <div className={styles.categoryTabs}>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className={`${styles.categoryTab} ${selectedCategory === cat ? styles.active : ''}`}
-                onClick={() => {
-                  setSelectedCategory(cat);
-                  setCurrentPage(1);
-                }}
-              >
-                <Icon name="tag" size={14} />
-                <span>{cat}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Section 4: Master Inventory Data View */}
-          {filteredProducts.length === 0 ? (
+        {/* ---------- Product list ---------- */}
+        <section className={styles.listCard}>
+          {sortedProducts.length === 0 ? (
             <div className={styles.emptyState}>
-              <Icon name="box" size={48} />
+              <span className={styles.emptyIcon}><Icon name="box" size={28} /></span>
               <h3>No products found</h3>
-              <p>No inventory records match your search &quot;{searchQuery}&quot; or filter combination.</p>
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setSelectedCategory('All categories');
-                  setSelectedHealth('All items');
-                  setSelectedLocation('All retail locations');
-                }}
-                className={styles.btnSecondary}
-              >
-                Clear All Filters
-              </button>
+              <p>No inventory records match{searchQuery ? <> &quot;{searchQuery}&quot;</> : ''} with the current filters.</p>
+              <button onClick={resetFilters} className={styles.ghostButton}>Clear all filters</button>
             </div>
           ) : viewMode === 'list' ? (
-            /* Table Mode */
-            <div className={styles.tableContainer}>
-              <table className={styles.productsTable}>
-                <thead>
-                  <tr>
-                    <th>Product & Variant</th>
-                    <th>SKU & Barcode</th>
-                    <th>Category</th>
-                    <th>Location</th>
-                    <th>Price (Per Pack)</th>
-                    <th>Available (Mixed Units OD-02)</th>
-                    <th>In-Transit (OD-05)</th>
-                    <th>Reserved</th>
-                    <th>Packaging</th>
-                    <th>Status</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginatedProducts.map((product) => {
-                    const isNegative = product.totalUnits < 0;
-                    const isLow = product.totalUnits >= 0 && product.totalUnits <= 10;
-
-                    return (
-                      <tr key={product.id}>
-                        <td>
-                          <div className={styles.productCell}>
-                            <div className={styles.productAvatar}>
-                              {product.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
-                            </div>
-                            <div>
-                              <div className={styles.productName}>{product.name}</div>
-                              <div className={styles.productVariant}>{product.variant}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <div className={styles.skuCell}>
-                            <span className={styles.skuBadge}>{product.sku}</span>
-                            <span className={styles.barcodeText}>{product.barcode}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={styles.categoryBadge}>{product.category}</span>
-                        </td>
-                        <td>
-                          <div className={styles.locationCell}>
-                            <Icon name="mapPin" size={13} />
-                            <span>{product.location}</span>
-                          </div>
-                        </td>
-                        <td className={styles.priceCell}>
-                          <strong>₹{product.price.toFixed(2)}</strong>
-                          <span className={styles.pricePolicy}>Fixed HQ</span>
-                        </td>
-                        <td>
-                          <div className={styles.stockCell}>
-                            <span className={`${styles.stockValue} ${isNegative ? styles.textNegative : ''}`}>
-                              {product.totalUnits} packs
-                            </span>
-                            <span className={styles.stockDetail}>
-                              {product.packaging.includes('Carton') ? (
-                                isNegative ? (
-                                  <span className={styles.negativeAlert}>Deficit: reconcile</span>
-                                ) : (
-                                  `(${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose)`
-                                )
-                              ) : (
-                                '(Loose Only)'
-                              )}
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={product.inTransit > 0 ? styles.inTransitActive : styles.inTransitZero}>
-                            {product.inTransit > 0 ? `+${product.inTransit}` : '0'}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={styles.reservedText}>{product.reserved}</span>
-                        </td>
-                        <td>
-                          <div className={styles.packagingBadge}>
-                            <Icon name="package" size={13} />
-                            <span>{product.packaging}</span>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`${styles.statusBadge} ${styles[product.status.replace(/\s+/g, '')]}`}>
-                            {product.status === 'Healthy' && '● Healthy'}
-                            {product.status === 'Low Stock' && '● Low Stock'}
-                            {product.status === 'Negative' && '● Negative (OD-03)'}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <div className={styles.actionsCell}>
-                            <button
-                              onClick={() => openReplenish(product)}
-                              className={styles.actionBtnPrimary}
-                              title="Request Stock Replenishment"
-                            >
-                              <Icon name="truck" size={14} />
-                              <span>Replenish</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            /* Grid Card Mode */
-            <div className={styles.productsGrid}>
+            <div className={styles.rowsScroller}>
+              <div className={`${styles.rowGrid} ${styles.headRow}`}>
+                <SortHead label="Product" k="name" />
+                <SortHead label="Stock health" k="status" />
+                <SortHead label="On hand" k="stock" />
+                <span className={styles.headLabel}>Pipeline</span>
+                <SortHead label="Price" k="price" />
+                <span className={styles.headLabel}>Status</span>
+                <span className={`${styles.headLabel} ${styles.alignRight}`}>Action</span>
+              </div>
               {paginatedProducts.map((product) => {
                 const isNegative = product.totalUnits < 0;
+                const onHand = Math.max(0, product.totalUnits);
+                const pipelineShare = onHand + product.inTransit ? Math.round((onHand / (onHand + product.inTransit)) * 100) : 0;
                 return (
-                  <div key={product.id} className={styles.gridCard}>
-                    <div className={styles.gridCardHeader}>
-                      <span className={styles.categoryBadge}>{product.category}</span>
-                      <span className={`${styles.statusBadge} ${styles[product.status.replace(/\s+/g, '')]}`}>
-                        ● {product.status}
+                  <div key={product.id} className={`${styles.rowGrid} ${styles.productRow}`}>
+                    <div className={styles.productCell}>
+                      <span className={`${styles.thumb} ${styles[CATEGORY_TONE[product.category] ?? 'toneTeal']}`}>{product.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>
+                      <span className={styles.productText}>
+                        <strong>{product.name}</strong>
+                        <small>{product.variant} · {product.category}</small>
+                        <span className={styles.productMeta}><span className={styles.sku}>{product.sku}</span><span className={styles.withIcon}><Icon name="mapPin" size={11} />{product.location}</span></span>
                       </span>
                     </div>
 
-                    <div className={styles.gridCardTitle}>
-                      <h3>{product.name}</h3>
-                      <p>{product.variant}</p>
+                    <div className={styles.healthCell}>
+                      <Gauge product={product} />
+                      <span className={styles.healthText}>
+                        <span>{pipelineShare}%</span>
+                        <small>on shelf</small>
+                      </span>
                     </div>
 
-                    <div className={styles.gridCardMeta}>
-                      <div>
-                        <span className={styles.metaLabel}>SKU:</span> {product.sku}
-                      </div>
-                      <div>
-                        <span className={styles.metaLabel}>Price:</span> ₹{product.price.toFixed(2)}
-                      </div>
+                    <div className={styles.stockCell}>
+                      <span className={styles.withIcon}><Icon name="package" size={14} /><b className={isNegative ? styles.negative : ''}>{product.totalUnits} {unitWord(product.totalUnits)}</b></span>
+                      <small>{isNegative ? 'Deficit · reconcile ledger' : product.packaging.includes('Carton') ? `${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose` : 'Loose only'}</small>
                     </div>
 
-                    <div className={styles.gridCardStockBox}>
-                      <div className={styles.gridStockCol}>
-                        <span className={styles.metaLabel}>On Hand:</span>
-                        <strong className={isNegative ? styles.textNegative : ''}>
-                          {product.totalUnits} packs
-                        </strong>
-                        <small>
-                          {product.packaging.includes('Carton') && !isNegative
-                            ? `${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose`
-                            : product.packaging}
-                        </small>
-                      </div>
-                      <div className={styles.gridStockCol}>
-                        <span className={styles.metaLabel}>In-Transit:</span>
-                        <span className={product.inTransit > 0 ? styles.inTransitActive : styles.inTransitZero}>
-                          +{product.inTransit}
-                        </span>
-                      </div>
+                    <div className={styles.pipelineCell}>
+                      <span className={product.inTransit > 0 ? styles.transitText : styles.mutedText}><Icon name="truck" size={13} /> {product.inTransit > 0 ? `+${product.inTransit}` : '0'} in transit</span>
+                      <small>{product.reserved} reserved{product.quarantined ? ` · ${product.quarantined} held` : ''}</small>
                     </div>
 
-                    <div className={styles.gridCardFooter}>
-                      <div className={styles.locationCell}>
-                        <Icon name="mapPin" size={13} />
-                        <span>{product.location}</span>
+                    <div className={styles.priceCell}>
+                      <b>{formatPrice(product.price)}</b>
+                      <small>per pack</small>
+                    </div>
+
+                    <div><span className={`${styles.pill} ${statusTone(product.status)}`}>{product.status === 'Negative' ? 'Negative' : product.status}</span></div>
+
+                    <div className={styles.actionsCell}>
+                      <button type="button" className={styles.iconAction} onClick={() => openReplenish(product)} title="Request replenishment" aria-label={`Request replenishment for ${product.name}`}><Icon name="truck" size={15} /></button>
+                      <button type="button" className={styles.iconAction} onClick={() => copySku(product)} title="Copy SKU" aria-label={`Copy SKU ${product.sku}`}><Icon name="copy" size={15} /></button>
+                      <div className={styles.menuWrap} data-row-menu>
+                        <button type="button" className={styles.iconAction} onClick={() => setMenuFor(menuFor === product.id ? null : product.id)} aria-haspopup="menu" aria-expanded={menuFor === product.id} aria-label="More actions"><Icon name="more" size={15} /></button>
+                        {menuFor === product.id && (
+                          <div className={styles.rowMenu} role="menu">
+                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openReplenish(product); }}><Icon name="truck" size={14} /> Request replenishment</button>
+                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); copySku(product); }}><Icon name="copy" size={14} /> Copy SKU</button>
+                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setSelectedCategory(product.category); setCurrentPage(1); }}><Icon name="tag" size={14} /> Show {product.category}</button>
+                            <a role="menuitem" href="/reports?tab=stock"><Icon name="fileText" size={14} /> Open stock report</a>
+                          </div>
+                        )}
                       </div>
-                      <button
-                        onClick={() => openReplenish(product)}
-                        className={styles.actionBtnPrimary}
-                      >
-                        <Icon name="truck" size={14} />
-                        <span>Replenish</span>
-                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
-
-          {/* Pagination Controls */}
-          {filteredProducts.length > 0 && (
-            <div className={styles.pagination}>
-              <div className={styles.paginationInfo}>
-                Showing <strong>{(currentPage - 1) * itemsPerPage + 1}</strong> -{' '}
-                <strong>{Math.min(currentPage * itemsPerPage, filteredProducts.length)}</strong> of{' '}
-                <strong>{filteredProducts.length}</strong> items
-              </div>
-              <div className={styles.paginationControls}>
-                <button
-                  className={styles.pageBtn}
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage(prev => prev - 1)}
-                >
-                  <Icon name="chevronLeft" size={14} />
-                </button>
-                {Array.from({ length: totalPages }).map((_, i) => (
-                  <button
-                    key={i + 1}
-                    className={`${styles.pageBtn} ${currentPage === i + 1 ? styles.active : ''}`}
-                    onClick={() => setCurrentPage(i + 1)}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-                <button
-                  className={styles.pageBtn}
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage(prev => prev + 1)}
-                >
-                  <Icon name="chevronRight" size={14} />
-                </button>
-              </div>
+          ) : (
+            <div className={styles.productsGrid}>
+              {paginatedProducts.map((product) => {
+                const isNegative = product.totalUnits < 0;
+                return (
+                  <article key={product.id} className={styles.gridCard}>
+                    <div className={styles.gridTop}>
+                      <span className={`${styles.thumb} ${styles.thumbLg} ${styles[CATEGORY_TONE[product.category] ?? 'toneTeal']}`}>{product.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>
+                      <span className={`${styles.pill} ${statusTone(product.status)}`}>{product.status}</span>
+                    </div>
+                    <div className={styles.gridTitle}>
+                      <strong>{product.name}</strong>
+                      <small>{product.variant}</small>
+                    </div>
+                    <div className={styles.gridFigures}>
+                      <div><small>On hand</small><b className={isNegative ? styles.negative : ''}>{product.totalUnits}</b></div>
+                      <div><small>In transit</small><b className={product.inTransit ? styles.transitText : ''}>+{product.inTransit}</b></div>
+                      <div><small>Price</small><b>{formatPrice(product.price)}</b></div>
+                    </div>
+                    <div className={styles.gridHealth}><Gauge product={product} /><span>{product.packaging.includes('Carton') && !isNegative ? `${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose` : product.packaging}</span></div>
+                    <div className={styles.gridFoot}>
+                      <span className={styles.withIcon}><Icon name="mapPin" size={12} />{product.location}</span>
+                      <button type="button" onClick={() => openReplenish(product)} className={styles.smallPrimary}><Icon name="truck" size={13} /> Replenish</button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
-        </div>
-      </div>
 
+          {sortedProducts.length > 0 && (
+            <footer className={styles.pagination}>
+              <button type="button" className={styles.pageNav} disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}><Icon name="chevronLeft" size={14} /> Previous</button>
+              <div className={styles.pageCenter}>
+                <div className={styles.pageNumbers}>
+                  {pageNumbers.map((n, i) => n === 'gap'
+                    ? <span key={`gap-${i}`} className={styles.pageGap}>…</span>
+                    : <button key={n} type="button" className={currentPage === n ? styles.pageActive : ''} onClick={() => setCurrentPage(n)} aria-current={currentPage === n ? 'page' : undefined}>{String(n).padStart(2, '0')}</button>)}
+                </div>
+                <small>Showing {firstRow}–{lastRow} of {sortedProducts.length} variants</small>
+              </div>
+              <button type="button" className={styles.pageNav} disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)}>Next <Icon name="chevronRight" size={14} /></button>
+            </footer>
+          )}
+        </section>
+      </div>
       {/* MODAL 1: Request Replenishment Drawer/Modal */}
       {replenishModalOpen && selectedProductForReplenish && (
         <div className={styles.modalOverlay} onClick={() => setReplenishModalOpen(false)}>
