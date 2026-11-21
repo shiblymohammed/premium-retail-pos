@@ -1,8 +1,9 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
-import { QuickAccessCard, AdminModal } from '@/components/admin';
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getStoredSession } from '@/lib/auth';
+import { PillDropdown } from '@/components/ui/pill-dropdown';
+import styles from './discount.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -31,25 +32,38 @@ export interface Authority {
   discountLimitPercent: string | number | null;
 }
 
-const ROLE_OPTIONS = [
-  { value: 'ALL', label: 'All Roles' },
-  { value: 'STORE_MANAGER', label: 'Store Manager' },
-  { value: 'CASHIER', label: 'Cashier Station' },
-  { value: 'STAFF', label: 'Floor Staff' },
-  { value: 'CENTRAL_MANAGER', label: 'Central Warehouse' },
-  { value: 'SUB_WAREHOUSE_MANAGER', label: 'Sub Warehouse' },
-];
+interface HistoryEntry {
+  id: string;
+  when: string;
+  userId?: string;
+  name: string;
+  from: number;
+  to: number;
+  reason: string;
+  by?: string;
+}
+
+/** Only cashiers can finish a sale (POST /sales is cashier-only), so only their limit is used at checkout. */
+type Tier = 'none' | 'standard' | 'senior' | 'above';
+type TierFilter = 'ALL' | 'NONE' | 'UPTO5' | 'OVER5';
 
 const roleLabels: Record<string, string> = {
-  ALL: 'All Roles',
-  STORE_MANAGER: 'Store Manager',
-  CASHIER: 'Cashier Station',
-  STAFF: 'Floor Staff',
-  CENTRAL_MANAGER: 'Central Warehouse',
-  SUB_WAREHOUSE_MANAGER: 'Sub Warehouse',
-  SUPER_ADMIN: 'Super Admin',
-  ADMIN: 'Admin Director',
+  STORE_MANAGER: 'Store manager',
+  CASHIER: 'Cashier',
+  STAFF: 'Floor staff',
+  CENTRAL_MANAGER: 'Central warehouse',
+  WAREHOUSE_MANAGER: 'Warehouse manager',
+  SUB_WAREHOUSE_MANAGER: 'Sub-warehouse',
+  SUPER_ADMIN: 'Super admin',
+  ADMIN: 'Admin',
 };
+
+const PRESETS = [
+  { value: 0, label: 'No discount' },
+  { value: 5, label: 'Standard' },
+  { value: 10, label: 'Senior' },
+];
+const REASON_CHIPS = ['Promoted to senior cashier', 'New cashier set-up', 'Back to standard limit', 'Quarterly policy review'];
 
 const FALLBACK_LOCATIONS: LocationRecord[] = [
   { id: 'loc-1', name: 'Downtown Flagship Store', type: 'RETAIL_STORE' },
@@ -59,126 +73,22 @@ const FALLBACK_LOCATIONS: LocationRecord[] = [
 ];
 
 const FALLBACK_USERS: UserRecord[] = [
-  {
-    id: 'usr-003',
-    name: 'Asha Patel',
-    email: 'manager@premiumretail.com',
-    employeeCode: 'EMP-MGR-0841',
-    role: 'STORE_MANAGER',
-    isActive: true,
-    discountLimitPercent: 20,
-    lastReason: 'Downtown Store Manager authority adjustment',
-    lastUpdated: '18-Nov-2026',
-    locationScopes: [{ locationId: 'loc-1' }, { locationId: 'loc-2' }],
-  },
-  {
-    id: 'usr-006',
-    name: 'Ravi Menon',
-    email: 'cashier@premiumretail.com',
-    employeeCode: 'EMP-CSH-0842',
-    role: 'CASHIER',
-    isActive: true,
-    discountLimitPercent: 5,
-    lastReason: 'Initial checkout terminal provision',
-    lastUpdated: '15-Nov-2026',
-    locationScopes: [{ locationId: 'loc-1' }],
-  },
-  {
-    id: 'usr-007',
-    name: 'Neel Shah',
-    email: 'n.shah@premiumretail.com',
-    employeeCode: 'EMP-CSH-0843',
-    role: 'CASHIER',
-    isActive: true,
-    discountLimitPercent: 5,
-    lastReason: 'Downtown Store cashier lane 2 setup',
-    lastUpdated: '14-Nov-2026',
-    locationScopes: [{ locationId: 'loc-1' }],
-  },
-  {
-    id: 'usr-008',
-    name: 'Maya Das',
-    email: 'm.das@premiumretail.com',
-    employeeCode: 'EMP-CSH-0844',
-    role: 'CASHIER',
-    isActive: true,
-    discountLimitPercent: 10,
-    lastReason: 'Promoted to senior cashier for West End lane 1',
-    lastUpdated: '12-Nov-2026',
-    locationScopes: [{ locationId: 'loc-3' }],
-  },
-  {
-    id: 'usr-010',
-    name: 'Kabir Rao',
-    email: 'k.rao@premiumretail.com',
-    employeeCode: 'EMP-CSH-0845',
-    role: 'CASHIER',
-    isActive: true,
-    discountLimitPercent: 5,
-    lastReason: 'North Mall retail store cashier onboarding',
-    lastUpdated: '10-Nov-2026',
-    locationScopes: [{ locationId: 'loc-2' }],
-  },
-  {
-    id: 'usr-012',
-    name: 'Divya Nair',
-    email: 'd.nair@premiumretail.com',
-    employeeCode: 'EMP-CSH-0846',
-    role: 'CASHIER',
-    isActive: true,
-    discountLimitPercent: 5,
-    lastReason: 'North Mall POS terminal lane 2 provision',
-    lastUpdated: '08-Nov-2026',
-    locationScopes: [{ locationId: 'loc-2' }],
-  },
-  {
-    id: 'usr-004',
-    name: 'Vikram Singh',
-    email: 'warehouse@premiumretail.com',
-    employeeCode: 'EMP-WH-0501',
-    role: 'CENTRAL_MANAGER',
-    isActive: true,
-    discountLimitPercent: 0,
-    lastReason: 'Central Hub logistics manager - zero discount allowance',
-    lastUpdated: '01-Nov-2026',
-    locationScopes: [{ locationId: 'loc-4' }],
-  },
-  {
-    id: 'usr-005',
-    name: 'Rajesh Kumar',
-    email: 'subwarehouse@premiumretail.com',
-    employeeCode: 'EMP-WH-0502',
-    role: 'SUB_WAREHOUSE_MANAGER',
-    isActive: true,
-    discountLimitPercent: 0,
-    lastReason: 'Regional sub-warehouse manager - zero discount allowance',
-    lastUpdated: '01-Nov-2026',
-    locationScopes: [{ locationId: 'loc-4' }],
-  },
-  {
-    id: 'usr-009',
-    name: 'Priya Sharma',
-    email: 'staff@premiumretail.com',
-    employeeCode: 'EMP-STF-0109',
-    role: 'STAFF',
-    isActive: true,
-    discountLimitPercent: 0,
-    lastReason: 'Floor staff - discount permissions restricted',
-    lastUpdated: '25-Oct-2026',
-    locationScopes: [{ locationId: 'loc-1' }],
-  },
-  {
-    id: 'usr-011',
-    name: 'Anita Verma',
-    email: 'a.verma@premiumretail.com',
-    employeeCode: 'EMP-STF-0110',
-    role: 'STAFF',
-    isActive: true,
-    discountLimitPercent: 0,
-    lastReason: 'Floor assistant - discount permissions restricted',
-    lastUpdated: '20-Oct-2026',
-    locationScopes: [{ locationId: 'loc-3' }],
-  },
+  { id: 'usr-003', name: 'Asha Patel', email: 'manager@premiumretail.com', employeeCode: 'EMP-MGR-0841', role: 'STORE_MANAGER', isActive: true, discountLimitPercent: 20, lastReason: 'Downtown Store Manager authority adjustment', lastUpdated: '18-Nov-2026', locationScopes: [{ locationId: 'loc-1' }, { locationId: 'loc-2' }] },
+  { id: 'usr-006', name: 'Ravi Menon', email: 'cashier@premiumretail.com', employeeCode: 'EMP-CSH-0842', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'Initial checkout terminal provision', lastUpdated: '15-Nov-2026', locationScopes: [{ locationId: 'loc-1' }] },
+  { id: 'usr-007', name: 'Neel Shah', email: 'n.shah@premiumretail.com', employeeCode: 'EMP-CSH-0843', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'Downtown Store cashier lane 2 setup', lastUpdated: '14-Nov-2026', locationScopes: [{ locationId: 'loc-1' }] },
+  { id: 'usr-008', name: 'Maya Das', email: 'm.das@premiumretail.com', employeeCode: 'EMP-CSH-0844', role: 'CASHIER', isActive: true, discountLimitPercent: 10, lastReason: 'Promoted to senior cashier for West End lane 1', lastUpdated: '12-Nov-2026', locationScopes: [{ locationId: 'loc-3' }] },
+  { id: 'usr-010', name: 'Kabir Rao', email: 'k.rao@premiumretail.com', employeeCode: 'EMP-CSH-0845', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'North Mall retail store cashier onboarding', lastUpdated: '10-Nov-2026', locationScopes: [{ locationId: 'loc-2' }] },
+  { id: 'usr-012', name: 'Divya Nair', email: 'd.nair@premiumretail.com', employeeCode: 'EMP-CSH-0846', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'North Mall POS terminal lane 2 provision', lastUpdated: '08-Nov-2026', locationScopes: [{ locationId: 'loc-2' }] },
+  { id: 'usr-004', name: 'Vikram Singh', email: 'warehouse@premiumretail.com', employeeCode: 'EMP-WH-0501', role: 'CENTRAL_MANAGER', isActive: true, discountLimitPercent: 0, lastReason: 'Central Hub logistics manager - zero discount allowance', lastUpdated: '01-Nov-2026', locationScopes: [{ locationId: 'loc-4' }] },
+  { id: 'usr-005', name: 'Rajesh Kumar', email: 'subwarehouse@premiumretail.com', employeeCode: 'EMP-WH-0502', role: 'SUB_WAREHOUSE_MANAGER', isActive: true, discountLimitPercent: 0, lastReason: 'Regional sub-warehouse manager - zero discount allowance', lastUpdated: '01-Nov-2026', locationScopes: [{ locationId: 'loc-4' }] },
+  { id: 'usr-009', name: 'Priya Sharma', email: 'staff@premiumretail.com', employeeCode: 'EMP-STF-0109', role: 'STAFF', isActive: true, discountLimitPercent: 0, lastReason: 'Floor staff - discount permissions restricted', lastUpdated: '25-Oct-2026', locationScopes: [{ locationId: 'loc-1' }] },
+  { id: 'usr-011', name: 'Anita Verma', email: 'a.verma@premiumretail.com', employeeCode: 'EMP-STF-0110', role: 'STAFF', isActive: true, discountLimitPercent: 0, lastReason: 'Floor assistant - discount permissions restricted', lastUpdated: '20-Oct-2026', locationScopes: [{ locationId: 'loc-3' }] },
+];
+
+const FALLBACK_HISTORY: HistoryEntry[] = [
+  { id: 'h1', when: 'Today, 17:42', userId: 'usr-008', name: 'Maya Das', from: 5, to: 10, reason: 'Promoted to senior cashier for West End outlet lane 1' },
+  { id: 'h3', when: '14-Nov-2026', userId: 'usr-006', name: 'Ravi Menon', from: 0, to: 5, reason: 'Initial checkout terminal provision' },
+  { id: 'h4', when: '10-Nov-2026', userId: 'usr-010', name: 'Kabir Rao', from: 0, to: 5, reason: 'North Mall retail store onboarding' },
 ];
 
 async function errorMessage(response: Response) {
@@ -190,1745 +100,708 @@ async function errorMessage(response: Response) {
   }
 }
 
-export default function DiscountLimitsAdmin() {
-  // Navigation Tabs (Physical Staff Caps vs Policy Templates, matching company/users tabs)
-  const [activeTab, setActiveTab] = useState<'LIMITS' | 'TEMPLATES'>('LIMITS');
+// ---------- helpers ----------
+const displayName = (u: UserRecord) => u.name || u.email.split('@')[0];
+const initials = (name: string) => name.split(/[\s.]+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+const pct = (v: number) => `${Number.isInteger(v) ? v : v.toFixed(1)}%`;
+const tierOf = (v: number): Tier => (v === 0 ? 'none' : v <= 5 ? 'standard' : v <= 10 ? 'senior' : 'above');
+const TIER_LABEL: Record<Tier, string> = { none: 'No discount', standard: 'Standard', senior: 'Senior', above: 'Above guide' };
+const TIER_CLASS: Record<Tier, string> = { none: styles.tierNone, standard: styles.tierStandard, senior: styles.tierStandard, above: styles.tierHigh };
+const STATUS_CLASS: Record<Tier, string> = { none: styles.statusNone, standard: styles.statusStandard, senior: styles.statusSenior, above: styles.statusAbove };
+const rupeesOff = (limit: number) => `₹${Math.round(limit * 10).toLocaleString('en-IN')}`;
+const todayLabel = () => new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+const tierMatch = (v: number, f: TierFilter) => (f === 'NONE' ? v === 0 : f === 'UPTO5' ? v > 0 && v <= 5 : f === 'OVER5' ? v > 5 : true);
 
-  // Session & Authority
-  const [token, setToken] = useState<string>('demo_token');
-  const [actorEmail, setActorEmail] = useState<string>('admin@premiumretail.com');
-  const [authority, setAuthority] = useState<Authority>({
-    role: 'SUPER_ADMIN',
-    unlimited: true,
-    discountLimitPercent: 100,
-  });
+// ---------- icons ----------
+const PATHS: Record<string, React.ReactNode> = {
+  cashier: <><rect x="3" y="10" width="18" height="10" rx="2" /><path d="M7 10V6h10v4M7 15h2M11 15h2M15 15h2" /></>,
+  target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></>,
+  up: <><path d="m6 15 6-6 6 6" /><path d="M12 9v11" /></>,
+  shield: <><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z" /><path d="m9 12 2 2 4-4" /></>,
+  history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
+  layers: <><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /></>,
+  search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
+  store: <><path d="M3 9 5 4h14l2 5M4 9v11h16V9" /><path d="M3 9h18a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0" /></>,
+  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+  more: <><circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" /></>,
+  close: <path d="M6 6l12 12M18 6 6 18" />,
+  check: <path d="m5 12 5 5 9-10" />,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
+  alert: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></>,
+  lock: <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
+  copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></>,
+  split: <><path d="M4 6h16M4 12h7M4 18h16" /><path d="m15 10 4 2-4 2" /></>,
+  receipt: <><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2V3Z" /><path d="M9 8h6M9 12h6" /></>,
+  edit: <><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></>,
+  chevron: <path d="m6 9 6 6 6-6" />,
+};
+function Icon({ name, size = 18 }: { name: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {PATHS[name]}
+    </svg>
+  );
+}
+
+// ---------- right-side panel ----------
+function Drawer({ head, onClose, footer, children, label }: { head: React.ReactNode; onClose: () => void; footer: React.ReactNode; children: React.ReactNode; label: string }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className={styles.backdrop} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label={label}>
+        <header className={styles.drawerHead}>
+          {head}
+          <button ref={closeRef} type="button" className={styles.closeButton} onClick={onClose} aria-label="Close"><Icon name="close" size={16} /></button>
+        </header>
+        <div className={styles.drawerBody}>{children}</div>
+        <footer className={styles.drawerFoot}>{footer}</footer>
+      </aside>
+    </div>
+  );
+}
+
+// ---------- limit picker (presets + slider + number) ----------
+function LimitPicker({ value, onChange, max }: { value: string; onChange: (v: string) => void; max: number }) {
+  const num = Number(value);
+  const sliderMax = Math.min(max, 30);
+  return (
+    <div className={styles.section}>
+      <p className={styles.sectionLabel}>New limit</p>
+      <div className={styles.presets}>
+        {PRESETS.map((p) => (
+          <button key={p.value} type="button" disabled={p.value > max} className={`${styles.preset} ${num === p.value && value !== '' ? styles.presetOn : ''}`} onClick={() => onChange(String(p.value))}>
+            <b>{p.value}%</b>
+            <small>{p.label}</small>
+          </button>
+        ))}
+      </div>
+      <div className={styles.sliderRow}>
+        <input className={styles.slider} type="range" min={0} max={sliderMax} step={0.5} value={Number.isFinite(num) ? Math.min(num, sliderMax) : 0} onChange={(e) => onChange(e.target.value)} aria-label="Discount limit" />
+        <label className={styles.pctInput}>
+          <input type="number" min={0} max={max} step={0.5} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Discount limit in percent" />
+          <em>%</em>
+        </label>
+      </div>
+      <div className={styles.scale}><span>0%</span><span>{pct(sliderMax / 2)}</span><span>{pct(sliderMax)}{max > sliderMax ? ' (type more if needed)' : ''}</span></div>
+    </div>
+  );
+}
+
+export default function DiscountLimitsAdmin() {
+  // Session & authority (demo defaults when nobody is signed in)
+  const [token, setToken] = useState('');
+  const [actorEmail, setActorEmail] = useState('admin@premiumretail.com');
+  const [authority, setAuthority] = useState<Authority>({ role: 'SUPER_ADMIN', unlimited: true, discountLimitPercent: 100 });
 
   // Data
   const [users, setUsers] = useState<UserRecord[]>(FALLBACK_USERS);
   const [locations, setLocations] = useState<LocationRecord[]>(FALLBACK_LOCATIONS);
+  const [history, setHistory] = useState<HistoryEntry[]>(FALLBACK_HISTORY);
 
-  // Filtering & Search
+  // Filters
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('ALL');
   const [locationFilter, setLocationFilter] = useState('ALL');
-  const [tierFilter, setTierFilter] = useState('ALL');
+  const [tierFilter, setTierFilter] = useState<TierFilter>('ALL');
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [othersOpen, setOthersOpen] = useState(false);
 
-  // Dropdown & Menu Toggles
-  const [openDropdown, setOpenDropdown] = useState<'ROLE' | 'LOCATION' | 'TIER' | null>(null);
-  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
+  // Feedback
+  const [toast, setToast] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  // Selected row for highlight
-  const [selectedUserId, setSelectedUserId] = useState<string>('usr-003');
-
-  // Status & Feedback
-  const [savingUserId, setSavingUserId] = useState<string>('');
-  const [notice, setNotice] = useState<string>('');
-  const [error, setError] = useState<string>('');
-
-  // Modals
-  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
-  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
-  const [bulkRole, setBulkRole] = useState<'CASHIER' | 'STORE_MANAGER' | 'STAFF'>('CASHIER');
+  // Panels
+  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [newLimit, setNewLimit] = useState('');
+  const [reason, setReason] = useState('');
+  const [formError, setFormError] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkStore, setBulkStore] = useState('ALL');
   const [bulkPercent, setBulkPercent] = useState('5');
   const [bulkReason, setBulkReason] = useState('Quarterly operational discount policy update');
 
-  // Dedicated "Edit User Discount Limit" Modal
-  const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
-  const [modalCapPercent, setModalCapPercent] = useState('5');
-  const [modalAuditReason, setModalAuditReason] = useState('');
-
-  // Initialize from Session or API
+  // Load the signed-in user's authority and the real lists when the API is reachable
   useEffect(() => {
     const session = getStoredSession();
-    if (session?.user?.email) {
-      setActorEmail(session.user.email);
-    }
+    if (session?.user?.email) setActorEmail(session.user.email);
     if (session?.user?.role) {
-      setAuthority({
-        role: session.user.role,
-        unlimited: session.user.role === 'SUPER_ADMIN',
-        discountLimitPercent: session.user.role === 'SUPER_ADMIN' ? 100 : 50,
+      setAuthority({ role: session.user.role, unlimited: session.user.role === 'SUPER_ADMIN', discountLimitPercent: session.user.role === 'SUPER_ADMIN' ? 100 : 50 });
+    }
+    if (!session?.accessToken) return;
+    setToken(session.accessToken);
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+    Promise.all([
+      fetch(`${API_BASE}/users/me/discount-limit`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
+    ])
+      .then(async ([authRes, usersRes, locsRes]) => {
+        if (!(authRes.ok && usersRes.ok && locsRes.ok)) return;
+        const [authData, usersData, locsData] = await Promise.all([authRes.json(), usersRes.json(), locsRes.json()]);
+        if (authData?.data) setAuthority(authData.data);
+        if (Array.isArray(usersData?.data) && usersData.data.length > 0) {
+          setUsers(usersData.data.filter((u: UserRecord) => u.email.toLowerCase() !== session.user?.email.toLowerCase()));
+          setHistory([]); // demo history doesn't belong to real accounts
+        }
+        if (Array.isArray(locsData?.data) && locsData.data.length > 0) setLocations(locsData.data);
+      })
+      .catch(() => {
+        // API not reachable: keep the demo data
       });
-    }
-
-    if (session?.accessToken) {
-      const headers = { Authorization: `Bearer ${session.accessToken}` };
-      Promise.all([
-        fetch(`${API_BASE}/users/me/discount-limit`, { headers, cache: 'no-store' }),
-        fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
-        fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
-      ])
-        .then(async ([authRes, usersRes, locsRes]) => {
-          if (authRes.ok && usersRes.ok && locsRes.ok) {
-            const [authData, usersData, locsData] = await Promise.all([
-              authRes.json(),
-              usersRes.json(),
-              locsRes.json(),
-            ]);
-            if (authData?.data) {
-              setAuthority(authData.data);
-            }
-            if (Array.isArray(usersData?.data) && usersData.data.length > 0) {
-              const manageable = usersData.data.filter(
-                (u: UserRecord) => u.email.toLowerCase() !== session.user?.email.toLowerCase(),
-              );
-              setUsers(manageable);
-            }
-            if (Array.isArray(locsData?.data) && locsData.data.length > 0) {
-              setLocations(locsData.data);
-            }
-          }
-        })
-        .catch(() => {
-          // Keep fallback data
-        });
-    }
   }, []);
 
-  // Global Click Listener to dismiss dropdowns
   useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.custom-filter-dropdown-wrap')) {
-        setOpenDropdown(null);
-      }
-      if (!target.closest('.discount-action-menu-wrap')) {
-        setActiveActionMenuId(null);
-      }
-    };
-    window.addEventListener('click', handleGlobalClick);
-    return () => window.removeEventListener('click', handleGlobalClick);
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(''), 3500);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('[data-row-menu]')) setMenuFor(null); };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
   }, []);
 
-  const locationMap = useMemo(() => {
-    const map = new Map<string, string>();
-    locations.forEach((loc) => map.set(loc.id, loc.name));
-    return map;
-  }, [locations]);
-
+  // ---------- who may change limits (same rules as the API) ----------
+  const viewerRole = authority.role;
+  const canManage = viewerRole === 'SUPER_ADMIN' || viewerRole === 'ADMIN';
   const maximumAuthority = authority.unlimited ? 100 : Number(authority.discountLimitPercent || 0);
 
-  // Filtered Users List
-  const filteredUsers = useMemo(() => {
-    return users.filter((user) => {
-      const name = user.name || user.email.split('@')[0];
-      const code = user.employeeCode || '';
-      const searchMatch =
-        !search.trim() ||
-        name.toLowerCase().includes(search.toLowerCase()) ||
-        user.email.toLowerCase().includes(search.toLowerCase()) ||
-        code.toLowerCase().includes(search.toLowerCase());
+  const locationMap = useMemo(() => new Map(locations.map((l) => [l.id, l.name])), [locations]);
+  const storesOf = useCallback(
+    (u: UserRecord) => (u.locationScopes || []).map((s) => s.location?.name || locationMap.get(s.locationId) || s.locationId).filter(Boolean),
+    [locationMap],
+  );
 
-      const roleMatch = roleFilter === 'ALL' || user.role === roleFilter;
+  // Cashiers are the only people who bill; everyone else's limit isn't used at checkout
+  const cashiers = useMemo(() => users.filter((u) => u.role === 'CASHIER'), [users]);
+  const admins = useMemo(() => users.filter((u) => u.role === 'ADMIN' || u.role === 'SUPER_ADMIN'), [users]);
+  const others = useMemo(() => users.filter((u) => u.role !== 'CASHIER' && u.role !== 'ADMIN' && u.role !== 'SUPER_ADMIN'), [users]);
+  const retailStores = locations.filter((l) => l.type === 'RETAIL_STORE');
 
-      const scopes = user.locationScopes || [];
-      const locationMatch =
-        locationFilter === 'ALL' ||
-        scopes.some((s) => s.locationId === locationFilter || locationMap.get(s.locationId) === locationFilter);
-
-      const limitNum = Number(user.discountLimitPercent);
-      let tierMatch = true;
-      if (tierFilter === 'RESTRICTED') tierMatch = limitNum === 0;
-      else if (tierFilter === 'STANDARD') tierMatch = limitNum > 0 && limitNum <= 10;
-      else if (tierFilter === 'ELEVATED') tierMatch = limitNum > 10;
-
-      return searchMatch && roleMatch && locationMatch && tierMatch;
+  const baseCashiers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return cashiers.filter((u) => {
+      const searchOk = !q || displayName(u).toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.employeeCode || '').toLowerCase().includes(q);
+      const locOk = locationFilter === 'ALL' || (u.locationScopes || []).some((s) => s.locationId === locationFilter);
+      return searchOk && locOk;
     });
-  }, [users, search, roleFilter, locationFilter, tierFilter, locationMap]);
+  }, [cashiers, search, locationFilter]);
+  const filtered = baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), tierFilter));
+  const tierCounts: Record<TierFilter, number> = {
+    ALL: baseCashiers.length,
+    NONE: baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), 'NONE')).length,
+    UPTO5: baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), 'UPTO5')).length,
+    OVER5: baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), 'OVER5')).length,
+  };
+  const filtersActive = search.trim() !== '' || locationFilter !== 'ALL' || tierFilter !== 'ALL';
+  const resetFilters = () => { setSearch(''); setLocationFilter('ALL'); setTierFilter('ALL'); };
 
-  // Folder Card Metrics
   const kpis = useMemo(() => {
-    const total = users.length;
-    const managers = users.filter((u) => u.role === 'STORE_MANAGER');
-    const cashiers = users.filter((u) => u.role === 'CASHIER');
-    const warehouse = users.filter((u) => u.role.includes('WAREHOUSE') || u.role === 'CENTRAL_MANAGER');
-    const staff = users.filter((u) => u.role === 'STAFF');
+    const limits = cashiers.map((u) => Number(u.discountLimitPercent));
+    const freq = new Map<number, number>();
+    limits.forEach((v) => freq.set(v, (freq.get(v) || 0) + 1));
+    const common = [...freq.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+    const top = cashiers.reduce<UserRecord | null>((best, u) => (!best || Number(u.discountLimitPercent) > Number(best.discountLimitPercent) ? u : best), null);
+    const storeCount = new Set(cashiers.flatMap((u) => (u.locationScopes || []).map((s) => s.locationId))).size;
+    return { count: cashiers.length, storeCount, common, top };
+  }, [cashiers]);
 
-    const mgrLimits = managers.map((m) => Number(m.discountLimitPercent));
-    const cshLimits = cashiers.map((c) => Number(c.discountLimitPercent));
-
-    return {
-      total,
-      managers: managers.length,
-      managerCap: mgrLimits.length ? `${Math.max(...mgrLimits).toFixed(0)}%` : '20%',
-      cashiers: cashiers.length,
-      cashierRange: cshLimits.length ? `${Math.min(...cshLimits).toFixed(0)}% – ${Math.max(...cshLimits).toFixed(0)}%` : '5% – 10%',
-      warehouse: warehouse.length,
-      staff: staff.length,
-    };
-  }, [users]);
-
-  const resetAllFilters = () => {
-    setSearch('');
-    setRoleFilter('ALL');
-    setLocationFilter('ALL');
-    setTierFilter('ALL');
-  };
-
-  // Open Edit Modal for a User
-  const openEditModal = (u: UserRecord) => {
-    setEditingUser(u);
-    setModalCapPercent(String(u.discountLimitPercent));
-    setModalAuditReason('');
-    setSelectedUserId(u.id);
-  };
-
-  // Save from Modal
-  const handleSaveModal = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!editingUser) return;
-
-    const nextLimit = Number(modalCapPercent);
-    const reason = modalAuditReason.trim();
-
-    if (!Number.isFinite(nextLimit) || nextLimit < 0 || nextLimit > maximumAuthority) {
-      alert(`Limit must be between 0% and your ${maximumAuthority.toFixed(0)}% ceiling.`);
-      return;
-    }
-    if (reason.length < 3) {
-      alert('Please provide an audit justification of at least 3 characters before saving.');
-      return;
-    }
-
-    setSavingUserId(editingUser.id);
-
-    try {
-      if (token && token !== 'demo_token') {
-        const res = await fetch(`${API_BASE}/users/${editingUser.id}/discount-limit`, {
+  // ---------- saving ----------
+  /** Saves one limit. With a signed-in session it goes to the API; in the demo it updates locally. */
+  const saveLimit = async (u: UserRecord, value: number, why: string): Promise<string | null> => {
+    if (token) {
+      try {
+        const res = await fetch(`${API_BASE}/users/${u.id}/discount-limit`, {
           method: 'PATCH',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ discountLimitPercent: nextLimit, reason }),
+          body: JSON.stringify({ discountLimitPercent: value, reason: why }),
         });
-        if (!res.ok) throw new Error(await errorMessage(res));
+        if (!res.ok) return await errorMessage(res);
+      } catch {
+        return 'Could not reach the server. Nothing was changed.';
       }
-
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === editingUser.id
-            ? { ...item, discountLimitPercent: nextLimit, lastReason: reason, lastUpdated: 'Today' }
-            : item,
-        ),
-      );
-      setEditingUser(null);
-      setNotice(`Updated discount ceiling for ${editingUser.name || editingUser.email} to ${nextLimit.toFixed(1)}%.`);
-    } catch {
-      // Local fallback for demo
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === editingUser.id
-            ? { ...item, discountLimitPercent: nextLimit, lastReason: reason, lastUpdated: 'Today' }
-            : item,
-        ),
-      );
-      setEditingUser(null);
-      setNotice(`Updated discount ceiling for ${editingUser.name || editingUser.email} to ${nextLimit.toFixed(1)}% (Audit log recorded).`);
-    } finally {
-      setSavingUserId('');
     }
+    const from = Number(u.discountLimitPercent);
+    setUsers((prev) => prev.map((item) => (item.id === u.id ? { ...item, discountLimitPercent: value, lastReason: why, lastUpdated: todayLabel() } : item)));
+    setHistory((prev) => [{ id: `h${Date.now()}-${u.id}`, when: 'Just now', userId: u.id, name: displayName(u), from, to: value, reason: why, by: actorEmail }, ...prev]);
+    return null;
   };
 
-  // Quick Preset Update directly from Action Menu
-  const applyQuickPreset = async (user: UserRecord, val: number, label: string) => {
-    const reason = `Fast-assigned ${val}% ${label} via directory quick action`;
-    setSavingUserId(user.id);
-    setActiveActionMenuId(null);
+  const viewing = cashiers.find((u) => u.id === viewingId) ?? null;
+  const openPerson = (u: UserRecord) => {
+    setViewingId(u.id);
+    setNewLimit(String(Number(u.discountLimitPercent)));
+    setReason('');
+    setFormError('');
+    setMenuFor(null);
+  };
+  const closePerson = useCallback(() => setViewingId(null), []);
 
-    try {
-      if (token && token !== 'demo_token') {
-        await fetch(`${API_BASE}/users/${user.id}/discount-limit`, {
-          method: 'PATCH',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ discountLimitPercent: val, reason }),
-        });
-      }
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === user.id
-            ? { ...item, discountLimitPercent: val, lastReason: reason, lastUpdated: 'Today' }
-            : item,
-        ),
-      );
-      setNotice(`Set ${val}% ceiling for ${user.name || user.email}.`);
-    } catch {
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === user.id
-            ? { ...item, discountLimitPercent: val, lastReason: reason, lastUpdated: 'Today' }
-            : item,
-        ),
-      );
-      setNotice(`Set ${val}% ceiling for ${user.name || user.email}.`);
-    } finally {
-      setSavingUserId('');
+  const validLimit = (raw: string) => {
+    const value = Number(raw);
+    if (raw === '' || !Number.isFinite(value) || value < 0 || value > maximumAuthority) {
+      return `Choose a limit between 0% and ${pct(maximumAuthority)}${authority.unlimited ? '' : ' (your own limit)'}.`;
     }
+    if (Math.round(value * 100) !== value * 100) return 'Use at most two decimal places.';
+    return '';
   };
 
-  // Bulk Apply
-  const handleApplyBulk = (e: FormEvent) => {
+  const submitPerson = async (e: FormEvent) => {
     e.preventDefault();
-    const targetPercent = Number(bulkPercent);
-    if (!Number.isFinite(targetPercent) || targetPercent < 0 || targetPercent > maximumAuthority) {
-      alert(`Discount must be between 0% and ${maximumAuthority}%.`);
-      return;
-    }
-    if (bulkReason.trim().length < 3) {
-      alert('Justification must be at least 3 characters.');
-      return;
-    }
-
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.role === bulkRole) {
-          return { ...u, discountLimitPercent: targetPercent, lastReason: bulkReason, lastUpdated: 'Today' };
-        }
-        return u;
-      }),
-    );
-
-    setIsBulkModalOpen(false);
-    setNotice(`Updated all active ${roleLabels[bulkRole]} accounts to ${targetPercent}% discount ceiling.`);
+    if (!viewing) return;
+    const problemText = validLimit(newLimit);
+    if (problemText) return setFormError(problemText);
+    if (reason.trim().length < 3) return setFormError('Write a short reason (at least 3 characters). It is saved with the change.');
+    const value = Number(newLimit);
+    setSaving(true);
+    const problem = await saveLimit(viewing, value, reason.trim());
+    setSaving(false);
+    if (problem) return setFormError(problem);
+    setViewingId(null);
+    setToast(value === 0 ? `${displayName(viewing)} can no longer give discounts.` : `${displayName(viewing)} can now give up to ${pct(value)} off a bill.`);
   };
 
-  // Copy User Discount Policy
-  const copyUserPolicy = (u: UserRecord) => {
-    const scopes = (u.locationScopes || [])
-      .map((s) => locationMap.get(s.locationId) || s.locationId)
-      .join(', ') || 'Platform-wide';
-    const text = `Staff: ${u.name || u.email} | Role: ${roleLabels[u.role] || u.role} | Discount Cap: ${u.discountLimitPercent}% (Line & Bill Parity) | Store: ${scopes} | OD-07 Enforced`;
-    navigator.clipboard.writeText(text);
-    setNotice(`Copied discount policy for ${u.name || u.email} to clipboard.`);
+  const applyQuickPreset = async (u: UserRecord, value: number, label: string) => {
+    setMenuFor(null);
+    if (value > maximumAuthority) return setError(`You can only set limits up to ${pct(maximumAuthority)}.`);
+    const problem = await saveLimit(u, value, `Fast-assigned ${value}% ${label} via directory quick action`);
+    if (problem) setError(`${displayName(u)}: ${problem}`);
+    else setToast(`Set ${pct(value)} for ${displayName(u)}.`);
   };
+
+  const copySummary = (u: UserRecord) => {
+    setMenuFor(null);
+    const stores = storesOf(u).join(', ') || 'No store';
+    const text = `${displayName(u)} · Cashier · Discount limit ${pct(Number(u.discountLimitPercent))} per bill · ${stores}`;
+    void navigator.clipboard?.writeText(text);
+    setToast(`Copied ${displayName(u)}'s discount summary.`);
+  };
+
+  // ---------- set for all cashiers (optionally one store) ----------
+  const bulkTargets = cashiers.filter((u) => bulkStore === 'ALL' || (u.locationScopes || []).some((s) => s.locationId === bulkStore));
+  const bulkValue = Number(bulkPercent);
+  const submitBulk = async (e: FormEvent) => {
+    e.preventDefault();
+    const problemText = validLimit(bulkPercent);
+    if (problemText) return setFormError(problemText);
+    if (bulkReason.trim().length < 3) return setFormError('Write a short reason (at least 3 characters).');
+    const toChange = bulkTargets.filter((u) => Number(u.discountLimitPercent) !== bulkValue);
+    if (toChange.length === 0) return setFormError(`These cashiers already have ${pct(bulkValue)}.`);
+    setSaving(true);
+    const failures: string[] = [];
+    for (const u of toChange) {
+      const problem = await saveLimit(u, bulkValue, bulkReason.trim());
+      if (problem) failures.push(`${displayName(u)} (${problem})`);
+    }
+    setSaving(false);
+    setBulkOpen(false);
+    const done = toChange.length - failures.length;
+    if (done) setToast(`Updated ${done} ${done === 1 ? 'cashier' : 'cashiers'} to ${pct(bulkValue)}.`);
+    if (failures.length) setError(`Not changed: ${failures.join('; ')}`);
+  };
+  const openBulk = () => { setFormError(''); setBulkOpen(true); };
+  const closeBulk = useCallback(() => setBulkOpen(false), []);
+  const closeHistory = useCallback(() => setHistoryOpen(false), []);
+  const storeCashierCount = (id: string) => cashiers.filter((u) => id === 'ALL' || (u.locationScopes || []).some((s) => s.locationId === id)).length;
+
+  const scaleMax = Math.max(20, ...cashiers.map((u) => Number(u.discountLimitPercent)));
 
   return (
-    <div style={{ padding: '28px 36px 60px', maxWidth: '1440px', margin: '0 auto', color: '#1e293b' }}>
-      {/* Alert Notice (Matching users & company pages) */}
-      {notice && (
-        <div
-          style={{
-            padding: '12px 18px',
-            borderRadius: '10px',
-            background: '#ecfdf5',
-            border: '1px solid #a7f3d0',
-            color: '#065f46',
-            fontSize: '13px',
-            marginBottom: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 2px 8px rgba(16, 185, 129, 0.1)',
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>✓ {notice}</span>
-          <button
-            type="button"
-            onClick={() => setNotice('')}
-            style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
-          >
-            ✕
-          </button>
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div>
+          <h1>Discount Limits</h1>
+          <p>How much each cashier can take off a bill. Only cashiers bill customers, so this limit only applies to them.</p>
         </div>
-      )}
+        <div className={styles.headerActions}>
+          <button type="button" className={styles.ghostButton} onClick={() => setHistoryOpen(true)}><Icon name="history" size={16} /> Change history</button>
+          {canManage && <button type="button" className={styles.primaryButton} onClick={openBulk}><Icon name="layers" size={16} /> Set for all cashiers</button>}
+        </div>
+      </header>
 
+      {!canManage && (
+        <div className={styles.readOnly}><Icon name="lock" size={16} /><span>You can see every cashier&apos;s limit here. Only an Admin or Super Admin can change them.</span></div>
+      )}
       {error && (
-        <div
-          style={{
-            padding: '12px 18px',
-            borderRadius: '10px',
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            color: '#991b1b',
-            fontSize: '13px',
-            marginBottom: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 2px 8px rgba(239, 68, 68, 0.1)',
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>⚠ {error}</span>
-          <button
-            type="button"
-            onClick={() => setError('')}
-            style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
-          >
-            ✕
-          </button>
-        </div>
+        <div className={styles.errorNotice}><Icon name="alert" size={16} /><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="Dismiss"><Icon name="close" size={14} /></button></div>
       )}
 
-      {/* Header: Title with Blue Badge, Section View Toggles, Info, and Primary Action Button */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            Discount Limits Policy
-            <span
-              style={{
-                display: 'inline-grid',
-                placeItems: 'center',
-                width: '34px',
-                height: '34px',
-                borderRadius: '9px',
-                background: '#1a62ea',
-                color: '#ffffff',
-                fontSize: '18px',
-                boxShadow: '0 3px 8px rgba(26, 98, 234, 0.25)',
-              }}
-              title="OD-07 Security Invariant"
-            >
-              🏷️
-            </span>
-          </h1>
+      {/* Summary cards */}
+      <section className={styles.summaryGrid}>
+        <div className={styles.summaryCard}>
+          <div className={styles.summaryTop}><span>Cashiers</span><i><Icon name="cashier" size={16} /></i></div>
+          <div className={styles.summaryValue}>{kpis.count}</div>
+          <div className={styles.summaryFoot}><span className={styles.chip}>{kpis.storeCount} {kpis.storeCount === 1 ? 'store' : 'stores'}</span> can bill customers</div>
         </div>
+        <button type="button" className={`${styles.summaryCard} ${styles.summaryBlue} ${kpis.common && tierFilter !== 'ALL' ? styles.summaryOn : ''}`} onClick={() => kpis.common && setTierFilter(tierFilter !== 'ALL' ? 'ALL' : kpis.common[0] === 0 ? 'NONE' : kpis.common[0] <= 5 ? 'UPTO5' : 'OVER5')}>
+          <div className={styles.summaryTop}><span>Most common limit</span><i><Icon name="target" size={16} /></i></div>
+          <div className={styles.summaryValue}>{kpis.common ? pct(kpis.common[0]) : '—'}</div>
+          <div className={styles.summaryFoot}>{kpis.common ? <><span className={`${styles.chip} ${styles.chipBlue}`}>{kpis.common[1]} of {kpis.count}</span> cashiers · click to filter</> : 'No cashiers yet'}</div>
+        </button>
+        <button type="button" className={styles.summaryCard} onClick={() => kpis.top && openPerson(kpis.top)} disabled={!kpis.top}>
+          <div className={styles.summaryTop}><span>Highest limit</span><i className={styles.toneAmber}><Icon name="up" size={16} /></i></div>
+          <div className={styles.summaryValue}>{kpis.top ? pct(Number(kpis.top.discountLimitPercent)) : '—'}</div>
+          <div className={styles.summaryFoot}>{kpis.top ? <><span className={`${styles.chip} ${styles.chipAmber}`}>{displayName(kpis.top)}</span> {storesOf(kpis.top)[0] || 'No store'}</> : '—'}</div>
+        </button>
+        <div className={styles.summaryCard}>
+          <div className={styles.summaryTop}><span>Your authority</span><i className={styles.toneGreen}><Icon name="shield" size={16} /></i></div>
+          <div className={styles.summaryValue}>{canManage ? (authority.unlimited ? 'No cap' : pct(maximumAuthority)) : 'View only'}</div>
+          <div className={styles.summaryFoot}>{canManage ? <><span className={`${styles.chip} ${styles.chipGreen}`}>up to {pct(maximumAuthority)}</span> for any cashier</> : 'Ask an admin to change a limit'}</div>
+        </div>
+      </section>
 
-        {/* Right side: View Tabs, Info button, and Primary Action Button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <button
-              type="button"
-              onClick={() => setActiveTab('LIMITS')}
-              style={{
-                border: 'none',
-                background: activeTab === 'LIMITS' ? '#ffffff' : 'transparent',
-                color: activeTab === 'LIMITS' ? '#1a62ea' : '#64748b',
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontWeight: 700,
-                fontSize: '13px',
-                cursor: 'pointer',
-                boxShadow: activeTab === 'LIMITS' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Staff Discount Caps
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('TEMPLATES')}
-              style={{
-                border: 'none',
-                background: activeTab === 'TEMPLATES' ? '#ffffff' : 'transparent',
-                color: activeTab === 'TEMPLATES' ? '#1a62ea' : '#64748b',
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontWeight: 700,
-                fontSize: '13px',
-                cursor: 'pointer',
-                boxShadow: activeTab === 'TEMPLATES' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Role Default Policies
-            </button>
+      {/* Cashiers and their limits */}
+      <section className={styles.card}>
+        <div className={styles.toolbar}>
+          <div className={styles.tabs} role="tablist" aria-label="Filter by limit">
+            {([['ALL', 'All cashiers'], ['NONE', 'No discount'], ['UPTO5', 'Up to 5%'], ['OVER5', 'Over 5%']] as [TierFilter, string][]).map(([key, label]) => (
+              <button key={key} type="button" role="tab" aria-selected={tierFilter === key} className={tierFilter === key ? styles.tabOn : ''} onClick={() => setTierFilter(key)}>
+                {label} <em>{tierCounts[key]}</em>
+              </button>
+            ))}
           </div>
-
-          {/* Directory Info Button (Matching /admin/users & /admin/company) */}
-          <button
-            type="button"
-            onClick={() => setIsAuditModalOpen(true)}
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '8px',
-              border: '1px solid #e2e8f0',
-              background: '#ffffff',
-              color: '#64748b',
-              fontSize: '16px',
-              display: 'grid',
-              placeItems: 'center',
-              cursor: 'pointer',
-            }}
-            title="View Audit Trail & Policy Architecture"
-          >
-            ⓘ
-          </button>
-
-          {/* Primary Action Button (Matching /admin/users & /admin/company) */}
-          <button
-            type="button"
-            onClick={() => setIsBulkModalOpen(true)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 18px',
-              borderRadius: '8px',
-              background: '#1a62ea',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: 700,
-              fontSize: '13px',
-              cursor: 'pointer',
-              boxShadow: '0 2px 10px rgba(26, 98, 234, 0.28)',
-            }}
-          >
-            <span style={{ fontSize: '15px' }}>⚡</span> Bulk Preset Policy
-          </button>
-        </div>
-      </div>
-
-      {/* SECTION 1: QUICK ACCESS (Row of 4 Folder-Tabbed Cards matching the reference image) */}
-      <div style={{ marginBottom: '34px' }}>
-        <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: '0 0 14px' }}>
-          QUICK ACCESS
-        </h2>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
-          {/* Folder Card 1: Store Managers */}
-          <QuickAccessCard
-            isActive={roleFilter === 'STORE_MANAGER'}
-            onClick={() => setRoleFilter(roleFilter === 'STORE_MANAGER' ? 'ALL' : 'STORE_MANAGER')}
-            title="Filter by Store Managers"
-            avatars={[
-              { text: 'AP', bg: '#059669' },
-              { text: 'SM', bg: '#0d9488' },
-            ]}
-            heading={`Store Managers (${kpis.managerCap})`}
-            subheading={`${kpis.managers} Active Supervisors · Storefloor`}
-          />
-
-          {/* Folder Card 2: Cashiers & POS */}
-          <QuickAccessCard
-            isActive={roleFilter === 'CASHIER'}
-            onClick={() => setRoleFilter(roleFilter === 'CASHIER' ? 'ALL' : 'CASHIER')}
-            title="Filter by Cashiers"
-            avatars={[
-              { text: 'RM', bg: '#d97706' },
-              { text: 'NS', bg: '#f59e0b' },
-              { text: 'MD', bg: '#b45309' },
-            ]}
-            heading={`Cashiers & POS (${kpis.cashierRange})`}
-            subheading={`${kpis.cashiers} Active Cashiers · Standard POS`}
-          />
-
-          {/* Folder Card 3: Warehouse & Support Logistics */}
-          <QuickAccessCard
-            isActive={roleFilter === 'STAFF' || roleFilter === 'CENTRAL_MANAGER'}
-            onClick={() => setRoleFilter(roleFilter === 'STAFF' ? 'ALL' : 'STAFF')}
-            title="Filter by Operations & Floor Staff"
-            avatars={[
-              { text: 'PS', bg: '#4f46e5' },
-              { text: 'AV', bg: '#6366f1' },
-            ]}
-            heading="Floor Staff (0% Cap)"
-            subheading={`${kpis.staff} Floor Staff · Restricted`}
-          />
-
-          {/* Summary Card 4: Executive Invariant (Styled exactly like 4th card in reference image) */}
-          <div
-            className="drive-folder-card"
-            onClick={() => setIsAuditModalOpen(true)}
-            title="View OD-07 Security Invariant Architecture"
-            style={{ borderLeft: '4px solid #1a62ea' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: '#1a62ea' }}>🗎</span>
-                <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>OD-07 Invariant</strong>
-              </div>
-              <div
-                style={{
-                  width: '26px',
-                  height: '26px',
-                  borderRadius: '50%',
-                  background: '#1a62ea',
-                  color: '#fff',
-                  fontSize: '11px',
-                  fontWeight: 750,
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                SA
-              </div>
-            </div>
-            <div style={{ marginTop: '16px' }}>
-              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', textTransform: 'uppercase', display: 'block' }}>
-                GOVERNANCE
-              </small>
-              <span style={{ fontSize: '12px', fontWeight: 650, color: '#334155', display: 'block', marginTop: '2px' }}>
-                Line & Bill Parity · Anti-Stacking Enforced
-              </span>
-            </div>
+          <div className={styles.toolbarRight}>
+            <PillDropdown heading="Store" ariaLabel="Filter by store" icon={<Icon name="store" size={14} />} value={locationFilter} options={[{ value: 'ALL', label: 'All stores' }, ...retailStores.map((l) => ({ value: l.id, label: l.name }))]} onChange={setLocationFilter} />
+            <label className={styles.search}>
+              <Icon name="search" size={15} />
+              <input type="search" placeholder="Search name, email or ID…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search cashiers" />
+            </label>
           </div>
         </div>
-      </div>
 
-      {/* VIEW TAB 1: LIMITS DIRECTORY */}
-      {activeTab === 'LIMITS' && (
-        <div>
-          {/* Section 2 Toolbar (Matching ALL USERS toolbar in /admin/users & company) */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-            <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: 0 }}>
-              DISCOUNT POLICY DIRECTORY ({filteredUsers.length})
-            </h2>
+        <div className={`${styles.listHead} ${styles.cashierGrid}`} role="row">
+          <span>Cashier</span>
+          <span>Store</span>
+          <span>Discount limit</span>
+          <span className={styles.colExample}>Level</span>
+          <span className={styles.colChange}>Last change</span>
+          <span />
+        </div>
 
-            {/* Filter Toolbar matching /admin/users & /admin/company */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
-              <input
-                type="text"
-                placeholder="Filter staff by name, email..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: '18px',
-                  border: '1px solid #cbd5e1',
-                  fontSize: '12.5px',
-                  outline: 'none',
-                  background: '#f8fafc',
-                  minWidth: '220px',
-                }}
-              />
-
-              {/* Custom Styled Role Dropdown */}
-              <div className="custom-filter-dropdown-wrap" style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  onClick={() => setOpenDropdown(openDropdown === 'ROLE' ? null : 'ROLE')}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    borderRadius: '20px',
-                    border: roleFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                    background: roleFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                    color: roleFilter !== 'ALL' ? '#1d4ed8' : '#334155',
-                    fontSize: '12.5px',
-                    fontWeight: 650,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                  }}
-                >
-                  <span>👤</span>
-                  <span>{roleLabels[roleFilter] || 'All Roles'}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
-                </button>
-
-                {openDropdown === 'ROLE' && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 6px)',
-                      left: 0,
-                      width: '210px',
-                      background: '#ffffff',
-                      borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
-                      padding: '6px',
-                      zIndex: 60,
-                    }}
-                  >
-                    <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                      FILTER BY ROLE
-                    </div>
-                    {ROLE_OPTIONS.map((opt) => {
-                      const isSelected = roleFilter === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => {
-                            setRoleFilter(opt.value);
-                            setOpenDropdown(null);
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '7px 10px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: isSelected ? '#eff6ff' : 'transparent',
-                            color: isSelected ? '#1a62ea' : '#1e293b',
-                            fontSize: '12px',
-                            fontWeight: isSelected ? 700 : 500,
-                            textAlign: 'left',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            cursor: 'pointer',
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = '#f8fafc';
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'transparent';
-                          }}
-                        >
-                          <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Custom Styled Location Dropdown */}
-              <div className="custom-filter-dropdown-wrap" style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  onClick={() => setOpenDropdown(openDropdown === 'LOCATION' ? null : 'LOCATION')}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    borderRadius: '20px',
-                    border: locationFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                    background: locationFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                    color: locationFilter !== 'ALL' ? '#1d4ed8' : '#334155',
-                    fontSize: '12.5px',
-                    fontWeight: 650,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                  }}
-                >
-                  <span>⌖</span>
-                  <span>{locationFilter === 'ALL' ? 'All Locations' : locationMap.get(locationFilter) || locationFilter}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
-                </button>
-
-                {openDropdown === 'LOCATION' && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 6px)',
-                      left: 0,
-                      width: '230px',
-                      background: '#ffffff',
-                      borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
-                      padding: '6px',
-                      zIndex: 60,
-                    }}
-                  >
-                    <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                      FILTER BY STORE LOCATION
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLocationFilter('ALL');
-                        setOpenDropdown(null);
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '7px 10px',
-                        borderRadius: '8px',
-                        border: 'none',
-                        background: locationFilter === 'ALL' ? '#eff6ff' : 'transparent',
-                        color: locationFilter === 'ALL' ? '#1a62ea' : '#1e293b',
-                        fontSize: '12px',
-                        fontWeight: locationFilter === 'ALL' ? 700 : 500,
-                        textAlign: 'left',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <span>All Locations</span>
-                      {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
-                    </button>
-                    {locations.map((loc) => {
-                      const isSelected = locationFilter === loc.id;
-                      return (
-                        <button
-                          key={loc.id}
-                          type="button"
-                          onClick={() => {
-                            setLocationFilter(loc.id);
-                            setOpenDropdown(null);
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '7px 10px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: isSelected ? '#eff6ff' : 'transparent',
-                            color: isSelected ? '#1a62ea' : '#1e293b',
-                            fontSize: '12px',
-                            fontWeight: isSelected ? 700 : 500,
-                            textAlign: 'left',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <span>{loc.name}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Custom Styled Discount Tier Dropdown */}
-              <div className="custom-filter-dropdown-wrap" style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  onClick={() => setOpenDropdown(openDropdown === 'TIER' ? null : 'TIER')}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    borderRadius: '20px',
-                    border: tierFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                    background: tierFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                    color: tierFilter !== 'ALL' ? '#1d4ed8' : '#334155',
-                    fontSize: '12.5px',
-                    fontWeight: 650,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                  }}
-                >
-                  <span>🏷️</span>
-                  <span>
-                    {tierFilter === 'ALL'
-                      ? 'All Caps'
-                      : tierFilter === 'STANDARD'
-                      ? 'Standard (1-10%)'
-                      : tierFilter === 'ELEVATED'
-                      ? 'Elevated (>10%)'
-                      : 'Restricted (0%)'}
-                  </span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
-                </button>
-
-                {openDropdown === 'TIER' && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 6px)',
-                      left: 0,
-                      width: '210px',
-                      background: '#ffffff',
-                      borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
-                      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
-                      padding: '6px',
-                      zIndex: 60,
-                    }}
-                  >
-                    <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                      DISCOUNT TIER
-                    </div>
-                    {[
-                      { value: 'ALL', label: 'All Caps' },
-                      { value: 'STANDARD', label: 'Standard (1% – 10%)' },
-                      { value: 'ELEVATED', label: 'Elevated (>10%)' },
-                      { value: 'RESTRICTED', label: 'Restricted (0%)' },
-                    ].map((opt) => {
-                      const isSelected = tierFilter === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => {
-                            setTierFilter(opt.value);
-                            setOpenDropdown(null);
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '7px 10px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: isSelected ? '#eff6ff' : 'transparent',
-                            color: isSelected ? '#1a62ea' : '#1e293b',
-                            fontSize: '12px',
-                            fontWeight: isSelected ? 700 : 500,
-                            textAlign: 'left',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Reset Filters Link */}
-              {(search || roleFilter !== 'ALL' || locationFilter !== 'ALL' || tierFilter !== 'ALL') && (
-                <button
-                  type="button"
-                  onClick={resetAllFilters}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#1a62ea',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    textDecoration: 'underline',
-                  }}
-                >
-                  Reset Filters
-                </button>
-              )}
-            </div>
+        {filtered.length === 0 ? (
+          <div className={styles.empty}>
+            <strong>{cashiers.length ? 'No cashier matches these filters' : 'No cashiers yet'}</strong>
+            <span>{cashiers.length ? 'Try a different search, or clear the filters.' : 'Add a cashier in the User Directory, then set their limit here.'}</span>
+            {filtersActive && <button type="button" className={styles.linkButton} onClick={resetFilters}>Clear filters</button>}
           </div>
-
-          {/* Structured Table matching /admin/users & /admin/company */}
-          <div
-            style={{
-              background: '#ffffff',
-              border: '1px solid #eef2f6',
-              borderRadius: '14px',
-              overflow: 'hidden',
-              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
-            }}
-          >
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                <thead>
-                  <tr
-                    style={{
-                      borderBottom: '1px solid #edf2f7',
-                      background: '#ffffff',
-                      color: '#64748b',
-                      fontSize: '11px',
-                      fontWeight: 750,
-                      letterSpacing: '0.06em',
-                    }}
-                  >
-                    <th style={{ padding: '14px 20px', width: '30%' }}>STAFF ACCOUNT</th>
-                    <th style={{ padding: '14px 16px', width: '16%' }}>ORGANIZATIONAL ROLE</th>
-                    <th style={{ padding: '14px 16px', width: '20%' }}>STORE LOCATION</th>
-                    <th style={{ padding: '14px 16px', width: '16%' }}>DISCOUNT CEILING</th>
-                    <th style={{ padding: '14px 16px', width: '10%' }}>LAST AUDIT</th>
-                    <th style={{ padding: '14px 20px', width: '8%', textAlign: 'right' }}>ACTIONS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
-                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🏷️</div>
-                        <strong>No staff accounts match your active filter</strong>
-                        <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or searching by employee ID.</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredUsers.map((user) => {
-                      const scopes = (user.locationScopes || [])
-                        .map((s) => locationMap.get(s.locationId) || s.locationId)
-                        .filter(Boolean);
-                      const numVal = Number(user.discountLimitPercent);
-                      const isSelected = selectedUserId === user.id;
-                      const initials = (user.name || user.email)
-                        .split(' ')
-                        .map((p) => p[0])
-                        .join('')
-                        .slice(0, 2)
-                        .toUpperCase();
-
-                      return (
-                        <tr
-                          key={user.id}
-                          onClick={() => setSelectedUserId(user.id)}
-                          style={{
-                            borderBottom: '1px solid #f1f5f9',
-                            background: isSelected ? '#edf4fe' : '#ffffff',
-                            cursor: 'pointer',
-                            transition: 'background 0.12s ease',
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = '#f8fafd';
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = '#ffffff';
-                          }}
-                        >
-                          {/* Col 1: Staff Account */}
-                          <td style={{ padding: '13px 20px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                              <div
-                                style={{
-                                  width: '32px',
-                                  height: '32px',
-                                  borderRadius: '50%',
-                                  background: user.role === 'STORE_MANAGER' ? '#ecfdf5' : user.role === 'CASHIER' ? '#eff6ff' : '#f1f5f9',
-                                  color: user.role === 'STORE_MANAGER' ? '#059669' : user.role === 'CASHIER' ? '#1a62ea' : '#475569',
-                                  display: 'grid',
-                                  placeItems: 'center',
-                                  fontWeight: 800,
-                                  fontSize: '12px',
-                                  flexShrink: 0,
-                                  border: '1px solid rgba(0,0,0,0.06)',
-                                }}
-                              >
-                                {initials}
-                              </div>
-                              <div style={{ minWidth: 0 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontSize: '13px', fontWeight: 750, color: '#1e293b' }}>
-                                    {user.name || user.email.split('@')[0]}
-                                  </span>
-                                  <span
-                                    style={{
-                                      width: '7px',
-                                      height: '7px',
-                                      borderRadius: '50%',
-                                      background: user.isActive ? '#10b981' : '#94a3b8',
-                                      display: 'inline-block',
-                                    }}
-                                    title={user.isActive ? 'Active Staff' : 'Inactive'}
-                                  />
-                                </div>
-                                <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '1px' }}>
-                                  <span>{user.email}</span>
-                                  <span>·</span>
-                                  <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{user.employeeCode || user.id.slice(0, 8)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Col 2: Role */}
-                          <td style={{ padding: '13px 16px' }}>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '5px',
-                                padding: '4px 9px',
-                                borderRadius: '6px',
-                                fontSize: '11.5px',
-                                fontWeight: 700,
-                                background:
-                                  user.role === 'STORE_MANAGER'
-                                    ? '#ecfdf5'
-                                    : user.role === 'CASHIER'
-                                    ? '#eff6ff'
-                                    : '#f1f5f9',
-                                color:
-                                  user.role === 'STORE_MANAGER'
-                                    ? '#059669'
-                                    : user.role === 'CASHIER'
-                                    ? '#1a62ea'
-                                    : '#475569',
-                                border: `1px solid ${
-                                  user.role === 'STORE_MANAGER'
-                                    ? '#a7f3d0'
-                                    : user.role === 'CASHIER'
-                                    ? '#bfdbfe'
-                                    : '#e2e8f0'
-                                }`,
-                              }}
-                            >
-                              <span>{user.role === 'STORE_MANAGER' ? '♛' : user.role === 'CASHIER' ? '♙' : '♟'}</span>
-                              <span>{roleLabels[user.role] || user.role}</span>
-                            </span>
-                          </td>
-
-                          {/* Col 3: Assigned Store */}
-                          <td style={{ padding: '13px 16px' }}>
-                            <div style={{ fontSize: '12.5px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
-                              <span style={{ color: '#1a62ea', fontSize: '13px' }}>🏪</span>
-                              <span>{scopes.length ? scopes[0] : 'All Branches'}</span>
-                              {scopes.length > 1 && (
-                                <span style={{ fontSize: '10.5px', padding: '1px 5px', borderRadius: '4px', background: '#e2e8f0', color: '#475569', fontWeight: 750 }}>
-                                  +{scopes.length - 1}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Col 4: Discount Ceiling (Clean Metric Badge) */}
-                          <td style={{ padding: '13px 16px' }}>
-                            <div>
-                              <span
-                                style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '5px',
-                                  padding: '4px 9px',
-                                  borderRadius: '6px',
-                                  fontSize: '12px',
-                                  fontWeight: 800,
-                                  background: numVal > 10 ? '#ecfdf5' : numVal > 0 ? '#eff6ff' : '#f8fafc',
-                                  color: numVal > 10 ? '#059669' : numVal > 0 ? '#1a62ea' : '#64748b',
-                                  border: `1px solid ${numVal > 10 ? '#a7f3d0' : numVal > 0 ? '#bfdbfe' : '#e2e8f0'}`,
-                                }}
-                              >
-                                <span>{numVal.toFixed(1)}% Cap</span>
-                              </span>
-                              <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', fontWeight: 500 }}>
-                                Line & Bill Parity
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Col 5: Last Audit */}
-                          <td style={{ padding: '13px 16px' }}>
-                            <div style={{ fontSize: '12px', color: '#475569' }}>
-                              <div style={{ fontWeight: 650, color: '#1e293b' }}>
-                                {user.lastUpdated || '15-Nov-2026'}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: '11px',
-                                  color: '#64748b',
-                                  marginTop: '1px',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  maxWidth: '160px',
-                                }}
-                                title={user.lastReason || 'Standard verified allowance'}
-                              >
-                                {user.lastReason || 'Standard verified'}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Col 6: Actions (Edit + Link + Dots) */}
-                          <td style={{ padding: '13px 20px', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }} onClick={(e) => e.stopPropagation()}>
-                              {/* Edit Cap Button */}
-                              <button
-                                type="button"
-                                onClick={() => openEditModal(user)}
-                                style={{
-                                  padding: '4px 10px',
-                                  borderRadius: '6px',
-                                  background: '#eff6ff',
-                                  border: '1px solid #bfdbfe',
-                                  color: '#1a62ea',
-                                  fontSize: '12px',
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  transition: 'all 0.12s ease',
-                                }}
-                                title="Adjust discount ceiling"
-                              >
-                                Edit
-                              </button>
-
-                              {/* Quick Copy Button */}
-                              <button
-                                type="button"
-                                onClick={() => copyUserPolicy(user)}
-                                style={{
-                                  border: 'none',
-                                  background: 'transparent',
-                                  color: '#64748b',
-                                  width: '28px',
-                                  height: '28px',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  display: 'grid',
-                                  placeItems: 'center',
-                                  fontSize: '14px',
-                                }}
-                                title="Copy policy snapshot"
-                              >
-                                🔗
-                              </button>
-
-                              {/* Context Menu Trigger */}
-                              <div className="discount-action-menu-wrap" style={{ position: 'relative' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveActionMenuId((prev) => (prev === user.id ? null : user.id))}
-                                  style={{
-                                    border: 'none',
-                                    background: 'transparent',
-                                    color: '#64748b',
-                                    width: '28px',
-                                    height: '28px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    display: 'grid',
-                                    placeItems: 'center',
-                                    fontSize: '16px',
-                                    fontWeight: 800,
-                                  }}
-                                  title="More options"
-                                >
-                                  ···
-                                </button>
-
-                                {activeActionMenuId === user.id && (
-                                  <div
-                                    style={{
-                                      position: 'absolute',
-                                      top: 'calc(100% + 4px)',
-                                      right: 0,
-                                      zIndex: 60,
-                                      background: '#ffffff',
-                                      borderRadius: '10px',
-                                      border: '1px solid #cbd5e1',
-                                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                                      minWidth: '190px',
-                                      padding: '5px',
-                                      textAlign: 'left',
-                                    }}
-                                  >
-                                    <div
-                                      onClick={() => openEditModal(user)}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 650, color: '#1a62ea', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      ✎ Configure Limit & Reason...
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, 5, 'Standard POS')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#334155', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      ⚡ Fast Set to 5% Cap
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, 10, 'Senior POS')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#334155', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      ⚡ Fast Set to 10% Cap
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, 20, 'Manager Override')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#059669', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      ♛ Fast Set to 20% Cap
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, 0, 'Restricted')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#dc2626', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      ⛔ Revoke (Set to 0%)
-                                    </div>
-                                    <div
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(user.email);
-                                        setNotice(`Copied ${user.email} to clipboard.`);
-                                        setActiveActionMenuId(null);
-                                      }}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#64748b', cursor: 'pointer', borderRadius: '6px', borderTop: '1px solid #f1f5f9' }}
-                                    >
-                                      📋 Copy Email Address
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
+        ) : (
+          filtered.map((u) => {
+            const v = Number(u.discountLimitPercent);
+            const tier = tierOf(v);
+            const stores = storesOf(u);
+            return (
+              <div key={u.id} className={`${styles.row} ${styles.cashierGrid}`} role="button" tabIndex={0} onClick={() => openPerson(u)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPerson(u); } }}>
+                <div className={styles.person}>
+                  <span className={`${styles.avatar} ${styles.avCashier}`}>{initials(displayName(u))}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <strong>{displayName(u)}</strong>
+                    <small>{u.employeeCode || u.id.slice(0, 8)} · {u.email}</small>
+                  </div>
+                </div>
+                <div className={styles.store} title={stores.join(', ')}>
+                  <span>{stores[0] || 'No store'}</span>
+                  {stores.length > 1 && <em>+{stores.length - 1}</em>}
+                </div>
+                <div className={`${styles.limit} ${TIER_CLASS[tier]}`}>
+                  <div className={styles.limitTop}>
+                    <b>{pct(v)}</b>
+                    <small>{v > 0 ? `up to ${rupeesOff(v)} off ₹1,000` : 'full price only'}</small>
+                  </div>
+                  <div className={styles.bar}><i style={{ width: `${Math.min(100, (v / scaleMax) * 100)}%` }} /></div>
+                </div>
+                <div className={styles.colExample}>
+                  <span className={`${styles.status} ${STATUS_CLASS[tier]}`}><i />{TIER_LABEL[tier]}</span>
+                </div>
+                <div className={`${styles.lastChange} ${styles.colChange}`} title={u.lastReason}>
+                  <b>{u.lastUpdated || '—'}</b>
+                  <span>{u.lastReason || 'No changes recorded yet'}</span>
+                </div>
+                <div className={styles.actions} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} data-row-menu>
+                  <button type="button" className={`${styles.ghostButton} ${styles.smallButton}`} onClick={() => openPerson(u)}>
+                    {canManage ? <><Icon name="edit" size={13} /> Change</> : 'View'}
+                  </button>
+                  <button type="button" className={styles.iconButton} aria-label={`More options for ${displayName(u)}`} aria-expanded={menuFor === u.id} onClick={() => setMenuFor(menuFor === u.id ? null : u.id)}>
+                    <Icon name="more" size={16} />
+                  </button>
+                  {menuFor === u.id && (
+                    <div className={styles.menu} role="menu">
+                      {canManage && (
+                        <>
+                          <p>Quick set</p>
+                          {[{ v: 5, l: 'Standard POS' }, { v: 10, l: 'Senior POS' }, { v: 0, l: 'Restricted' }].map((p) => (
+                            <button key={p.v} type="button" role="menuitem" disabled={p.v > maximumAuthority || p.v === v} onClick={() => void applyQuickPreset(u, p.v, p.l)}>
+                              <span>{p.v === 0 ? 'No discount' : `${p.v}%`}</span><small>{p.v === 0 ? '0%' : p.l.replace(' POS', '')}</small>
+                            </button>
+                          ))}
+                          <hr />
+                        </>
+                      )}
+                      <button type="button" role="menuitem" onClick={() => copySummary(u)}><span>Copy summary</span><Icon name="copy" size={14} /></button>
+                    </div>
                   )}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              </div>
+            );
+          })
+        )}
 
-            {/* Table Footer */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '13px 20px',
-                background: '#ffffff',
-                borderTop: '1px solid #edf2f7',
-                fontSize: '12px',
-                color: '#64748b',
-              }}
-            >
-              <span>
-                Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> active staff accounts
-              </span>
-              <span>
-                Dual-Axis Security Invariant OD-07: All adjustments write an immutable record to the ledger.
-              </span>
+        <div className={styles.listFoot}>
+          <span>Showing <b>{filtered.length}</b> of <b>{cashiers.length}</b> cashiers{filtersActive && <> · <button type="button" className={styles.linkButton} onClick={resetFilters}>Clear filters</button></>}</span>
+          <span>One limit covers item and bill discounts</span>
+        </div>
+      </section>
+
+      {/* Guide: suggestions, the real checkout rules, and who can set limits */}
+      <section className={styles.guide}>
+        <div className={styles.guideCard}>
+          <h2>Suggested cashier limits</h2>
+          <p>A starting point. You can give any cashier more or less.</p>
+          <div className={styles.roleGuide}>
+            <div className={styles.roleTile}>
+              <b style={{ color: '#3e64a0' }}>5%</b>
+              <strong>Standard cashier</strong>
+              <span>For everyday courtesy discounts, such as a regular customer or a small defect on an item.</span>
+            </div>
+            <div className={styles.roleTile}>
+              <b style={{ color: '#3e64a0' }}>10%</b>
+              <strong>Senior cashier</strong>
+              <span>For experienced cashiers, usually with the store manager&apos;s approval.</span>
+            </div>
+            <div className={styles.roleTile}>
+              <b style={{ color: '#6b7280' }}>0%</b>
+              <strong>No discounts</strong>
+              <span>The cashier can still bill at full price, but can&apos;t take anything off.</span>
             </div>
           </div>
         </div>
-      )}
-
-      {/* VIEW TAB 2: ROLE POLICY TEMPLATES */}
-      {activeTab === 'TEMPLATES' && (
-        <div>
-          <div style={{ marginBottom: '18px', fontSize: '12.5px', fontWeight: 850, color: '#334155', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            ORGANIZATIONAL ROLE TEMPLATES & DISCOUNT BANDS
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px', marginBottom: '30px' }}>
-            {/* Store Managers Policy */}
-            <div style={{ background: '#ffffff', borderRadius: '14px', border: '1px solid #eef2f6', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#059669', background: '#ecfdf5', padding: '4px 10px', borderRadius: '20px', border: '1px solid #a7f3d0' }}>
-                  MANAGEMENT TIER
-                </span>
-                <span style={{ fontSize: '20px', fontWeight: 850, color: '#059669' }}>20.00%</span>
-              </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: '#0f172a' }}>Store Managers</h3>
-              <p style={{ fontSize: '13.5px', color: '#475569', lineHeight: 1.5, margin: '0 0 16px' }}>
-                Store managers possess elevated discretionary authority up to 20% on line items or aggregate bill totals to resolve customer escalation and VIP promotions.
-              </p>
-              <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
-                <strong>Policy Rule:</strong> Any discount &gt; 10% requires an electronic signature and prompt notification in store daily reports.
-              </div>
-            </div>
-
-            {/* Cashier Stations Policy */}
-            <div style={{ background: '#ffffff', borderRadius: '14px', border: '1px solid #eef2f6', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#1a62ea', background: '#eff6ff', padding: '4px 10px', borderRadius: '20px', border: '1px solid #bfdbfe' }}>
-                  OPERATIONAL TIER
-                </span>
-                <span style={{ fontSize: '20px', fontWeight: 850, color: '#1a62ea' }}>5% – 10%</span>
-              </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: '#0f172a' }}>Cashier Terminal Stations</h3>
-              <p style={{ fontSize: '13.5px', color: '#475569', lineHeight: 1.5, margin: '0 0 16px' }}>
-                Standard cashiers have a 5% cap for customer courtesy adjustments. Senior cashiers can be provisioned up to a 10% cap with written store manager approval.
-              </p>
-              <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
-                <strong>Policy Rule:</strong> Cashiers cannot apply discounts exceeding their configured cap; the terminal prompt blocks validation immediately.
-              </div>
-            </div>
-
-            {/* Floor Staff Policy */}
-            <div style={{ background: '#ffffff', borderRadius: '14px', border: '1px solid #eef2f6', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626', background: '#fef2f2', padding: '4px 10px', borderRadius: '20px', border: '1px solid #fecaca' }}>
-                  RESTRICTED TIER
-                </span>
-                <span style={{ fontSize: '20px', fontWeight: 850, color: '#dc2626' }}>0.00%</span>
-              </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: '#0f172a' }}>Floor & Support Staff</h3>
-              <p style={{ fontSize: '13.5px', color: '#475569', lineHeight: 1.5, margin: '0 0 16px' }}>
-                Floor assistants, inventory runners, and warehouse staff have 0% discount allowance. They can view catalog prices but cannot execute checkout discounts.
-              </p>
-              <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
-                <strong>Policy Rule:</strong> Zero permissions assigned. Any attempted line discount triggers permission rejection error code POS-403.
-              </div>
-            </div>
-          </div>
-
-          {/* Deep Invariant Architecture Callout */}
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '14px',
-              border: '1px solid #eef2f6',
-              padding: '24px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-              <span style={{ fontSize: '22px' }}>🛡️</span>
-              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
-                OD-07 Security Invariant Architecture
-              </h2>
-            </div>
-            <div style={{ fontSize: '13.5px', color: '#334155', lineHeight: 1.6, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginTop: '14px' }}>
-              <div>
-                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px', fontSize: '14px' }}>1. Single Shared Percentage Cap</strong>
-                The cashier percentage cap is shared identically between line item discounts and bill-level cart discounts. Neither can exceed the authorized value.
-              </div>
-              <div>
-                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px', fontSize: '14px' }}>2. Anti-Stacking Prevention</strong>
-                Cumulative compounding discounts on individual items that have already received bill-level markdowns are mathematically prevented by the pricing engine.
-              </div>
-              <div>
-                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px', fontSize: '14px' }}>3. Cryptographic Audit Immutability</strong>
-                Every change to a user's ceiling requires a textual justification and is immutably logged with the prior cap, new cap, timestamp, and administrator credentials.
-              </div>
-            </div>
-          </div>
+        <div className={styles.guideCard}>
+          <h2>How the checkout uses it</h2>
+          <p>These rules are checked by the server when a sale is finished.</p>
+          <ul className={styles.rules}>
+            <li><i><Icon name="cashier" size={15} /></i><div><strong>Only cashiers can bill</strong><span>Managers, warehouse and floor staff can&apos;t finish a sale, so a limit does nothing for them.</span></div></li>
+            <li><i><Icon name="split" size={15} /></i><div><strong>Item or bill discount, not both</strong><span>A bill can have discounts on single items or one discount on the whole bill, never both.</span></div></li>
+            <li><i><Icon name="receipt" size={15} /></i><div><strong>The total can&apos;t go over the limit</strong><span>All the discounts on a bill together must stay within the cashier&apos;s %. If not, the sale is blocked.</span></div></li>
+            <li><i><Icon name="history" size={15} /></i><div><strong>Every change is recorded</strong><span>A reason is required. The old and new limit, who changed it and when are all saved.</span></div></li>
+          </ul>
         </div>
-      )}
+      </section>
 
-      {/* MODAL: EDIT USER DISCOUNT CEILING (Matching modal style of /admin/users & /admin/company) */}
-      {editingUser && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.55)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100,
-            padding: '20px',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEditingUser(null);
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              width: 'min(520px, 100%)',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
-              padding: '26px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-              <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
-                  Adjust Discount Ceiling
-                </h2>
-                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>
-                  {editingUser.name || editingUser.email} · {roleLabels[editingUser.role] || editingUser.role}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingUser(null)}
-                style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '14px', color: '#64748b' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveModal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Current vs New Cap Display */}
-              <div style={{ background: '#f8fafc', padding: '14px 16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>New Discount Ceiling (%):</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: '#ffffff', padding: '4px 10px', borderRadius: '8px', border: '1.5px solid #1a62ea' }}>
-                    <input
-                      type="number"
-                      min="0"
-                      max={maximumAuthority}
-                      step="0.5"
-                      value={modalCapPercent}
-                      onChange={(e) => setModalCapPercent(e.target.value)}
-                      style={{ width: '56px', border: 'none', outline: 'none', fontSize: '16px', fontWeight: 850, textAlign: 'right', color: '#0f172a' }}
-                      required
-                    />
-                    <span style={{ fontSize: '14px', fontWeight: 800, color: '#1a62ea' }}>%</span>
-                  </div>
-                </div>
-
-                {/* Preset Chips */}
-                <div style={{ display: 'flex', gap: '6px', marginTop: '12px' }}>
-                  {[
-                    { label: '0% Restricted', val: 0 },
-                    { label: '5% Standard', val: 5 },
-                    { label: '10% Senior', val: 10 },
-                    { label: '20% Manager', val: 20 },
-                  ].map((preset) => (
-                    <button
-                      key={preset.val}
-                      type="button"
-                      onClick={() => setModalCapPercent(String(preset.val))}
-                      style={{
-                        flex: 1,
-                        padding: '6px 8px',
-                        borderRadius: '6px',
-                        border: `1px solid ${Number(modalCapPercent) === preset.val ? '#1a62ea' : '#cbd5e1'}`,
-                        background: Number(modalCapPercent) === preset.val ? '#eff6ff' : '#ffffff',
-                        color: Number(modalCapPercent) === preset.val ? '#1a62ea' : '#475569',
-                        fontSize: '11.5px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Justification Reason Field */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 750, color: '#334155', marginBottom: '6px' }}>
-                  Audit Justification Reason (Required by Invariant OD-07)
-                </label>
-                <textarea
-                  rows={3}
-                  value={modalAuditReason}
-                  onChange={(e) => setModalAuditReason(e.target.value)}
-                  placeholder="Enter detailed reason for this discount limit change..."
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: `1.5px solid ${modalAuditReason.trim().length >= 3 ? '#cbd5e1' : '#fca5a5'}`,
-                    fontSize: '13px',
-                    fontFamily: 'inherit',
-                    color: '#0f172a',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                  required
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: modalAuditReason.trim().length >= 3 ? '#64748b' : '#dc2626', marginTop: '4px' }}>
-                  <span>{modalAuditReason.trim().length >= 3 ? '✓ Valid justification' : 'Minimum 3 characters required'}</span>
-                  <span>{modalAuditReason.length} characters</span>
-                </div>
-              </div>
-
-              {/* OD-07 Invariant Notice */}
-              <div style={{ fontSize: '11.5px', color: '#64748b', background: '#eff6ff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                🔒 <strong>OD-07 Rule:</strong> This percentage applies equally to line-item discounts and cart-level discounts. Anti-stacking is enforced.
-              </div>
-
-              {/* Form Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => setEditingUser(null)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', background: '#f1f5f9', border: 'none', color: '#475569', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={modalAuditReason.trim().length < 3 || savingUserId === editingUser.id}
-                  style={{
-                    padding: '9px 20px',
-                    borderRadius: '8px',
-                    background: modalAuditReason.trim().length >= 3 ? '#1a62ea' : '#94a3b8',
-                    border: 'none',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: 750,
-                    cursor: modalAuditReason.trim().length >= 3 ? 'pointer' : 'default',
-                    boxShadow: modalAuditReason.trim().length >= 3 ? '0 2px 6px rgba(26, 98, 234, 0.28)' : 'none',
-                  }}
-                >
-                  {savingUserId === editingUser.id ? 'Saving…' : 'Save & Log Audit'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: AUDIT TRAIL LOGS */}
-      {isAuditModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.55)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100,
-            padding: '20px',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsAuditModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              width: 'min(720px, 100%)',
-              maxHeight: '85vh',
-              overflowY: 'auto',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
-              padding: '26px',
-              position: 'relative',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '22px' }}>▤</span>
-                <div>
-                  <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
-                    Discount Limit Audit Trail (OD-07)
-                  </h2>
-                  <span style={{ fontSize: '12px', color: '#64748b' }}>
-                    Immutable historical ledger of discount ceiling adjustments
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAuditModalOpen(false)}
-                style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '15px', fontWeight: 800, color: '#64748b' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '12px 14px', border: '1px solid #e2e8f0', marginBottom: '16px', fontSize: '12.5px', color: '#334155', lineHeight: 1.5 }}>
-              Each time an administrator updates a discount limit, the backend records the <strong>previous value</strong>, <strong>new value</strong>, <strong>administrator account ID</strong>, <strong>timestamp</strong>, and <strong>mandatory justification reason</strong>.
-            </div>
-
-            {/* Audit Log Entries Table */}
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden', marginBottom: '18px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 150px 90px 1fr', padding: '9px 12px', background: '#f1f5f9', fontSize: '10.5px', fontWeight: 800, color: '#334155', textTransform: 'uppercase' }}>
-                <div>Timestamp</div>
-                <div>Target Account</div>
-                <div>Cap Delta</div>
-                <div>Justification Reason</div>
-              </div>
-
-              {[
-                { time: 'Today, 17:42', target: 'm.das@premiumretail.com', delta: '5% → 10%', reason: 'Promoted to senior cashier for West End outlet lane 1' },
-                { time: 'Yesterday, 11:15', target: 'manager@premiumretail.com', delta: '15% → 20%', reason: 'Downtown Store Manager authority adjustment' },
-                { time: '14-Nov-2026', target: 'cashier@premiumretail.com', delta: '0% → 5%', reason: 'Initial checkout terminal provision' },
-                { time: '10-Nov-2026', target: 'k.rao@premiumretail.com', delta: '0% → 5%', reason: 'North Mall retail store onboarding' },
-              ].map((entry, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '120px 150px 90px 1fr',
-                    padding: '11px 12px',
-                    borderTop: '1px solid #f1f5f9',
-                    fontSize: '12px',
-                    color: '#1e293b',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div style={{ color: '#64748b', fontSize: '11.5px' }}>{entry.time}</div>
-                  <div style={{ fontWeight: 700 }}>{entry.target.split('@')[0]}</div>
-                  <div>
-                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#eff6ff', color: '#1a62ea', fontWeight: 750, fontSize: '11px' }}>
-                      {entry.delta}
-                    </span>
-                  </div>
-                  <div style={{ color: '#475569', fontSize: '11.5px' }}>{entry.reason}</div>
+      <section className={styles.guide}>
+        <div className={styles.guideCard}>
+          <h2>Who can set limits</h2>
+          <p>Store managers and other roles can only view this page.</p>
+          <ul className={styles.rules}>
+            <li><i><Icon name="shield" size={15} /></i><div><strong>Super admin</strong><span>Can give a cashier any limit, up to 100%.</span></div></li>
+            <li><i><Icon name="user" size={15} /></i><div><strong>Admin</strong><span>Can set limits for cashiers in their own stores, but never higher than the admin&apos;s own limit.</span></div></li>
+          </ul>
+          {admins.length > 0 && (
+            <div className={styles.affected} style={{ marginTop: 14 }}>
+              {admins.map((a) => (
+                <div key={a.id}>
+                  <span>{displayName(a)} <small>· {roleLabels[a.role]}</small></span>
+                  <small>{a.role === 'SUPER_ADMIN' ? 'No cap' : `Can set up to ${pct(Number(a.discountLimitPercent))}`}</small>
                 </div>
               ))}
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => setIsAuditModalOpen(false)}
-                style={{
-                  padding: '8px 18px',
-                  borderRadius: '8px',
-                  background: '#1a62ea',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontSize: '12.5px',
-                  fontWeight: 750,
-                  cursor: 'pointer',
-                }}
-              >
-                Close Audit Log
-              </button>
-            </div>
-          </div>
+          )}
         </div>
-      )}
+        <div className={styles.guideCard}>
+          <button type="button" className={styles.othersToggle} onClick={() => setOthersOpen((o) => !o)} aria-expanded={othersOpen}>
+            <div>
+              <h2>Other staff ({others.length})</h2>
+              <p>They can&apos;t bill, so a discount limit doesn&apos;t apply to them.</p>
+            </div>
+            <span className={othersOpen ? styles.chevOpen : ''}><Icon name="chevron" size={16} /></span>
+          </button>
+          {othersOpen && (
+            <>
+              <div className={styles.affected}>
+                {others.map((o) => (
+                  <div key={o.id}>
+                    <span>{displayName(o)} <small>· {roleLabels[o.role] || o.role}</small></span>
+                    <small>{storesOf(o)[0] || '—'}</small>
+                  </div>
+                ))}
+              </div>
+              <p className={styles.sectionHint} style={{ marginTop: 10 }}>If someone moves to a cashier role, they appear in the list above. Check their limit then.</p>
+            </>
+          )}
+        </div>
+      </section>
 
-      {/* MODAL: BULK PRESET POLICY */}
-      {isBulkModalOpen && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.55)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100,
-            padding: '20px',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsBulkModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              width: 'min(480px, 100%)',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
-              padding: '26px',
-            }}
+      {/* Cashier panel */}
+      {viewing && (() => {
+        const current = Number(viewing.discountLimitPercent);
+        const tier = tierOf(current);
+        const next = Number(newLimit);
+        const changed = newLimit !== '' && Number.isFinite(next) && next !== current;
+        const personHistory = history.filter((h) => h.userId === viewing.id);
+        const stores = storesOf(viewing);
+        return (
+          <Drawer
+            label={`Discount limit for ${displayName(viewing)}`}
+            onClose={closePerson}
+            head={<>
+              <span className={`${styles.avatar} ${styles.avCashier}`}>{initials(displayName(viewing))}</span>
+              <div><h2>{displayName(viewing)}</h2><p>Cashier · {viewing.employeeCode || viewing.email}</p></div>
+            </>}
+            footer={canManage ? (
+              <>
+                <button type="button" className={styles.ghostButton} onClick={closePerson}>Cancel</button>
+                <button type="submit" form="limit-form" className={styles.primaryButton} disabled={saving || !changed || reason.trim().length < 3}>{saving ? 'Saving…' : 'Save change'}</button>
+              </>
+            ) : (
+              <><small><Icon name="lock" size={14} /> View only</small><button type="button" className={styles.primaryButton} onClick={closePerson}>Close</button></>
+            )}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
-                Bulk Preset Policy
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsBulkModalOpen(false)}
-                style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '28px', height: '28px', cursor: 'pointer', fontSize: '14px', color: '#64748b' }}
-              >
-                ✕
-              </button>
+            <div className={`${styles.hero} ${TIER_CLASS[tier]}`}>
+              <div className={styles.heroValue}>{Number.isInteger(current) ? current : current.toFixed(1)}<em>%</em></div>
+              <div className={styles.heroText}>
+                <span className={styles.tierPill}><i /> {TIER_LABEL[tier]}</span>
+                {tier === 'none' ? <span>Can bill at full price but can&apos;t give any discount.</span>
+                  : <span>On a <b>₹1,000</b> bill they can take off up to <b>{rupeesOff(current)}</b>, on single items or the whole bill.</span>}
+              </div>
             </div>
 
-            <form onSubmit={handleApplyBulk} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: '#334155', marginBottom: '5px' }}>
-                  Target Role
+            {canManage ? (
+              <form id="limit-form" className={styles.section} onSubmit={submitPerson} style={{ gap: 20 }}>
+                <LimitPicker value={newLimit} onChange={(v) => { setNewLimit(v); setFormError(''); }} max={maximumAuthority} />
+                {changed && (
+                  <div className={styles.change}>
+                    <b>{pct(current)}</b><span className={styles.arrow}>→</span><b className={next > current ? styles.up : styles.down}>{pct(next)}</b>
+                    <small>{next > 0 ? `Up to ${rupeesOff(next)} off a ₹1,000 bill` : 'No discounts at checkout'}</small>
+                  </div>
+                )}
+                <label className={styles.field}>
+                  <span>Reason for the change <em>required, saved in the history</em></span>
+                  <textarea value={reason} maxLength={500} placeholder="e.g. Promoted to senior cashier" onChange={(e) => { setReason(e.target.value); setFormError(''); }} />
                 </label>
-                <select
-                  value={bulkRole}
-                  onChange={(e) => setBulkRole(e.target.value as any)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', fontWeight: 600, color: '#0f172a' }}
-                >
-                  <option value="CASHIER">All Cashier Stations</option>
-                  <option value="STORE_MANAGER">All Store Managers</option>
-                  <option value="STAFF">All Floor Staff</option>
-                </select>
-              </div>
+                <div className={styles.reasonChips}>
+                  {REASON_CHIPS.map((r) => <button key={r} type="button" onClick={() => setReason(r)}>{r}</button>)}
+                </div>
+                {!authority.unlimited && <div className={styles.infoBox}><Icon name="info" size={16} /><span>You can&apos;t set a limit higher than your own ({pct(maximumAuthority)}).</span></div>}
+                {formError && <p className={styles.error}><Icon name="alert" size={15} /> {formError}</p>}
+              </form>
+            ) : (
+              <div className={styles.infoBox}><Icon name="lock" size={16} /><span>Only an Admin or Super Admin can change discount limits.</span></div>
+            )}
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: '#334155', marginBottom: '5px' }}>
-                  Standard Cap Percentage (%)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max={maximumAuthority}
-                  step="0.5"
-                  value={bulkPercent}
-                  onChange={(e) => setBulkPercent(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', fontWeight: 600, color: '#0f172a' }}
-                  required
-                />
+            <div className={styles.section}>
+              <p className={styles.sectionLabel}>Details</p>
+              <div className={styles.details}>
+                <div><small>Email</small><b title={viewing.email}>{viewing.email}</b></div>
+                <div><small>Status</small><b>{viewing.isActive ? 'Active' : 'Inactive'}</b></div>
+                <div><small>Store</small><b title={stores.join(', ')}>{stores.join(', ') || 'No store'}</b></div>
+                <div><small>Last changed</small><b>{viewing.lastUpdated || '—'}</b></div>
               </div>
+            </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: '#334155', marginBottom: '5px' }}>
-                  Audit Justification Reason
-                </label>
-                <input
-                  type="text"
-                  value={bulkReason}
-                  onChange={(e) => setBulkReason(e.target.value)}
-                  placeholder="Reason for role-wide update (min 3 chars)..."
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', fontWeight: 550, color: '#0f172a' }}
-                  required
-                />
-              </div>
+            <div className={styles.section}>
+              <p className={styles.sectionLabel}>History</p>
+              {personHistory.length ? (
+                <ul className={styles.history}>
+                  {personHistory.map((h) => (
+                    <li key={h.id}>
+                      <span className={styles.historyIcon}><Icon name="history" size={15} /></span>
+                      <div style={{ minWidth: 0 }}><strong>{h.reason}</strong><span>{h.when}{h.by ? ` · by ${h.by}` : ''}</span></div>
+                      <div className={styles.delta}><b>{pct(h.from)} → {pct(h.to)}</b></div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={styles.noHistory}>{viewing.lastReason ? `Last note: “${viewing.lastReason}”` : 'No changes recorded yet.'}</p>
+              )}
+            </div>
+          </Drawer>
+        );
+      })()}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsBulkModalOpen(false)}
-                  style={{ padding: '8px 14px', borderRadius: '8px', background: '#f1f5f9', border: 'none', color: '#475569', fontSize: '12.5px', fontWeight: 650, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={{ padding: '8px 18px', borderRadius: '8px', background: '#1a62ea', border: 'none', color: '#ffffff', fontSize: '12.5px', fontWeight: 750, cursor: 'pointer', boxShadow: '0 2px 6px rgba(26, 98, 234, 0.28)' }}
-                >
-                  Apply to All {roleLabels[bulkRole]}s
-                </button>
+      {/* Set for all cashiers panel */}
+      {bulkOpen && (
+        <Drawer
+          label="Set a limit for all cashiers"
+          onClose={closeBulk}
+          head={<><span className={styles.headIcon}><Icon name="layers" /></span><div><h2>Set for all cashiers</h2><p>Give every cashier, or every cashier in one store, the same limit.</p></div></>}
+          footer={<>
+            <button type="button" className={styles.ghostButton} onClick={closeBulk}>Cancel</button>
+            <button type="submit" form="bulk-form" className={styles.primaryButton} disabled={saving || bulkTargets.length === 0}>{saving ? 'Saving…' : `Apply to ${bulkTargets.length} ${bulkTargets.length === 1 ? 'cashier' : 'cashiers'}`}</button>
+          </>}
+        >
+          <form id="bulk-form" className={styles.section} onSubmit={submitBulk} style={{ gap: 20 }}>
+            <div className={styles.section}>
+              <p className={styles.sectionLabel}>Which cashiers</p>
+              <div className={styles.roleChoices}>
+                {[{ id: 'ALL', name: 'All stores' }, ...retailStores].map((s) => (
+                  <button key={s.id} type="button" className={`${styles.roleChoice} ${bulkStore === s.id ? styles.roleChoiceOn : ''}`} onClick={() => { setBulkStore(s.id); setFormError(''); }} aria-pressed={bulkStore === s.id}>
+                    <strong>{s.name}</strong>
+                    <small>{storeCashierCount(s.id)} {storeCashierCount(s.id) === 1 ? 'cashier' : 'cashiers'}</small>
+                  </button>
+                ))}
               </div>
-            </form>
-          </div>
-        </div>
+            </div>
+            <LimitPicker value={bulkPercent} onChange={(v) => { setBulkPercent(v); setFormError(''); }} max={maximumAuthority} />
+            <label className={styles.field}>
+              <span>Reason <em>required, saved for each cashier</em></span>
+              <textarea value={bulkReason} maxLength={500} onChange={(e) => { setBulkReason(e.target.value); setFormError(''); }} />
+            </label>
+            <div className={styles.section}>
+              <p className={styles.sectionLabel}>Who will change</p>
+              {bulkTargets.length ? (
+                <div className={styles.affected}>
+                  {bulkTargets.map((u) => {
+                    const from = Number(u.discountLimitPercent);
+                    const same = bulkPercent !== '' && from === bulkValue;
+                    return (
+                      <div key={u.id}>
+                        <span>{displayName(u)} <small>· {storesOf(u)[0] || 'No store'}</small></span>
+                        <small>{same ? `Already ${pct(from)}` : `${pct(from)} → ${bulkPercent === '' ? '…' : pct(bulkValue)}`}</small>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className={styles.noHistory}>There are no cashiers in this store.</p>
+              )}
+            </div>
+            {formError && <p className={styles.error}><Icon name="alert" size={15} /> {formError}</p>}
+          </form>
+        </Drawer>
       )}
+
+      {/* Change history panel */}
+      {historyOpen && (
+        <Drawer
+          label="Change history"
+          onClose={closeHistory}
+          head={<><span className={styles.headIcon}><Icon name="history" /></span><div><h2>Change history</h2><p>Every limit change, newest first. Changes can&apos;t be edited or deleted.</p></div></>}
+          footer={<button type="button" className={styles.primaryButton} onClick={closeHistory}>Close</button>}
+        >
+          <div className={styles.infoBox}><Icon name="info" size={16} /><span>For each change the system keeps the old limit, the new limit, who made it, when, and the reason.</span></div>
+          {history.length ? (
+            <ul className={styles.history}>
+              {history.map((h) => (
+                <li key={h.id}>
+                  <span className={`${styles.avatar} ${styles.avCashier}`}>{initials(h.name)}</span>
+                  <div style={{ minWidth: 0 }}><strong>{h.name}</strong><span title={h.reason}>{h.reason}</span></div>
+                  <div className={styles.delta}><b>{pct(h.from)} → {pct(h.to)}</b><em>{h.when}</em></div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={styles.noHistory}>No changes made in this session yet. Older changes are kept in the server&apos;s audit log.</p>
+          )}
+        </Drawer>
+      )}
+
+      {toast && <div className={styles.toast} role="status"><Icon name="check" size={15} /> {toast}</div>}
     </div>
   );
 }

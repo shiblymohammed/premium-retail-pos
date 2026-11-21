@@ -160,7 +160,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
         handleSignOut={handleSignOut}
         collapsed={collapsed}
         toggleSidebar={toggleSidebar}
-        showSearch={!['/dashboard', '/reports', '/products', '/operations', '/sales-controls', '/attendance/manage'].includes(pathname)}
+        showSearch={!['/dashboard', '/reports', '/products', '/operations', '/sales-controls', '/attendance/manage', '/admin/discount-limits'].includes(pathname)}
       />
 
         {/* Content Canvas */}
