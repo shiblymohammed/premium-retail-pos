@@ -586,25 +586,49 @@ export default function SalesControlsPage() {
 
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Returns and cancellations summary">
-        <article className={styles.summaryCard}>
-          <div className={styles.summaryTop}><span>Returns recorded</span><i className={styles.toneBlue}><Icon name="return" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{summary.returns}</strong>
-          <span className={styles.summaryFoot}><b className={`${styles.chip} ${styles.chipBlue}`}>{currency(summary.returnedValue)}</b> refunded</span>
+        <article className={`${styles.summaryCard} ${styles.summaryBlue}`}>
+          <i className={styles.summaryIcon}><Icon name="return" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>Returns recorded</span>
+            <strong className={styles.summaryValue}>{summary.returns}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Refunded</span>
+            <b className={`${styles.chip} ${styles.chipBlue}`}>{currency(summary.returnedValue)}</b>
+          </div>
         </article>
-        <article className={styles.summaryCard}>
-          <div className={styles.summaryTop}><span>Bills cancelled</span><i className={styles.toneRed}><Icon name="ban" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{summary.cancelled}</strong>
-          <span className={styles.summaryFoot}><b className={`${styles.chip} ${styles.chipRed}`}>{currency(summary.cancelledValue)}</b> voided</span>
+        <article className={`${styles.summaryCard} ${styles.summaryRed}`}>
+          <i className={styles.summaryIcon}><Icon name="ban" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>Bills cancelled</span>
+            <strong className={styles.summaryValue}>{summary.cancelled}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Voided</span>
+            <b className={`${styles.chip} ${styles.chipRed}`}>{currency(summary.cancelledValue)}</b>
+          </div>
         </article>
         <article className={`${styles.summaryCard} ${styles.summaryHighlight}`}>
-          <div className={styles.summaryTop}><span>Total paid back</span><i><Icon name="rupee" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{currency(summary.total)}</strong>
-          <span className={styles.summaryFoot}>returns + cancellations</span>
+          <i className={styles.summaryIcon}><Icon name="rupee" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>Total paid back</span>
+            <strong className={styles.summaryValue}>{currency(summary.total)}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Combined</span>
+            <b className={`${styles.chip} ${styles.chipPurple}`}>{summary.returns + summary.cancelled}</b>
+          </div>
         </article>
-        <article className={styles.summaryCard}>
-          <div className={styles.summaryTop}><span>Bills on this screen</span><i><Icon name="receipt" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{summary.bills}</strong>
-          <span className={styles.summaryFoot}><b className={styles.chip}>{knownInvoices.filter((i) => i.status === 'FINALIZED').length} open</b> can still be changed</span>
+        <article className={`${styles.summaryCard} ${styles.summaryGray}`}>
+          <i className={styles.summaryIcon}><Icon name="receipt" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>Bills on screen</span>
+            <strong className={styles.summaryValue}>{summary.bills}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Status</span>
+            <b className={styles.chip}>{knownInvoices.filter((i) => i.status === 'FINALIZED').length} open</b>
+          </div>
         </article>
       </section>
 

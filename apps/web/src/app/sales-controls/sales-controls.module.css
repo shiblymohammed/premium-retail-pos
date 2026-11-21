@@ -54,24 +54,90 @@
 /* ---------- Tones ---------- */
 .toneBlue { background: #e9eff8 !important; color: var(--accent-deep) !important; border-color: transparent !important; }
 .toneRed { background: #fdecec !important; color: var(--danger) !important; border-color: transparent !important; }
-.chip { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 650; white-space: nowrap; background: rgba(17, 24, 39, 0.06); color: #374151; }
-.chipBlue { background: #e9eff8; color: var(--accent-deep); }
-.chipRed { background: #fdecec; color: var(--danger); }
+.chip { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 10.5px; font-weight: 700; white-space: nowrap; }
+.chip { background: rgba(17, 24, 39, 0.08); color: #374151; }
+.chipBlue { background: rgba(59, 130, 246, 0.15); color: #1e40af; }
+.chipRed { background: rgba(239, 68, 68, 0.15); color: #b91c1c; }
+.chipPurple { background: rgba(147, 51, 234, 0.15); color: #7e22ce; }
 .badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 650; white-space: nowrap; }
 .badgeGreen { background: #e7f5ec; color: #2f7a4b; }
 .badgeAmber { background: #fdf2e0; color: #a35b0b; }
 .badgeRed { background: #fdecec; color: var(--danger); }
 
-/* ---------- Summary cards ---------- */
-.summaryGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.summaryCard { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px 18px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); transition: transform 0.18s ease, box-shadow 0.18s ease; }
-.summaryCard:hover { transform: translateY(-2px); box-shadow: 0 10px 24px -16px rgba(30, 50, 90, 0.35); }
-.summaryHighlight { background: linear-gradient(135deg, #f4f7fc 0%, #e6edf8 100%); border-color: #d6e0ef; }
-.summaryTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; font-weight: 500; color: #374151; }
-.summaryTop i { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; font-style: normal; background: #f3f4f6; border: 1px solid var(--line); color: var(--ink); flex-shrink: 0; }
-.summaryHighlight .summaryTop i { background: rgba(255, 255, 255, 0.8); border-color: transparent; color: var(--accent-deep); }
-.summaryValue { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; white-space: nowrap; }
-.summaryFoot { display: flex; align-items: center; gap: 6px; margin-top: auto; font-size: 11.5px; color: #4b5563; white-space: nowrap; overflow: hidden; }
+/* ---------- Summary cards (compact stat design) ---------- */
+.summaryGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.summaryCard {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  height: 72px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 3px rgba(17, 24, 39, 0.06);
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+}
+.summaryCard:hover { transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgba(17, 24, 39, 0.15); }
+.summaryBlue { background: linear-gradient(135deg, #e8f1fc 0%, #d9e8f7 100%); border-color: rgba(59, 130, 246, 0.15); }
+.summaryRed { background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-color: rgba(239, 68, 68, 0.15); }
+.summaryHighlight { background: linear-gradient(135deg, #f3eeff 0%, #e9dcff 100%); border-color: rgba(147, 51, 234, 0.15); }
+.summaryGray { background: linear-gradient(135deg, #f9fafb 0%, #eef1f4 100%); border-color: rgba(209, 213, 219, 0.4); }
+
+/* Icon badge */
+.summaryIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+  background: rgba(17, 24, 39, 0.95);
+  color: #ffffff;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.2);
+}
+
+/* Main content area */
+.summaryMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.summaryLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.summaryValue {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: #111827;
+}
+
+/* Right side info */
+.summaryDetail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.summaryDetailLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
 /* ---------- Cards ---------- */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; min-width: 0; }

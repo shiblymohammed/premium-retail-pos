@@ -668,86 +668,57 @@ export default function ProductsPage() {
           </div>
         </header>
 
-        {/* ---------- Summary cards (same style as dashboard / reports) ---------- */}
+        {/* ---------- Summary cards (compact stat design) ---------- */}
         <section className={styles.summaryGrid} aria-label="Product summary">
-          <article className={styles.summaryCard}>
-            <div className={styles.summaryTop}>
-              <span>Products tracked</span>
-              <i><Icon name="package" size={16} /></i>
+          <article className={`${styles.summaryCard} ${styles.summaryGray}`}>
+            <i className={styles.summaryIcon}><Icon name="package" size={18} /></i>
+            <div className={styles.summaryMain}>
+              <span className={styles.summaryLabel}>Products tracked</span>
+              <strong className={styles.summaryValue}>{kpiStats.totalCount}<em>variants</em></strong>
             </div>
-            <strong className={styles.summaryValue}>{kpiStats.totalCount} <em>variants</em></strong>
-            <div className={styles.summaryFoot}>
-              <span className={`${styles.chip} ${styles.chipNeutral}`}>{new Set(filteredProducts.map((p) => p.category)).size} categories</span>
-              <span>{new Set(filteredProducts.map((p) => p.location)).size} locations</span>
+            <div className={styles.summaryDetail}>
+              <span className={styles.summaryDetailLabel}>Categories</span>
+              <b className={`${styles.chip} ${styles.chipGray}`}>{new Set(filteredProducts.map((p) => p.category)).size}</b>
             </div>
           </article>
 
           <article className={`${styles.summaryCard} ${styles.summaryTeal}`}>
-            <div className={styles.summaryTop}>
-              <span>Stock valuation</span>
-              <i><Icon name="dollarSign" size={16} /></i>
+            <i className={styles.summaryIcon}><Icon name="dollarSign" size={18} /></i>
+            <div className={styles.summaryMain}>
+              <span className={styles.summaryLabel}>Stock valuation</span>
+              <strong className={styles.summaryValue}>{formatPrice(kpiStats.totalValuation)}</strong>
             </div>
-            <strong className={styles.summaryValue}>{formatPrice(kpiStats.totalValuation)}</strong>
-            <div className={styles.summaryFoot}>
-              {topValueProduct ? (
-                <>
-                  <span className={`${styles.thumb} ${styles.thumbXs} ${styles[CATEGORY_TONE[topValueProduct.category] ?? 'toneTeal']}`}>{topValueProduct.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>
-                  <span className={styles.ellipsis} title={topValueProduct.name}>Top: <b>{topValueProduct.name}</b> · {formatPrice(Math.max(0, topValueProduct.totalUnits) * topValueProduct.price).replace(/\.00$/, '')}</span>
-                </>
-              ) : <span>On-hand units × selling price</span>}
+            <div className={styles.summaryDetail}>
+              <span className={styles.summaryDetailLabel}>Units</span>
+              <b className={`${styles.chip} ${styles.chipTeal}`}>{kpiStats.availableTotal}</b>
             </div>
           </article>
 
-          <article className={styles.summaryCard}>
-            <div className={styles.summaryTop}>
-              <span>Stock health</span>
-              <i><Icon name="check" size={16} /></i>
+          <article className={`${styles.summaryCard} ${styles.summaryAmber}`}>
+            <i className={styles.summaryIcon}><Icon name="alert" size={18} /></i>
+            <div className={styles.summaryMain}>
+              <span className={styles.summaryLabel}>Low stock</span>
+              <strong className={styles.summaryValue}>{kpiStats.lowStockCount}</strong>
             </div>
-            <div className={styles.healthSummary}>
-              <div>
-                <strong className={styles.summaryValue}>{healthPct}% <em>{healthLabel.toLowerCase()}</em></strong>
-                <small className={styles.summarySub}>{healthyCount} of {filteredProducts.length} variants healthy</small>
-              </div>
-              <svg viewBox="0 0 80 46" className={styles.healthGauge} role="img" aria-label={`${healthPct}% of variants healthy`}>
-                <path d="M8 40a32 32 0 0 1 64 0" className={styles.gaugeTrack} />
-                <path d="M8 40a32 32 0 0 1 64 0" className={styles.gaugeFill} style={{ strokeDasharray: `${(healthPct / 100) * 100.5} 100.5` }} />
-              </svg>
-            </div>
-            <div className={styles.summaryFoot}>
-              <button type="button" className={`${styles.chip} ${styles.chipWarn}`} onClick={() => { setSelectedHealth('Low Stock'); setCurrentPage(1); }}>{kpiStats.lowStockCount} low stock</button>
-              <button type="button" className={`${styles.chip} ${styles.chipBad}`} onClick={() => { setSelectedHealth('Negative'); setCurrentPage(1); }}>{kpiStats.negativeStockCount} negative</button>
+            <div className={styles.summaryDetail}>
+              <span className={styles.summaryDetailLabel}>Status</span>
+              <button type="button" className={`${styles.chip} ${styles.chipAmber}`} onClick={() => { setSelectedHealth('Low Stock'); setCurrentPage(1); }}>View all</button>
             </div>
           </article>
 
-          <article className={`${styles.summaryCard} ${styles.summaryWide}`}>
-            {(() => {
-              const states = [
-                { label: 'Available', value: kpiStats.availableTotal, cls: styles.stAvailable },
-                { label: 'In transit', value: kpiStats.inTransitTotal, cls: styles.stTransit },
-                { label: 'Reserved', value: kpiStats.reservedTotal, cls: styles.stReserved },
-                { label: 'Quarantined', value: kpiStats.quarantinedTotal, cls: styles.stQuarantine },
-              ];
-              const total = states.reduce((s, x) => s + x.value, 0);
-              return (
-                <>
-                  <div className={styles.summaryTop}>
-                    <span>Units by state</span>
-                    <i><Icon name="truck" size={16} /></i>
-                  </div>
-                  <strong className={styles.summaryValue}>{total.toLocaleString('en-IN')} <em>packs in the pipeline</em></strong>
-                  <div className={styles.stateBar} role="img" aria-label={states.map((s) => `${s.label} ${s.value}`).join(', ')}>
-                    {states.map((s) => <i key={s.label} className={s.cls} style={{ width: `${total ? (s.value / total) * 100 : 0}%` }} title={`${s.label}: ${s.value} packs`} />)}
-                  </div>
-                  <div className={styles.stateLegend}>
-                    {states.map((s) => (
-                      <span key={s.label}><i className={s.cls} />{s.label}<b>{s.value.toLocaleString('en-IN')}</b></span>
-                    ))}
-                  </div>
-                </>
-              );
-            })()}
+          <article className={`${styles.summaryCard} ${styles.summaryGreen}`}>
+            <i className={styles.summaryIcon}><Icon name="check" size={18} /></i>
+            <div className={styles.summaryMain}>
+              <span className={styles.summaryLabel}>Healthy stock</span>
+              <strong className={styles.summaryValue}>{healthPct}%</strong>
+            </div>
+            <div className={styles.summaryDetail}>
+              <span className={styles.summaryDetailLabel}>Variants</span>
+              <b className={`${styles.chip} ${styles.chipGreen}`}>{healthyCount}</b>
+            </div>
           </article>
         </section>
+
         {/* ---------- Toolbar: categories, page size, view ---------- */}
         <div className={styles.toolbar}>
           <div className={styles.categoryTabs} role="tablist" aria-label="Category">

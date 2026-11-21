@@ -45,7 +45,6 @@ interface HistoryEntry {
 
 /** Only cashiers can finish a sale (POST /sales is cashier-only), so only their limit is used at checkout. */
 type Tier = 'none' | 'standard' | 'senior' | 'above';
-type TierFilter = 'ALL' | 'NONE' | 'UPTO5' | 'OVER5';
 
 const roleLabels: Record<string, string> = {
   STORE_MANAGER: 'Store manager',
@@ -110,13 +109,13 @@ const TIER_CLASS: Record<Tier, string> = { none: styles.tierNone, standard: styl
 const STATUS_CLASS: Record<Tier, string> = { none: styles.statusNone, standard: styles.statusStandard, senior: styles.statusSenior, above: styles.statusAbove };
 const rupeesOff = (limit: number) => `₹${Math.round(limit * 10).toLocaleString('en-IN')}`;
 const todayLabel = () => new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
-const tierMatch = (v: number, f: TierFilter) => (f === 'NONE' ? v === 0 : f === 'UPTO5' ? v > 0 && v <= 5 : f === 'OVER5' ? v > 5 : true);
 
 // ---------- icons ----------
 const PATHS: Record<string, React.ReactNode> = {
   cashier: <><rect x="3" y="10" width="18" height="10" rx="2" /><path d="M7 10V6h10v4M7 15h2M11 15h2M15 15h2" /></>,
   target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></>,
   up: <><path d="m6 15 6-6 6 6" /><path d="M12 9v11" /></>,
+  down: <><path d="m6 9 6 6 6-6" /><path d="M12 15V4" /></>,
   shield: <><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z" /><path d="m9 12 2 2 4-4" /></>,
   history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
   layers: <><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /></>,
@@ -134,6 +133,8 @@ const PATHS: Record<string, React.ReactNode> = {
   receipt: <><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2V3Z" /><path d="M9 8h6M9 12h6" /></>,
   edit: <><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></>,
   chevron: <path d="m6 9 6 6 6-6" />,
+  grid: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
+  list: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
 };
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   return (
@@ -207,9 +208,7 @@ export default function DiscountLimitsAdmin() {
   // Filters
   const [search, setSearch] = useState('');
   const [locationFilter, setLocationFilter] = useState('ALL');
-  const [tierFilter, setTierFilter] = useState<TierFilter>('ALL');
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [othersOpen, setOthersOpen] = useState(false);
 
   // Feedback
   const [toast, setToast] = useState('');
@@ -282,11 +281,9 @@ export default function DiscountLimitsAdmin() {
 
   // Cashiers are the only people who bill; everyone else's limit isn't used at checkout
   const cashiers = useMemo(() => users.filter((u) => u.role === 'CASHIER'), [users]);
-  const admins = useMemo(() => users.filter((u) => u.role === 'ADMIN' || u.role === 'SUPER_ADMIN'), [users]);
-  const others = useMemo(() => users.filter((u) => u.role !== 'CASHIER' && u.role !== 'ADMIN' && u.role !== 'SUPER_ADMIN'), [users]);
   const retailStores = locations.filter((l) => l.type === 'RETAIL_STORE');
 
-  const baseCashiers = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return cashiers.filter((u) => {
       const searchOk = !q || displayName(u).toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.employeeCode || '').toLowerCase().includes(q);
@@ -294,15 +291,8 @@ export default function DiscountLimitsAdmin() {
       return searchOk && locOk;
     });
   }, [cashiers, search, locationFilter]);
-  const filtered = baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), tierFilter));
-  const tierCounts: Record<TierFilter, number> = {
-    ALL: baseCashiers.length,
-    NONE: baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), 'NONE')).length,
-    UPTO5: baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), 'UPTO5')).length,
-    OVER5: baseCashiers.filter((u) => tierMatch(Number(u.discountLimitPercent), 'OVER5')).length,
-  };
-  const filtersActive = search.trim() !== '' || locationFilter !== 'ALL' || tierFilter !== 'ALL';
-  const resetFilters = () => { setSearch(''); setLocationFilter('ALL'); setTierFilter('ALL'); };
+  const filtersActive = search.trim() !== '' || locationFilter !== 'ALL';
+  const resetFilters = () => { setSearch(''); setLocationFilter('ALL'); };
 
   const kpis = useMemo(() => {
     const limits = cashiers.map((u) => Number(u.discountLimitPercent));
@@ -412,230 +402,247 @@ export default function DiscountLimitsAdmin() {
   const closeHistory = useCallback(() => setHistoryOpen(false), []);
   const storeCashierCount = (id: string) => cashiers.filter((u) => id === 'ALL' || (u.locationScopes || []).some((s) => s.locationId === id)).length;
 
-  const scaleMax = Math.max(20, ...cashiers.map((u) => Number(u.discountLimitPercent)));
+  const rowMenu = (u: UserRecord, v: number) => (
+    <>
+      <button type="button" className={styles.iconButton} aria-label={`More options for ${displayName(u)}`} aria-expanded={menuFor === u.id} onClick={() => setMenuFor(menuFor === u.id ? null : u.id)}>
+        <Icon name="more" size={16} />
+      </button>
+      {menuFor === u.id && (
+        <div className={styles.menu} role="menu">
+          {canManage && (
+            <>
+              <p>Quick set</p>
+              {[{ v: 5, l: 'Standard POS' }, { v: 10, l: 'Senior POS' }, { v: 0, l: 'Restricted' }].map((p) => (
+                <button key={p.v} type="button" role="menuitem" disabled={p.v > maximumAuthority || p.v === v} onClick={() => void applyQuickPreset(u, p.v, p.l)}>
+                  <span>{p.v === 0 ? 'No discount' : `${p.v}%`}</span><small>{p.v === 0 ? '0%' : p.l.replace(' POS', '')}</small>
+                </button>
+              ))}
+              <hr />
+            </>
+          )}
+          <button type="button" role="menuitem" onClick={() => copySummary(u)}><span>Copy summary</span><Icon name="copy" size={14} /></button>
+        </div>
+      )}
+    </>
+  );
+
+  // ---------- numbers for the three stat cards ----------
+  const STORE_COLORS = ['#3e64a0', '#6f8fc4', '#a9bee0', '#cfdcef'];
+  const storeBreak = retailStores
+    .map((s) => ({ id: s.id, name: s.name, count: cashiers.filter((u) => (u.locationScopes || []).some((x) => x.locationId === s.id)).length }))
+    .filter((s) => s.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const TIER_COLOR: Record<Tier, string> = { none: '#c4c9d2', standard: '#5a7fb8', senior: '#3fa96b', above: '#e5a53a' };
+  const mix = (() => {
+    const map = new Map<number, number>();
+    cashiers.forEach((u) => { const v = Number(u.discountLimitPercent); map.set(v, (map.get(v) || 0) + 1); });
+    return [...map.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([v, n]) => ({ v, n, color: TIER_COLOR[tierOf(v)] }));
+  })();
+  const CIRC = 2 * Math.PI * 28;
+  let donutOffset = 0;
+  const highest = Math.max(0, ...cashiers.map((u) => Number(u.discountLimitPercent)));
+  const average = cashiers.length ? cashiers.reduce((s, u) => s + Number(u.discountLimitPercent), 0) / cashiers.length : 0;
+  const meterScale = Math.max(20, highest);
+  const recent = history.slice(0, 5);
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
           <h1>Discount Limits</h1>
-          <p>How much each cashier can take off a bill. Only cashiers bill customers, so this limit only applies to them.</p>
+          <p>The most each cashier can take off a bill. Click a cashier to change their limit.</p>
         </div>
         <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={() => setHistoryOpen(true)}><Icon name="history" size={16} /> Change history</button>
+          <button type="button" className={styles.ghostButton} onClick={() => setHistoryOpen(true)}><Icon name="history" size={16} /> History</button>
           {canManage && <button type="button" className={styles.primaryButton} onClick={openBulk}><Icon name="layers" size={16} /> Set for all cashiers</button>}
         </div>
       </header>
 
       {!canManage && (
-        <div className={styles.readOnly}><Icon name="lock" size={16} /><span>You can see every cashier&apos;s limit here. Only an Admin or Super Admin can change them.</span></div>
+        <div className={styles.readOnly}><Icon name="lock" size={16} /><span>You can view limits here. Only an Admin or Super Admin can change them.</span></div>
       )}
       {error && (
         <div className={styles.errorNotice}><Icon name="alert" size={16} /><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="Dismiss"><Icon name="close" size={14} /></button></div>
       )}
 
-      {/* Summary cards */}
-      <section className={styles.summaryGrid}>
-        <div className={styles.summaryCard}>
-          <div className={styles.summaryTop}><span>Cashiers</span><i><Icon name="cashier" size={16} /></i></div>
-          <div className={styles.summaryValue}>{kpis.count}</div>
-          <div className={styles.summaryFoot}><span className={styles.chip}>{kpis.storeCount} {kpis.storeCount === 1 ? 'store' : 'stores'}</span> can bill customers</div>
-        </div>
-        <button type="button" className={`${styles.summaryCard} ${styles.summaryBlue} ${kpis.common && tierFilter !== 'ALL' ? styles.summaryOn : ''}`} onClick={() => kpis.common && setTierFilter(tierFilter !== 'ALL' ? 'ALL' : kpis.common[0] === 0 ? 'NONE' : kpis.common[0] <= 5 ? 'UPTO5' : 'OVER5')}>
-          <div className={styles.summaryTop}><span>Most common limit</span><i><Icon name="target" size={16} /></i></div>
-          <div className={styles.summaryValue}>{kpis.common ? pct(kpis.common[0]) : '—'}</div>
-          <div className={styles.summaryFoot}>{kpis.common ? <><span className={`${styles.chip} ${styles.chipBlue}`}>{kpis.common[1]} of {kpis.count}</span> cashiers · click to filter</> : 'No cashiers yet'}</div>
-        </button>
-        <button type="button" className={styles.summaryCard} onClick={() => kpis.top && openPerson(kpis.top)} disabled={!kpis.top}>
-          <div className={styles.summaryTop}><span>Highest limit</span><i className={styles.toneAmber}><Icon name="up" size={16} /></i></div>
-          <div className={styles.summaryValue}>{kpis.top ? pct(Number(kpis.top.discountLimitPercent)) : '—'}</div>
-          <div className={styles.summaryFoot}>{kpis.top ? <><span className={`${styles.chip} ${styles.chipAmber}`}>{displayName(kpis.top)}</span> {storesOf(kpis.top)[0] || 'No store'}</> : '—'}</div>
-        </button>
-        <div className={styles.summaryCard}>
-          <div className={styles.summaryTop}><span>Your authority</span><i className={styles.toneGreen}><Icon name="shield" size={16} /></i></div>
-          <div className={styles.summaryValue}>{canManage ? (authority.unlimited ? 'No cap' : pct(maximumAuthority)) : 'View only'}</div>
-          <div className={styles.summaryFoot}>{canManage ? <><span className={`${styles.chip} ${styles.chipGreen}`}>up to {pct(maximumAuthority)}</span> for any cashier</> : 'Ask an admin to change a limit'}</div>
-        </div>
-      </section>
-
-      {/* Cashiers and their limits */}
-      <section className={styles.card}>
-        <div className={styles.toolbar}>
-          <div className={styles.tabs} role="tablist" aria-label="Filter by limit">
-            {([['ALL', 'All cashiers'], ['NONE', 'No discount'], ['UPTO5', 'Up to 5%'], ['OVER5', 'Over 5%']] as [TierFilter, string][]).map(([key, label]) => (
-              <button key={key} type="button" role="tab" aria-selected={tierFilter === key} className={tierFilter === key ? styles.tabOn : ''} onClick={() => setTierFilter(key)}>
-                {label} <em>{tierCounts[key]}</em>
-              </button>
-            ))}
-          </div>
-          <div className={styles.toolbarRight}>
-            <PillDropdown heading="Store" ariaLabel="Filter by store" icon={<Icon name="store" size={14} />} value={locationFilter} options={[{ value: 'ALL', label: 'All stores' }, ...retailStores.map((l) => ({ value: l.id, label: l.name }))]} onChange={setLocationFilter} />
-            <label className={styles.search}>
-              <Icon name="search" size={15} />
-              <input type="search" placeholder="Search name, email or ID…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search cashiers" />
-            </label>
-          </div>
-        </div>
-
-        <div className={`${styles.listHead} ${styles.cashierGrid}`} role="row">
-          <span>Cashier</span>
-          <span>Store</span>
-          <span>Discount limit</span>
-          <span className={styles.colExample}>Level</span>
-          <span className={styles.colChange}>Last change</span>
-          <span />
-        </div>
-
-        {filtered.length === 0 ? (
-          <div className={styles.empty}>
-            <strong>{cashiers.length ? 'No cashier matches these filters' : 'No cashiers yet'}</strong>
-            <span>{cashiers.length ? 'Try a different search, or clear the filters.' : 'Add a cashier in the User Directory, then set their limit here.'}</span>
-            {filtersActive && <button type="button" className={styles.linkButton} onClick={resetFilters}>Clear filters</button>}
-          </div>
-        ) : (
-          filtered.map((u) => {
-            const v = Number(u.discountLimitPercent);
-            const tier = tierOf(v);
-            const stores = storesOf(u);
-            return (
-              <div key={u.id} className={`${styles.row} ${styles.cashierGrid}`} role="button" tabIndex={0} onClick={() => openPerson(u)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPerson(u); } }}>
-                <div className={styles.person}>
-                  <span className={`${styles.avatar} ${styles.avCashier}`}>{initials(displayName(u))}</span>
-                  <div style={{ minWidth: 0 }}>
-                    <strong>{displayName(u)}</strong>
-                    <small>{u.employeeCode || u.id.slice(0, 8)} · {u.email}</small>
-                  </div>
-                </div>
-                <div className={styles.store} title={stores.join(', ')}>
-                  <span>{stores[0] || 'No store'}</span>
-                  {stores.length > 1 && <em>+{stores.length - 1}</em>}
-                </div>
-                <div className={`${styles.limit} ${TIER_CLASS[tier]}`}>
-                  <div className={styles.limitTop}>
-                    <b>{pct(v)}</b>
-                    <small>{v > 0 ? `up to ${rupeesOff(v)} off ₹1,000` : 'full price only'}</small>
-                  </div>
-                  <div className={styles.bar}><i style={{ width: `${Math.min(100, (v / scaleMax) * 100)}%` }} /></div>
-                </div>
-                <div className={styles.colExample}>
-                  <span className={`${styles.status} ${STATUS_CLASS[tier]}`}><i />{TIER_LABEL[tier]}</span>
-                </div>
-                <div className={`${styles.lastChange} ${styles.colChange}`} title={u.lastReason}>
-                  <b>{u.lastUpdated || '—'}</b>
-                  <span>{u.lastReason || 'No changes recorded yet'}</span>
-                </div>
-                <div className={styles.actions} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} data-row-menu>
-                  <button type="button" className={`${styles.ghostButton} ${styles.smallButton}`} onClick={() => openPerson(u)}>
-                    {canManage ? <><Icon name="edit" size={13} /> Change</> : 'View'}
-                  </button>
-                  <button type="button" className={styles.iconButton} aria-label={`More options for ${displayName(u)}`} aria-expanded={menuFor === u.id} onClick={() => setMenuFor(menuFor === u.id ? null : u.id)}>
-                    <Icon name="more" size={16} />
-                  </button>
-                  {menuFor === u.id && (
-                    <div className={styles.menu} role="menu">
-                      {canManage && (
-                        <>
-                          <p>Quick set</p>
-                          {[{ v: 5, l: 'Standard POS' }, { v: 10, l: 'Senior POS' }, { v: 0, l: 'Restricted' }].map((p) => (
-                            <button key={p.v} type="button" role="menuitem" disabled={p.v > maximumAuthority || p.v === v} onClick={() => void applyQuickPreset(u, p.v, p.l)}>
-                              <span>{p.v === 0 ? 'No discount' : `${p.v}%`}</span><small>{p.v === 0 ? '0%' : p.l.replace(' POS', '')}</small>
-                            </button>
-                          ))}
-                          <hr />
-                        </>
-                      )}
-                      <button type="button" role="menuitem" onClick={() => copySummary(u)}><span>Copy summary</span><Icon name="copy" size={14} /></button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-
-        <div className={styles.listFoot}>
-          <span>Showing <b>{filtered.length}</b> of <b>{cashiers.length}</b> cashiers{filtersActive && <> · <button type="button" className={styles.linkButton} onClick={resetFilters}>Clear filters</button></>}</span>
-          <span>One limit covers item and bill discounts</span>
-        </div>
-      </section>
-
-      {/* Guide: suggestions, the real checkout rules, and who can set limits */}
-      <section className={styles.guide}>
-        <div className={styles.guideCard}>
-          <h2>Suggested cashier limits</h2>
-          <p>A starting point. You can give any cashier more or less.</p>
-          <div className={styles.roleGuide}>
-            <div className={styles.roleTile}>
-              <b style={{ color: '#3e64a0' }}>5%</b>
-              <strong>Standard cashier</strong>
-              <span>For everyday courtesy discounts, such as a regular customer or a small defect on an item.</span>
-            </div>
-            <div className={styles.roleTile}>
-              <b style={{ color: '#3e64a0' }}>10%</b>
-              <strong>Senior cashier</strong>
-              <span>For experienced cashiers, usually with the store manager&apos;s approval.</span>
-            </div>
-            <div className={styles.roleTile}>
-              <b style={{ color: '#6b7280' }}>0%</b>
-              <strong>No discounts</strong>
-              <span>The cashier can still bill at full price, but can&apos;t take anything off.</span>
-            </div>
-          </div>
-        </div>
-        <div className={styles.guideCard}>
-          <h2>How the checkout uses it</h2>
-          <p>These rules are checked by the server when a sale is finished.</p>
-          <ul className={styles.rules}>
-            <li><i><Icon name="cashier" size={15} /></i><div><strong>Only cashiers can bill</strong><span>Managers, warehouse and floor staff can&apos;t finish a sale, so a limit does nothing for them.</span></div></li>
-            <li><i><Icon name="split" size={15} /></i><div><strong>Item or bill discount, not both</strong><span>A bill can have discounts on single items or one discount on the whole bill, never both.</span></div></li>
-            <li><i><Icon name="receipt" size={15} /></i><div><strong>The total can&apos;t go over the limit</strong><span>All the discounts on a bill together must stay within the cashier&apos;s %. If not, the sale is blocked.</span></div></li>
-            <li><i><Icon name="history" size={15} /></i><div><strong>Every change is recorded</strong><span>A reason is required. The old and new limit, who changed it and when are all saved.</span></div></li>
-          </ul>
-        </div>
-      </section>
-
-      <section className={styles.guide}>
-        <div className={styles.guideCard}>
-          <h2>Who can set limits</h2>
-          <p>Store managers and other roles can only view this page.</p>
-          <ul className={styles.rules}>
-            <li><i><Icon name="shield" size={15} /></i><div><strong>Super admin</strong><span>Can give a cashier any limit, up to 100%.</span></div></li>
-            <li><i><Icon name="user" size={15} /></i><div><strong>Admin</strong><span>Can set limits for cashiers in their own stores, but never higher than the admin&apos;s own limit.</span></div></li>
-          </ul>
-          {admins.length > 0 && (
-            <div className={styles.affected} style={{ marginTop: 14 }}>
-              {admins.map((a) => (
-                <div key={a.id}>
-                  <span>{displayName(a)} <small>· {roleLabels[a.role]}</small></span>
-                  <small>{a.role === 'SUPER_ADMIN' ? 'No cap' : `Can set up to ${pct(Number(a.discountLimitPercent))}`}</small>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className={styles.guideCard}>
-          <button type="button" className={styles.othersToggle} onClick={() => setOthersOpen((o) => !o)} aria-expanded={othersOpen}>
+      {/* Stat cards, same pattern as the Dashboard */}
+      <section className={styles.statsGrid}>
+        <div className={`${styles.statCard} ${styles.statTeal}`}>
+          <div className={styles.statMain}>
+            <div className={styles.statHead}><span className={styles.statIcon}><Icon name="cashier" size={16} /></span><h3>Cashiers</h3></div>
             <div>
-              <h2>Other staff ({others.length})</h2>
-              <p>They can&apos;t bill, so a discount limit doesn&apos;t apply to them.</p>
+              <div className={styles.statValue}>{kpis.count}</div>
+              <div className={styles.statMeta}><span className={styles.deltaBlue}>{kpis.storeCount} {kpis.storeCount === 1 ? 'store' : 'stores'}</span></div>
             </div>
-            <span className={othersOpen ? styles.chevOpen : ''}><Icon name="chevron" size={16} /></span>
-          </button>
-          {othersOpen && (
-            <>
-              <div className={styles.affected}>
-                {others.map((o) => (
-                  <div key={o.id}>
-                    <span>{displayName(o)} <small>· {roleLabels[o.role] || o.role}</small></span>
-                    <small>{storesOf(o)[0] || '—'}</small>
-                  </div>
-                ))}
+          </div>
+          <div className={styles.miniChart}>
+            <span className={styles.miniCaption}>Cashiers by store</span>
+            <div className={styles.splitBar}>
+              {storeBreak.map((s, i) => <i key={s.id} style={{ flex: s.count, background: STORE_COLORS[i % STORE_COLORS.length] }} />)}
+            </div>
+            <ul className={styles.legend}>
+              {storeBreak.slice(0, 3).map((s, i) => (
+                <li key={s.id}><i style={{ background: STORE_COLORS[i % STORE_COLORS.length] }} /><span>{s.name.replace(' Retail Store', '').replace(' Store', '')}</span><b>{s.count}</b></li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className={`${styles.statCard} ${styles.statViolet}`}>
+          <div className={styles.statMain}>
+            <div className={styles.statHead}><span className={styles.statIcon}><Icon name="target" size={16} /></span><h3>Most common</h3></div>
+            <div>
+              <div className={styles.statValue}>{kpis.common ? pct(kpis.common[0]) : '—'}</div>
+              <div className={styles.statMeta}>{kpis.common ? <><span className={styles.deltaViolet}>{kpis.common[1]} of {kpis.count}</span> cashiers</> : 'No cashiers yet'}</div>
+            </div>
+          </div>
+          <div className={`${styles.miniChart} ${styles.donutWrap}`}>
+            <svg className={styles.donut} viewBox="0 0 72 72" aria-hidden="true">
+              <circle cx="36" cy="36" r="28" className={styles.donutTrack} />
+              {mix.map((m) => {
+                const len = (m.n / Math.max(1, cashiers.length)) * CIRC;
+                const seg = <circle key={m.v} cx="36" cy="36" r="28" className={styles.donutSeg} stroke={m.color} strokeDasharray={`${Math.max(0, len - 2)} ${CIRC}`} strokeDashoffset={-donutOffset} />;
+                donutOffset += len;
+                return seg;
+              })}
+              <text x="36" y="35" textAnchor="middle" className={styles.donutValue}>{pct(Math.round(average * 10) / 10)}</text>
+              <text x="36" y="44" textAnchor="middle" className={styles.donutLabel}>average</text>
+            </svg>
+            <ul className={styles.legend}>
+              {mix.slice(0, 3).map((m) => (
+                <li key={m.v}><i style={{ background: m.color }} /><span>{pct(m.v)}</span><b>{m.n}</b></li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className={`${styles.statCard} ${styles.statGreen}`}>
+          <div className={styles.statMain}>
+            <div className={styles.statHead}><span className={styles.statIcon}><Icon name="shield" size={16} /></span><h3>Your authority</h3></div>
+            <div>
+              <div className={styles.statValue}>{canManage ? (authority.unlimited ? 'No cap' : pct(maximumAuthority)) : 'View only'}</div>
+              <div className={styles.statMeta}>{canManage ? <><span className={styles.deltaGreen}>up to {pct(maximumAuthority)}</span></> : 'Ask an admin to change limits'}</div>
+            </div>
+          </div>
+          <div className={styles.miniChart}>
+            <span className={styles.miniCaption}>Limits given</span>
+            <div className={styles.meters}>
+              <div className={styles.meter}>
+                <div className={styles.meterTop}><span>Highest</span><b>{pct(highest)}</b></div>
+                <div className={styles.meterTrack}><i style={{ width: `${(highest / meterScale) * 100}%`, background: '#e5a53a' }} /></div>
               </div>
-              <p className={styles.sectionHint} style={{ marginTop: 10 }}>If someone moves to a cashier role, they appear in the list above. Check their limit then.</p>
+              <div className={styles.meter}>
+                <div className={styles.meterTop}><span>Average</span><b>{pct(Math.round(average * 10) / 10)}</b></div>
+                <div className={styles.meterTrack}><i style={{ width: `${(average / meterScale) * 100}%`, background: '#3fa96b' }} /></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className={styles.mainGrid}>
+        {/* Cashier list */}
+        <section className={styles.listCard}>
+          <div className={styles.listHeader}>
+            <div>
+              <h2>Cashiers <span className={styles.countChip}>{filtered.length}</span></h2>
+              <p>Only cashiers bill customers, so only they need a limit.</p>
+            </div>
+            <div className={styles.toolbarRight}>
+              <PillDropdown heading="Store" ariaLabel="Filter by store" icon={<Icon name="store" size={14} />} value={locationFilter} options={[{ value: 'ALL', label: 'All stores' }, ...retailStores.map((l) => ({ value: l.id, label: l.name }))]} onChange={setLocationFilter} />
+              <label className={styles.search}>
+                <Icon name="search" size={15} />
+                <input type="search" placeholder="Search cashier…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search cashiers" />
+              </label>
+            </div>
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className={styles.empty}>
+              <strong>{cashiers.length ? 'No cashier found' : 'No cashiers yet'}</strong>
+              <span>{cashiers.length ? 'Try another name or store.' : 'Add a cashier in the User Directory first.'}</span>
+              {filtersActive && <button type="button" className={styles.linkButton} onClick={resetFilters}>Clear search</button>}
+            </div>
+          ) : (
+            <>
+              <div className={styles.boxHead}><span>Cashier</span><span>Limit</span><span className={styles.hideNarrow}>Last change</span><span /></div>
+              <ul className={styles.boxRows}>
+                {filtered.map((u) => {
+                  const v = Number(u.discountLimitPercent);
+                  const tier = tierOf(v);
+                  const stores = storesOf(u);
+                  return (
+                    <li key={u.id} className={styles.boxRow} onClick={() => openPerson(u)} onKeyDown={(e) => { if (e.key === 'Enter') openPerson(u); }} tabIndex={0}>
+                      <div className={styles.person}>
+                        <span className={`${styles.avatar} ${styles.avCashier}`}>{initials(displayName(u))}</span>
+                        <div style={{ minWidth: 0 }}>
+                          <strong>{displayName(u)}</strong>
+                          <small>{stores[0] || 'No store'}{stores.length > 1 ? ` +${stores.length - 1}` : ''}</small>
+                        </div>
+                      </div>
+                      <div className={styles.limitCell}>
+                        <span className={`${styles.bigPct} ${STATUS_CLASS[tier]}`}>{pct(v)}</span>
+                        <div>
+                          <b>{v > 0 ? `Up to ${rupeesOff(v)} off` : 'No discount'}</b>
+                          <small>{v > 0 ? 'on a ₹1,000 bill' : 'full price only'}</small>
+                        </div>
+                      </div>
+                      <div className={`${styles.lastChange} ${styles.hideNarrow}`} title={u.lastReason}>
+                        <b>{u.lastUpdated || '—'}</b>
+                        <span>{u.lastReason || 'No changes yet'}</span>
+                      </div>
+                      <div className={styles.actions} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} data-row-menu>
+                        <button type="button" className={`${styles.ghostButton} ${styles.smallButton}`} onClick={() => openPerson(u)}>
+                          {canManage ? <><Icon name="edit" size={13} /> Change</> : 'View'}
+                        </button>
+                        {rowMenu(u, v)}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             </>
           )}
+        </section>
+
+        {/* Side column */}
+        <div className={styles.sideCol}>
+          <section className={styles.sideCard}>
+            <div className={styles.sideHead}>
+              <div><h2>Recent changes</h2><p>Every change is saved with a reason.</p></div>
+              <button type="button" className={`${styles.primaryButton} ${styles.smallButton}`} onClick={() => setHistoryOpen(true)}>View all</button>
+            </div>
+            {recent.length ? (
+              <ul className={styles.changeList}>
+                {recent.map((h) => {
+                  const up = h.to > h.from;
+                  return (
+                    <li key={h.id}>
+                      <span className={`${styles.changeIcon} ${up ? styles.changeUp : styles.changeDown}`}><Icon name={up ? 'up' : 'down'} size={15} /></span>
+                      <div style={{ minWidth: 0 }}>
+                        <div className={styles.changeTop}><strong>{h.name}</strong><b>{pct(h.from)} → {pct(h.to)}</b></div>
+                        <span title={h.reason}>{h.reason}</span>
+                        <small>{h.when}</small>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className={styles.noHistory}>No changes yet.</p>
+            )}
+          </section>
+
+          <section className={styles.sideCard}>
+            <div className={styles.sideHead}><div><h2>How it works</h2><p>Checked by the till when a sale is finished.</p></div></div>
+            <ul className={styles.rules}>
+              <li><i><Icon name="receipt" size={15} /></i><div><strong>One limit per bill</strong><span>All discounts on a bill together must stay within it.</span></div></li>
+              <li><i><Icon name="split" size={15} /></i><div><strong>Item or bill discount</strong><span>A bill can use one kind, not both.</span></div></li>
+              <li><i><Icon name="lock" size={15} /></i><div><strong>Over the limit is blocked</strong><span>The till stops the sale straight away.</span></div></li>
+            </ul>
+          </section>
         </div>
-      </section>
+      </div>
 
       {/* Cashier panel */}
       {viewing && (() => {

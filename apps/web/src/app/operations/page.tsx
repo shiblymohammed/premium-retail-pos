@@ -478,25 +478,49 @@ export default function OperationsPage() {
 
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Transfer summary">
-        <button type="button" className={`${styles.summaryCard} ${filterStatus === 'PENDING_DISPATCH' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'PENDING_DISPATCH' ? 'ALL' : 'PENDING_DISPATCH')}>
-          <div className={styles.summaryTop}><span>Awaiting dispatch</span><i className={styles.toneAmber}><Icon name="clock" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{kpis.pending}</strong>
-          <span className={styles.summaryFoot}><b className={`${styles.chip} ${styles.chipAmber}`}>{kpis.pendingUnits} units</b> ready to send</span>
+        <button type="button" className={`${styles.summaryCard} ${styles.summaryAmber} ${filterStatus === 'PENDING_DISPATCH' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'PENDING_DISPATCH' ? 'ALL' : 'PENDING_DISPATCH')}>
+          <i className={styles.summaryIcon}><Icon name="clock" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>Awaiting dispatch</span>
+            <strong className={styles.summaryValue}>{kpis.pending}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Units</span>
+            <b className={`${styles.chip} ${styles.chipAmber}`}>{kpis.pendingUnits}</b>
+          </div>
         </button>
         <button type="button" className={`${styles.summaryCard} ${styles.summaryBlue} ${filterStatus === 'IN_TRANSIT' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'IN_TRANSIT' ? 'ALL' : 'IN_TRANSIT')}>
-          <div className={styles.summaryTop}><span>In transit</span><i><Icon name="truck" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{kpis.inTransit}</strong>
-          <span className={styles.summaryFoot}><b className={`${styles.chip} ${styles.chipBlue}`}>{kpis.inTransitUnits} units</b> on the road</span>
+          <i className={styles.summaryIcon}><Icon name="truck" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>In transit</span>
+            <strong className={styles.summaryValue}>{kpis.inTransit}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Units</span>
+            <b className={`${styles.chip} ${styles.chipBlue}`}>{kpis.inTransitUnits}</b>
+          </div>
         </button>
-        <button type="button" className={`${styles.summaryCard} ${filterStatus === 'RECEIVED' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'RECEIVED' ? 'ALL' : 'RECEIVED')}>
-          <div className={styles.summaryTop}><span>Received</span><i className={styles.toneGreen}><Icon name="check" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{kpis.received}</strong>
-          <span className={styles.summaryFoot}>{kpis.withIssues ? <b className={`${styles.chip} ${styles.chipRed}`}>{kpis.withIssues} with issues</b> : <b className={`${styles.chip} ${styles.chipGreen}`}>No issues</b>} after checking</span>
+        <button type="button" className={`${styles.summaryCard} ${styles.summaryPurple} ${filterStatus === 'RECEIVED' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'RECEIVED' ? 'ALL' : 'RECEIVED')}>
+          <i className={styles.summaryIcon}><Icon name="check" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>Received</span>
+            <strong className={styles.summaryValue}>{kpis.received}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Status</span>
+            {kpis.withIssues ? <b className={`${styles.chip} ${styles.chipRed}`}>{kpis.withIssues} issues</b> : <b className={`${styles.chip} ${styles.chipGreen}`}>All good</b>}
+          </div>
         </button>
-        <div className={styles.summaryCard}>
-          <div className={styles.summaryTop}><span>Units not yet received</span><i><Icon name="box" size={16} /></i></div>
-          <strong className={styles.summaryValue}>{kpis.openUnits.toLocaleString('en-IN')}</strong>
-          <span className={styles.summaryFoot}><b className={styles.chip}>{kpis.pending + kpis.inTransit} open transfers</b></span>
+        <div className={`${styles.summaryCard} ${styles.summaryGreen}`}>
+          <i className={styles.summaryIcon}><Icon name="box" size={18} /></i>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryLabel}>Open units</span>
+            <strong className={styles.summaryValue}>{kpis.openUnits.toLocaleString('en-IN')}</strong>
+          </div>
+          <div className={styles.summaryDetail}>
+            <span className={styles.summaryDetailLabel}>Transfers</span>
+            <b className={`${styles.chip} ${styles.chipGreen}`}>{kpis.pending + kpis.inTransit}</b>
+          </div>
         </div>
       </section>
 
