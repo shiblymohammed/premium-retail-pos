@@ -2,6 +2,7 @@
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
+import styles from './pos-terminal.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -1129,24 +1130,24 @@ export default function PosTerminal() {
 
   if (!terminal) {
     return (
-      <main className="login-shell">
-        <div className="login-card">
-          <div className="brand-mark">P</div>
-          <div className="eyebrow">PREMIUM RETAIL POS</div>
+      <main className={styles.loginShell}>
+        <div className={styles.loginCard}>
+          <div className={styles.brandMark}>P</div>
+          <div className={styles.eyebrow}>PREMIUM RETAIL POS</div>
           <h1>Cashier Terminal</h1>
-          <p className="muted">Sign in with your cashier credentials to unlock Lane POS-T01.</p>
-          <form className="login-form" onSubmit={login}>
+          <p className={styles.muted}>Sign in with your cashier credentials to unlock Lane POS-T01.</p>
+          <form className={styles.loginForm} onSubmit={login}>
             <label htmlFor="email">Cashier Email</label>
             <input id="email" autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="cashier@premiumretail.com" required />
             <label htmlFor="password">Password</label>
             <input id="password" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••••••" required />
-            {error && <div className="alert error">{error}</div>}
-            <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Opening Terminal…' : 'Unlock POS Terminal'} <span>→</span></button>
+            {error && <div className={styles.alertError}>{error}</div>}
+            <button className={styles.primaryButtonFullWidth} disabled={busy} type="submit">{busy ? 'Opening Terminal…' : 'Unlock POS Terminal'} <span>→</span></button>
           </form>
           <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <button
               type="button"
-              className="primary-button full-width"
+              className={styles.primaryButtonFullWidth}
               style={{ background: '#f1f5f9', color: '#1e293b', border: '1px solid #cbd5e1' }}
               onClick={activateDemoCashier}
             >
@@ -1159,21 +1160,21 @@ export default function PosTerminal() {
               Open Unified Login Gateway →
             </a>
           </div>
-          <div className="secure-note"><span className="status-dot" /> Verified offline cache and store ledger check</div>
+          <div className={styles.secureNote}><span className={styles.statusDot} /> Verified offline cache and store ledger check</div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="pos-shell">
-      <header className="topbar">
-        <div className="topbar-brand"><div className="brand-mark small">P</div><div><strong>POS Terminal</strong><span>{terminal.location.name} · Lane POS-T01</span></div></div>
-        <div className="topbar-actions">
-          {demoCatalogActive && <span className="terminal-demo-badge">DEMO CATALOGUE</span>}
-          <button className={`network-status ${isOnline ? 'online' : 'offline'}`} onClick={() => setOfflineDrawerOpen(true)} aria-label="Open offline sale queue"><span className="status-dot" />{isOnline ? 'Online' : `Offline · ${offlineSales.length} queued`}{isOnline && offlineSales.length > 0 ? ` · ${offlineSales.length} queued` : ''}</button>
-          <a className={`attendance-link ${attendanceStatus === 'WORKING' ? 'working' : ''}`} href="/attendance" title="Open staff attendance"><span className="attendance-link-dot" />{attendanceStatus === 'WORKING' ? 'Clocked in' : attendanceStatus === 'NOT_STARTED' ? 'Not clocked in' : 'Attendance'}</a>
-          <span className="cashier-avatar" title="Cashier session">CA</span>
+    <main className={styles.posShell}>
+      <header className={styles.topbar}>
+        <div className={styles.topbarBrand}><div className={styles.brandMarkSmall}>P</div><div><strong>POS Terminal</strong><span>{terminal.location.name} · Lane POS-T01</span></div></div>
+        <div className={styles.topbarActions}>
+          {demoCatalogActive && <span className={styles.terminalDemoBadge}>DEMO CATALOGUE</span>}
+          <button className={`${styles.networkStatus} ${isOnline ? styles.online : styles.offline}`} onClick={() => setOfflineDrawerOpen(true)} aria-label="Open offline sale queue"><span className={styles.statusDot} />{isOnline ? 'Online' : `Offline · ${offlineSales.length} queued`}{isOnline && offlineSales.length > 0 ? ` · ${offlineSales.length} queued` : ''}</button>
+          <a className={`${styles.attendanceLink} ${attendanceStatus === 'WORKING' ? styles.working : ''}`} href="/attendance" title="Open staff attendance"><span className={styles.attendanceLinkDot} />{attendanceStatus === 'WORKING' ? 'Clocked in' : attendanceStatus === 'NOT_STARTED' ? 'Not clocked in' : 'Attendance'}</a>
+          <span className={styles.cashierAvatar} title="Cashier session">CA</span>
           <a
             href="/login"
             style={{
@@ -1194,15 +1195,15 @@ export default function PosTerminal() {
           >
             <span>⇄</span> Switch Role
           </a>
-          <button className="signout-button" disabled={saleRetryPending || saleControlRetryPending} onClick={logout}><span aria-hidden="true">↪</span> Sign out</button>
+          <button className={styles.signoutButton} disabled={saleRetryPending || saleControlRetryPending} onClick={logout}><span aria-hidden="true">↪</span> Sign out</button>
         </div>
       </header>
 
-      <div className="pos-content">
-        <section className="catalog-panel">
-          <div className="catalog-search-area">
-            <div className="search-wrap">
-              <span className="search-icon" aria-hidden="true">⌕</span>
+      <div className={styles.posContent}>
+        <section className={styles.catalogPanel}>
+          <div className={styles.catalogSearchArea}>
+            <div className={styles.searchWrap}>
+              <span className={styles.searchIcon} aria-hidden="true">⌕</span>
               <input
                 ref={searchRef}
                 aria-label="Scan barcode or search products"
@@ -1212,142 +1213,142 @@ export default function PosTerminal() {
                 onChange={(event) => { setQuery(event.target.value); setNotice(''); setError(''); }}
                 onKeyDown={handleSearchKeyDown}
               />
-              {query && <button className="clear-search" type="button" aria-label="Clear search" onClick={() => setQuery('')}>×</button>}
+              {query && <button className={styles.clearSearch} type="button" aria-label="Clear search" onClick={() => setQuery('')}>×</button>}
               <kbd>ENTER</kbd>
             </div>
-            <div className="scanner-status"><span className="status-dot" /> Ready to scan · Enter a barcode or search</div>
+            <div className={styles.scannerStatus}><span className={styles.statusDot} /> Ready to scan · Enter a barcode or search</div>
           </div>
 
-          {error && <div className="alert error inline-alert">{error}</div>}
-          {notice && !error && <div className="notice-line">{notice}</div>}
-          {saleRetryPending && <div className="alert stock-error">The checkout response was interrupted. Retry the same sale to safely confirm its result; keep this terminal open.</div>}
-          {stockError && <div className="alert stock-error">Stock refresh failed: {stockError}</div>}
+          {error && <div className={styles.alertErrorInlineAlert}>{error}</div>}
+          {notice && !error && <div className={styles.noticeLine}>{notice}</div>}
+          {saleRetryPending && <div className={styles.alertStockError}>The checkout response was interrupted. Retry the same sale to safely confirm its result; keep this terminal open.</div>}
+          {stockError && <div className={styles.alertStockError}>Stock refresh failed: {stockError}</div>}
 
-          <section className="catalog-browser">
-            <div className="catalog-heading">
-              <div><div className="eyebrow">SALES FLOOR</div><h1>Products <span>({results.length})</span></h1></div>
-              <div className="catalog-controls"><button className={`catalog-mode-button ${demoCatalogActive ? 'demo-active' : ''}`} onClick={() => { const next = !demoCatalogActive; setDemoCatalogActive(next); setSelectedCategory('All categories'); setQuery(''); setError(''); if (next) setStockBalances(DEMO_STOCK); else setStockBalances({}); }} aria-pressed={demoCatalogActive}>{demoCatalogActive ? 'Use live catalogue' : 'Preview demo data'}</button><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
+          <section className={styles.catalogBrowser}>
+            <div className={styles.catalogHeading}>
+              <div><div className={styles.eyebrow}>SALES FLOOR</div><h1>Products <span>({results.length})</span></h1></div>
+              <div className={styles.catalogControls}><button className={`${styles.catalogModeButton} ${demoCatalogActive ? styles.demoActive : ''}`} onClick={() => { const next = !demoCatalogActive; setDemoCatalogActive(next); setSelectedCategory('All categories'); setQuery(''); setError(''); if (next) setStockBalances(DEMO_STOCK); else setStockBalances({}); }} aria-pressed={demoCatalogActive}>{demoCatalogActive ? 'Use live catalogue' : 'Preview demo data'}</button><label className={styles.sortControl}><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
             </div>
-            <div className="category-chips" aria-label="Product categories">
-              <button className={selectedCategory === 'All categories' ? 'active' : ''} onClick={() => setSelectedCategory('All categories')}>All categories</button>
-              {categories.map((category) => <button key={category} className={selectedCategory === category ? 'active' : ''} onClick={() => setSelectedCategory(category)}>{category}</button>)}
+            <div className={styles.categoryChips} aria-label="Product categories">
+              <button className={selectedCategory === 'All categories' ? styles.active : ''} onClick={() => setSelectedCategory('All categories')}>All categories</button>
+              {categories.map((category) => <button key={category} className={selectedCategory === category ? styles.active : ''} onClick={() => setSelectedCategory(category)}>{category}</button>)}
             </div>
-            {catalogLoading && !results.length ? <div className="catalog-loading">Loading products for {terminal.location.name}…</div> : visibleVariants.length ? (
-              <div className="product-tiles">
+            {catalogLoading && !results.length ? <div className={styles.catalogLoading}>Loading products for {terminal.location.name}…</div> : visibleVariants.length ? (
+              <div className={styles.productTiles}>
                 {visibleVariants.map(({ product, variant }) => {
                   const stock = stockBalances[variant.id];
                   const qty = stock ? Number(stock.quantityBaseUnits) : null;
                   const isNegative = stock && (stock.negativeAvailable || (qty !== null && qty <= 0));
                   const isLow = stock && !isNegative && (stock.lowStock || (qty !== null && qty <= 10));
                   return (
-                    <article className="product-tile" key={variant.id}>
-                      <div className="product-tile-art" aria-hidden="true"><span>{product.name.slice(0, 1).toUpperCase()}</span></div>
-                      <div className="product-tile-info">
-                        {product.category?.name && <span className="product-category">{product.category.name}</span>}
+                    <article className={styles.productTile} key={variant.id}>
+                      <div className={styles.productTileArt} aria-hidden="true"><span>{product.name.slice(0, 1).toUpperCase()}</span></div>
+                      <div className={styles.productTileInfo}>
+                        {product.category?.name && <span className={styles.productCategory}>{product.category.name}</span>}
                         <strong title={product.name}>{product.name}</strong>
-                        <span className="product-variant-name">{variant.name}</span>
-                        <span className="product-sku">{variant.sku}</span>
-                        <strong className="product-price">{formatMoney(product.sellingPrice)} <small>/ {product.baseUnit}</small></strong>
-                        <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-label="Stock alert">!</b>}{isNegative ? `${stock.formattedQuantity} in stock · Backorder sale` : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
+                        <span className={styles.productVariantName}>{variant.name}</span>
+                        <span className={styles.productSku}>{variant.sku}</span>
+                        <strong className={styles.productPrice}>{formatMoney(product.sellingPrice)} <small>/ {product.baseUnit}</small></strong>
+                        <span className={`${styles.stockChip} ${isNegative ? styles.negative : isLow ? styles.low : ''}`}>{stock ? <>{isNegative && <b aria-label="Stock alert">!</b>}{isNegative ? `${stock.formattedQuantity} in stock · Backorder sale` : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
                       </div>
-                      <button className="tile-add-button" disabled={busy || saleRetryPending} onClick={() => addToCart(product, variant)}><span>+</span> Add</button>
+                      <button className={styles.tileAddButton} disabled={busy || saleRetryPending} onClick={() => addToCart(product, variant)}><span>+</span> Add</button>
                     </article>
                   );
                 })}
               </div>
-            ) : catalogLoading ? <div className="catalog-loading">Updating catalogue…</div> : <div className="empty-state"><div className="empty-icon">⌕</div><strong>{query ? 'No matching products' : 'No active products found'}</strong><span>{query ? 'Try another product name, SKU, or barcode.' : 'Products available to sell will appear here.'}</span></div>}
+            ) : catalogLoading ? <div className={styles.catalogLoading}>Updating catalogue…</div> : <div className={styles.emptyState}><div className={styles.emptyIcon}>⌕</div><strong>{query ? 'No matching products' : 'No active products found'}</strong><span>{query ? 'Try another product name, SKU, or barcode.' : 'Products available to sell will appear here.'}</span></div>}
           </section>
         </section>
 
-        <aside className="basket-panel">
-          <div className="basket-heading"><div><div className="eyebrow">CURRENT SALE</div><h2>Current basket</h2><small>{terminal.location.name}</small></div><div className="basket-heading-actions"><span className="item-count">{cart.reduce((sum, line) => sum + line.quantity, 0)} items</span><button className="clear-basket-button" disabled={!cart.length || busy || saleRetryPending} onClick={() => void clearBasket()}>Clear basket</button></div></div>
+        <aside className={styles.basketPanel}>
+          <div className={styles.basketHeading}><div><div className={styles.eyebrow}>CURRENT SALE</div><h2>Current basket</h2><small>{terminal.location.name}</small></div><div className={styles.basketHeadingActions}><span className={styles.itemCount}>{cart.reduce((sum, line) => sum + line.quantity, 0)} items</span><button className={styles.clearBasketButton} disabled={!cart.length || busy || saleRetryPending} onClick={() => void clearBasket()}>Clear basket</button></div></div>
           {cart.length ? (
-            <div className="basket-lines">
+            <div className={styles.basketLines}>
               {cart.map((line) => (
-                <div className="basket-line" key={line.variantId}>
-                  <div className="basket-line-main"><div className="basket-item-icon">{line.productName.slice(0, 1).toUpperCase()}</div><div className="basket-item-copy"><strong>{line.productName}</strong><span>{line.variantName} · {line.sku}</span><small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small><small className="basket-line-total">Line total · {formatMoney(line.sellingPrice * line.quantity)}</small><small className={stockBalances[line.variantId]?.negativeAvailable ? 'stock-warning-text' : 'basket-stock'}>{stockBalances[line.variantId] ? <>{stockBalances[line.variantId].negativeAvailable ? '⚠ Negative stock: ' : 'Available: '}{stockBalances[line.variantId].quantityBaseUnits} {line.baseUnit}s</> : 'Checking store stock…'}</small></div><button className="remove-button" disabled={removingVariantId === line.variantId || saleRetryPending} aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>{removingVariantId === line.variantId ? '…' : '×'}</button></div>
-                  <div className="quantity-control"><button aria-label="Decrease quantity" disabled={line.quantity <= 1 || saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity - 1))}>−</button><input aria-label={`Quantity for ${line.productName}`} inputMode="numeric" value={line.quantity} disabled={saleRetryPending} onChange={(event) => setQuantity(line.variantId, event.target.value)} /><button aria-label="Increase quantity" disabled={saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity + 1))}>+</button></div>
-                  <label className="discount-input">Line discount (%)<input type="number" min="0" max="100" step="0.01" value={lineDiscounts[line.variantId] || ''} disabled={saleRetryPending || Number(billDiscount || 0) > 0} onChange={(event) => setLineDiscounts((current) => ({ ...current, [line.variantId]: event.target.value }))} /></label>
+                <div className={styles.basketLine} key={line.variantId}>
+                  <div className={styles.basketLineMain}><div className={styles.basketItemIcon}>{line.productName.slice(0, 1).toUpperCase()}</div><div className={styles.basketItemCopy}><strong>{line.productName}</strong><span>{line.variantName} · {line.sku}</span><small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small><small className={styles.basketLineTotal}>Line total · {formatMoney(line.sellingPrice * line.quantity)}</small><small className={stockBalances[line.variantId]?.negativeAvailable ? 'stock-warning-text' : 'basket-stock'}>{stockBalances[line.variantId] ? <>{stockBalances[line.variantId].negativeAvailable ? '⚠ Negative stock: ' : 'Available: '}{stockBalances[line.variantId].quantityBaseUnits} {line.baseUnit}s</> : 'Checking store stock…'}</small></div><button className={styles.removeButton} disabled={removingVariantId === line.variantId || saleRetryPending} aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>{removingVariantId === line.variantId ? '…' : '×'}</button></div>
+                  <div className={styles.quantityControl}><button aria-label="Decrease quantity" disabled={line.quantity <= 1 || saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity - 1))}>−</button><input aria-label={`Quantity for ${line.productName}`} inputMode="numeric" value={line.quantity} disabled={saleRetryPending} onChange={(event) => setQuantity(line.variantId, event.target.value)} /><button aria-label="Increase quantity" disabled={saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity + 1))}>+</button></div>
+                  <label className={styles.discountInput}>Line discount (%)<input type="number" min="0" max="100" step="0.01" value={lineDiscounts[line.variantId] || ''} disabled={saleRetryPending || Number(billDiscount || 0) > 0} onChange={(event) => setLineDiscounts((current) => ({ ...current, [line.variantId]: event.target.value }))} /></label>
                 </div>
               ))}
             </div>
-          ) : <div className="basket-empty"><div className="basket-empty-icon">▤</div><strong>Your basket is empty</strong><span>Scan an item or choose a product to get started.</span></div>}
-          <div className="basket-footer">
-            <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
-            <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
-            <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 →</span></button>
-            <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
-            {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
+          ) : <div className={styles.basketEmpty}><div className={styles.basketEmptyIcon}>▤</div><strong>Your basket is empty</strong><span>Scan an item or choose a product to get started.</span></div>}
+          <div className={styles.basketFooter}>
+            <div className={styles.saleTotals}><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
+            <label className={styles.discountInputBillDiscountInput}>Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
+            <button className={styles.checkoutButton} disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 →</span></button>
+            <div className={styles.keyboardCues}><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
+            {saleTotals.percent > discountLimit + 0.000001 && <p className={styles.discountWarning}>Discount exceeds your assigned limit.</p>}
             <p>Prices, discounts, payment, and stock are verified by the server before invoice finalization.</p>
           </div>
-          {offlineDrawerOpen && <div className="offline-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOfflineDrawerOpen(false); }}><section className="offline-queue offline-drawer" role="dialog" aria-modal="true" aria-label="Offline sale queue">
-            <div className="offline-drawer-title"><div><div className="eyebrow">LOCAL SYNC QUEUE</div><h2>Offline sales</h2></div><button className="small-action-button" onClick={() => setOfflineDrawerOpen(false)}>Close</button></div>
-            {offlineSales.length === 0 && <p className="offline-empty-note">No sales are waiting to sync.</p>}
-            <div className="offline-queue-heading"><div><strong>{offlineSales.length} pending sale{offlineSales.length === 1 ? '' : 's'}</strong><small>Saved on this device; not finalized yet.</small></div><button className="small-action-button" disabled={!isOnline || syncingSales} onClick={() => void syncOfflineSales()}>{syncingSales ? 'Syncing…' : 'Sync now'}</button></div>
+          {offlineDrawerOpen && <div className={styles.offlineDrawerBackdrop} onMouseDown={(event) => { if (event.target === event.currentTarget) setOfflineDrawerOpen(false); }}><section className="offline-queue offline-drawer" role="dialog" aria-modal="true" aria-label="Offline sale queue">
+            <div className={styles.offlineDrawerTitle}><div><div className={styles.eyebrow}>LOCAL SYNC QUEUE</div><h2>Offline sales</h2></div><button className={styles.smallActionButton} onClick={() => setOfflineDrawerOpen(false)}>Close</button></div>
+            {offlineSales.length === 0 && <p className={styles.offlineEmptyNote}>No sales are waiting to sync.</p>}
+            <div className={styles.offlineQueueHeading}><div><strong>{offlineSales.length} pending sale{offlineSales.length === 1 ? '' : 's'}</strong><small>Saved on this device; not finalized yet.</small></div><button className={styles.smallActionButton} disabled={!isOnline || syncingSales} onClick={() => void syncOfflineSales()}>{syncingSales ? 'Syncing…' : 'Sync now'}</button></div>
             {offlineSales.map((sale) => {
               const quote = offlineQuotes[sale.idempotencyKey];
               const totalMatch = sale.error?.match(/Current server total is ([0-9]+\.[0-9]{2})/);
-              return <div className="offline-sale-row" key={sale.idempotencyKey}>
+              return <div className={styles.offlineSaleRow} key={sale.idempotencyKey}>
                 <strong>{new Date(sale.createdAt).toLocaleString()} · {sale.status === 'needs_review' ? 'Needs review' : 'Waiting to sync'}</strong>
                 {sale.error && <p>{sale.error}</p>}
                 {sale.status === 'needs_review' && <>
-                  <div className="offline-quote-actions"><button className="small-action-button" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale)}>Quote with discounts</button><button className="small-action-button secondary" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale, true)}>Remove discounts and quote</button></div>
-                  {quote && <div className="offline-reconcile-form">
+                  <div className={styles.offlineQuoteActions}><button className={styles.smallActionButton} disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale)}>Quote with discounts</button><button className="small-action-button secondary" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale, true)}>Remove discounts and quote</button></div>
+                  {quote && <div className={styles.offlineReconcileForm}>
                     <p>Current server total: <strong>{formatMoney(quote.netTotal)}</strong>. Reconcile any amount difference with the customer before confirming.</p>
                     {JSON.parse(sale.body).paymentMethod === 'CASH' ? <label>Cash received<input type="number" min={quote.netTotal} step="0.01" value={offlineCashTendered[sale.idempotencyKey] || totalMatch?.[1] || ''} onChange={(event) => setOfflineCashTendered((current) => ({ ...current, [sale.idempotencyKey]: event.target.value }))} /></label> : <label>Updated transaction reference (optional)<input type="text" maxLength={120} value={offlineReference[sale.idempotencyKey] || ''} onChange={(event) => setOfflineReference((current) => ({ ...current, [sale.idempotencyKey]: event.target.value }))} /></label>}
-                    <label className="offline-confirm"><input type="checkbox" checked={offlinePaymentConfirmed[sale.idempotencyKey] || false} onChange={(event) => setOfflinePaymentConfirmed((current) => ({ ...current, [sale.idempotencyKey]: event.target.checked }))} /> I reconciled the actual payment with this total.</label>
-                    <button className="small-action-button" disabled={!isOnline || syncingSales || !offlinePaymentConfirmed[sale.idempotencyKey]} onClick={() => void confirmOfflineSale(sale)}>Confirm and sync</button>
+                    <label className={styles.offlineConfirm}><input type="checkbox" checked={offlinePaymentConfirmed[sale.idempotencyKey] || false} onChange={(event) => setOfflinePaymentConfirmed((current) => ({ ...current, [sale.idempotencyKey]: event.target.checked }))} /> I reconciled the actual payment with this total.</label>
+                    <button className={styles.smallActionButton} disabled={!isOnline || syncingSales || !offlinePaymentConfirmed[sale.idempotencyKey]} onClick={() => void confirmOfflineSale(sale)}>Confirm and sync</button>
                   </div>}
                 </>}
               </div>;
             })}
           </section></div>}
-          {(salesPermissions.canCancelSales || salesPermissions.canProcessReturns) && <section className="sale-controls">
-            <div className="eyebrow">SALE CONTROLS</div><h3>Returns & cancellations</h3>
+          {(salesPermissions.canCancelSales || salesPermissions.canProcessReturns) && <section className={styles.saleControls}>
+            <div className={styles.eyebrow}>SALE CONTROLS</div><h3>Returns & cancellations</h3>
             <p>Enter the original invoice number. Returns have no time limit. Refunds are recorded manually; this app does not send money.</p>
-            <div className="invoice-search"><input aria-label="Invoice number" value={invoiceSearch} onChange={(event) => setInvoiceSearch(event.target.value)} placeholder="Invoice number" disabled={saleControlRetryPending} /><button className="small-action-button" disabled={controlBusy || saleControlRetryPending || !invoiceSearch.trim()} onClick={() => void loadSaleControl()}>{controlBusy ? 'Loading…' : 'Find'}</button></div>
-            {controlError && <div className="alert error">{controlError}</div>}
-            {controlNotice && <div className="alert success">{controlNotice}</div>}
-            {saleControl && <div className="invoice-control-card">
-              <div className="invoice-control-heading"><strong>{saleControl.invoiceNumber}</strong><span>{saleControl.status} · {saleControl.location.name}</span></div>
-              {saleControl.cancellationReason && <p className="field-hint">Cancelled {saleControl.cancelledAt ? `on ${new Date(saleControl.cancelledAt).toLocaleString()}` : ''}: {saleControl.cancellationReason}</p>}
-              <div className="invoice-control-totals"><span>Total {formatMoney(saleControl.netTotal)}</span><span>Paid by {saleControl.payment?.method || 'unknown'}</span></div>
-              {saleControl.returns.map((saleReturn) => <div className="prior-return" key={saleReturn.returnNumber}>{saleReturn.returnNumber} · {saleReturn.refund ? `Manual refund ${formatMoney(saleReturn.refund.amount)} (${saleReturn.refund.method})` : 'No money refunded'}</div>)}
+            <div className={styles.invoiceSearch}><input aria-label="Invoice number" value={invoiceSearch} onChange={(event) => setInvoiceSearch(event.target.value)} placeholder="Invoice number" disabled={saleControlRetryPending} /><button className={styles.smallActionButton} disabled={controlBusy || saleControlRetryPending || !invoiceSearch.trim()} onClick={() => void loadSaleControl()}>{controlBusy ? 'Loading…' : 'Find'}</button></div>
+            {controlError && <div className={styles.alertError}>{controlError}</div>}
+            {controlNotice && <div className={styles.alertSuccess}>{controlNotice}</div>}
+            {saleControl && <div className={styles.invoiceControlCard}>
+              <div className={styles.invoiceControlHeading}><strong>{saleControl.invoiceNumber}</strong><span>{saleControl.status} · {saleControl.location.name}</span></div>
+              {saleControl.cancellationReason && <p className={styles.fieldHint}>Cancelled {saleControl.cancelledAt ? `on ${new Date(saleControl.cancelledAt).toLocaleString()}` : ''}: {saleControl.cancellationReason}</p>}
+              <div className={styles.invoiceControlTotals}><span>Total {formatMoney(saleControl.netTotal)}</span><span>Paid by {saleControl.payment?.method || 'unknown'}</span></div>
+              {saleControl.returns.map((saleReturn) => <div className={styles.priorReturn} key={saleReturn.returnNumber}>{saleReturn.returnNumber} · {saleReturn.refund ? `Manual refund ${formatMoney(saleReturn.refund.amount)} (${saleReturn.refund.method})` : 'No money refunded'}</div>)}
               {saleControl.status === 'FINALIZED' && <>
-                <label className="control-field">Reason<textarea value={controlReason} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setControlReason(event.target.value)} placeholder="Required: record why this action is being taken" /></label>
-                {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <label className="offline-confirm"><input type="checkbox" checked={confirmedGoodsReturned} disabled={saleControlRetryPending} onChange={(event) => setConfirmedGoodsReturned(event.target.checked)} /> I confirm all goods are physically back at this store.</label>}
-                <label className="control-field">Manual refund method<select value={refundMethod} disabled={saleControlRetryPending} onChange={(event) => setRefundMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE' | 'OTHER')}><option value="CASH">Cash</option><option value="CARD">Card (manual)</option><option value="ONLINE">Online (manual)</option><option value="OTHER">Other</option></select></label>
-                <label className="control-field">Refund reference (optional)<input value={refundReference} disabled={saleControlRetryPending} maxLength={120} onChange={(event) => setRefundReference(event.target.value)} placeholder="No card numbers" /></label>
-                {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <button className="danger-action-button" disabled={controlBusy} onClick={() => void cancelSale(saleControl)}>{saleControlRetryPending ? 'Retry same cancellation' : `Cancel sale · refund ${formatMoney(saleControl.netTotal)}`}</button>}
-                {saleControl.permissions.canProcessReturns && <div className="return-lines-form"><strong>Return inspected items</strong>{saleControl.lines.map((line) => {
+                <label className={styles.controlField}>Reason<textarea value={controlReason} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setControlReason(event.target.value)} placeholder="Required: record why this action is being taken" /></label>
+                {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <label className={styles.offlineConfirm}><input type="checkbox" checked={confirmedGoodsReturned} disabled={saleControlRetryPending} onChange={(event) => setConfirmedGoodsReturned(event.target.checked)} /> I confirm all goods are physically back at this store.</label>}
+                <label className={styles.controlField}>Manual refund method<select value={refundMethod} disabled={saleControlRetryPending} onChange={(event) => setRefundMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE' | 'OTHER')}><option value="CASH">Cash</option><option value="CARD">Card (manual)</option><option value="ONLINE">Online (manual)</option><option value="OTHER">Other</option></select></label>
+                <label className={styles.controlField}>Refund reference (optional)<input value={refundReference} disabled={saleControlRetryPending} maxLength={120} onChange={(event) => setRefundReference(event.target.value)} placeholder="No card numbers" /></label>
+                {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <button className={styles.dangerActionButton} disabled={controlBusy} onClick={() => void cancelSale(saleControl)}>{saleControlRetryPending ? 'Retry same cancellation' : `Cancel sale · refund ${formatMoney(saleControl.netTotal)}`}</button>}
+                {saleControl.permissions.canProcessReturns && <div className={styles.returnLinesForm}><strong>Return inspected items</strong>{saleControl.lines.map((line) => {
                   const remaining = line.quantityBaseUnits - line.returnedQuantityBaseUnits;
                   const selection = returnLines[line.id] || { quantity: '', disposition: 'QUARANTINED' as const, inspectionNotes: '' };
                   if (remaining < 1) return null;
-                  return <div className="return-line-entry" key={line.id}>
+                  return <div className={styles.returnLineEntry} key={line.id}>
                     <span>{line.variant.product.name} · {line.variant.name}<small>{remaining} {line.variant.product.baseUnit} remaining · {line.variant.sku}</small></span>
                     <input aria-label={`Return quantity for ${line.variant.name}`} type="number" min="0" max={remaining} value={selection.quantity} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, quantity: event.target.value } }))} />
                     <select aria-label={`Disposition for ${line.variant.name}`} value={selection.disposition} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, disposition: event.target.value as 'RESTOCKED' | 'QUARANTINED' } }))}><option value="QUARANTINED">Quarantine</option><option value="RESTOCKED">Inspected and restock</option></select>
                     <input aria-label={`Inspection notes for ${line.variant.name}`} value={selection.inspectionNotes} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, inspectionNotes: event.target.value } }))} placeholder="Inspection notes (required)" />
                   </div>;
-                })}<button className="small-action-button" disabled={controlBusy} onClick={() => void processSaleReturn(saleControl)}>{saleControlRetryPending ? 'Retry same return' : 'Record return'}</button></div>}
+                })}<button className={styles.smallActionButton} disabled={controlBusy} onClick={() => void processSaleReturn(saleControl)}>{saleControlRetryPending ? 'Retry same return' : 'Record return'}</button></div>}
               </>}
             </div>}
           </section>}
         </aside>
       </div>
-      {checkoutOpen && <div className="checkout-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCheckoutOpen(false); }}>
-        <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-          <header><div><div className="eyebrow">{demoCatalogActive ? 'DEMO · NO SALE WILL BE RECORDED' : 'PAYMENT'}</div><h2 id="checkout-title">Complete sale</h2><p>{demoCatalogActive ? 'Switch to the live catalogue to process a real customer sale.' : 'Review tender and confirm the amount received.'}</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout">×</button></header>
-          <div className="checkout-due"><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
-          <label className="payment-select">Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
-          {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{[100, 200, 500, 2000].map((amount) => <button key={amount} onClick={() => setCashTendered(String(amount))}>₹{amount}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
-          {demoCatalogActive && <div className="demo-checkout-note">Sample items and stock are for display only. Checkout is disabled in demo mode.</div>}
-          {error && <div className="alert error">{error}</div>}
-          <button className="checkout-button" disabled={demoCatalogActive || busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{demoCatalogActive ? 'Demo only · checkout disabled' : busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span>→</span></button>
+      {checkoutOpen && <div className={styles.checkoutModalBackdrop} onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCheckoutOpen(false); }}>
+        <section className={styles.checkoutModal} role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+          <header><div><div className={styles.eyebrow}>{demoCatalogActive ? 'DEMO · NO SALE WILL BE RECORDED' : 'PAYMENT'}</div><h2 id="checkout-title">Complete sale</h2><p>{demoCatalogActive ? 'Switch to the live catalogue to process a real customer sale.' : 'Review tender and confirm the amount received.'}</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout">×</button></header>
+          <div className={styles.checkoutDue}><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
+          <label className={styles.paymentSelect}>Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
+          {paymentMethod === 'CASH' ? <><label className={styles.paymentSelect}>Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{[100, 200, 500, 2000].map((amount) => <button key={amount} onClick={() => setCashTendered(String(amount))}>₹{amount}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className={styles.paymentSelect}>Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
+          {demoCatalogActive && <div className={styles.demoCheckoutNote}>Sample items and stock are for display only. Checkout is disabled in demo mode.</div>}
+          {error && <div className={styles.alertError}>{error}</div>}
+          <button className={styles.checkoutButton} disabled={demoCatalogActive || busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{demoCatalogActive ? 'Demo only · checkout disabled' : busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span>→</span></button>
         </section>
       </div>}
-      {lastReceipt && <div className="receipt-overlay" role="dialog" aria-modal="true" aria-label="Sale receipt"><section className="receipt-card"><div className="eyebrow">{terminal?.location.name}</div><h2>{lastReceipt.invoiceNumber}</h2><p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>{lastReceipt.lines.map((line, index) => <div className="receipt-line" key={`${line.variant.sku}-${index}`}><span>{line.variant.product.name} · {line.variant.name}<small>{line.quantityBaseUnits} {line.variant.product.baseUnit} × {formatMoney(line.unitPriceAtSale)} · {line.variant.sku}</small></span><strong>{formatMoney(line.lineTotal)}</strong></div>)}<div className="receipt-line"><span>Subtotal</span><strong>{formatMoney(lastReceipt.grossTotal)}</strong></div><div className="receipt-line"><span>Discount</span><strong>−{formatMoney(lastReceipt.discountTotal)}</strong></div><div className="receipt-line receipt-total"><span>Total paid · {lastReceipt.payment?.method}</span><strong>{formatMoney(lastReceipt.netTotal)}</strong></div>{lastReceipt.payment?.cashTenderedAmount && <div className="receipt-line"><span>Cash tendered</span><strong>{formatMoney(lastReceipt.payment.cashTenderedAmount)}</strong></div>}{lastReceipt.payment?.changeGivenAmount && Number(lastReceipt.payment.changeGivenAmount) > 0 && <div className="receipt-line"><span>Change</span><strong>{formatMoney(lastReceipt.payment.changeGivenAmount)}</strong></div>}<div className="receipt-actions"><button className="checkout-button" onClick={() => window.print()}>Print receipt</button><button className="text-button" onClick={() => setLastReceipt(null)}>Close</button></div></section></div>}
-      <footer className="terminal-footer"><span>Terminal bound to <strong>{terminal.location.name}</strong></span><span>Stock refreshes every 15 seconds while this terminal is open</span></footer>
+      {lastReceipt && <div className={styles.receiptOverlay} role="dialog" aria-modal="true" aria-label="Sale receipt"><section className="receipt-card"><div className={styles.eyebrow}>{terminal?.location.name}</div><h2>{lastReceipt.invoiceNumber}</h2><p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>{lastReceipt.lines.map((line, index) => <div className="receipt-line" key={`${line.variant.sku}-${index}`}><span>{line.variant.product.name} · {line.variant.name}<small>{line.quantityBaseUnits} {line.variant.product.baseUnit} × {formatMoney(line.unitPriceAtSale)} · {line.variant.sku}</small></span><strong>{formatMoney(line.lineTotal)}</strong></div>)}<div className="receipt-line"><span>Subtotal</span><strong>{formatMoney(lastReceipt.grossTotal)}</strong></div><div className="receipt-line"><span>Discount</span><strong>−{formatMoney(lastReceipt.discountTotal)}</strong></div><div className="receipt-line receipt-total"><span>Total paid · {lastReceipt.payment?.method}</span><strong>{formatMoney(lastReceipt.netTotal)}</strong></div>{lastReceipt.payment?.cashTenderedAmount && <div className="receipt-line"><span>Cash tendered</span><strong>{formatMoney(lastReceipt.payment.cashTenderedAmount)}</strong></div>}{lastReceipt.payment?.changeGivenAmount && Number(lastReceipt.payment.changeGivenAmount) > 0 && <div className="receipt-line"><span>Change</span><strong>{formatMoney(lastReceipt.payment.changeGivenAmount)}</strong></div>}<div className="receipt-actions"><button className={styles.checkoutButton} onClick={() => window.print()}>Print receipt</button><button className="text-button" onClick={() => setLastReceipt(null)}>Close</button></div></section></div>}
+      <footer className={styles.terminalFooter}><span>Terminal bound to <strong>{terminal.location.name}</strong></span><span>Stock refreshes every 15 seconds while this terminal is open</span></footer>
     </main>
   );
 }
