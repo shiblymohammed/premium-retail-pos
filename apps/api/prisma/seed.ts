@@ -116,6 +116,25 @@ async function main() {
   });
   console.log(`✅ Cashier: ${cashier.email} (scoped to ${retailStore.name})`);
 
+  // Link the sample cashier to an employee record so the real self-service
+  // attendance endpoints work with the seeded demo account.
+  const cashierEmployee = await prisma.employee.upsert({
+    where: { userId: cashier.id },
+    update: {
+      locationId: retailStore.id,
+      isActive: true,
+    },
+    create: {
+      userId: cashier.id,
+      employeeCode: 'EMP-0842',
+      firstName: 'Ravi',
+      lastName: 'Menon',
+      locationId: retailStore.id,
+      hireDate: new Date('2026-01-01T00:00:00.000Z'),
+    },
+  });
+  console.log(`✅ Cashier employee: ${cashierEmployee.employeeCode} at ${retailStore.name}`);
+
   console.log('\n🎉 Seed complete! Development credentials:');
   console.log('  Super Admin : admin@premiumretail.com / SuperAdmin@123');
   console.log('  Store Mgr   : manager@premiumretail.com / Manager@123');

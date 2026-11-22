@@ -44,6 +44,49 @@ export class AttendanceService {
     };
   }
 
+  async getMyHistory(actor: RequestUser) {
+    const employee = await this.employeeFor(actor);
+    const now = new Date();
+    const today = localDateKey(now, employee.location.company.timezone);
+    const [year, month, day] = today.split('-').map(Number);
+    const weekday = (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
+    const firstDay = new Date(Date.UTC(year, month - 1, day - weekday - 175));
+    const startDate = localDateKey(firstDay, 'UTC');
+    const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+    const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
+    const [endYear, endMonth, endDay] = [tomorrow.getUTCFullYear(), tomorrow.getUTCMonth() + 1, tomorrow.getUTCDate()];
+    const start = localMidnightUtc(startYear, startMonth, startDay, employee.location.company.timezone);
+    const end = localMidnightUtc(endYear, endMonth, endDay, employee.location.company.timezone);
+    const punches = await this.prisma.attendance.findMany({
+      where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
+      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, qrVerified: true, originalTimestamp: true, correctionReason: true },
+      orderBy: { punchTimestamp: 'asc' },
+    });
+    const byDay = new Map<string, typeof punches>();
+    for (const punch of punches) {
+      const key = localDateKey(punch.punchTimestamp, employee.location.company.timezone);
+      byDay.set(key, [...(byDay.get(key) ?? []), punch]);
+    }
+    const days = Array.from({ length: 176 + weekday }, (_, index) => {
+      const date = new Date(Date.UTC(startYear, startMonth - 1, startDay + index));
+      const dateKey = localDateKey(date, 'UTC');
+      const dayPunches = byDay.get(dateKey) ?? [];
+      const clockIn = dayPunches.find((punch) => punch.punchType === 'IN') ?? null;
+      const clockOut = dayPunches.find((punch) => punch.punchType === 'OUT') ?? null;
+      const durationEnd = clockOut?.punchTimestamp ?? (dateKey === today && clockIn ? now : null);
+      const workMinutes = clockIn && durationEnd ? Math.max(0, Math.floor((durationEnd.getTime() - clockIn.punchTimestamp.getTime()) / 60_000)) : 0;
+      return {
+        date: dateKey,
+        status: !clockIn ? 'off' : clockIn.isLate ? 'late' : 'present',
+        clockInAt: clockIn?.punchTimestamp ?? null,
+        clockOutAt: clockOut?.punchTimestamp ?? null,
+        isLate: clockIn?.isLate ?? false,
+        workMinutes,
+      };
+    });
+    return { employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode }, location: { id: employee.location.id, name: employee.location.name }, timezone: employee.location.company.timezone, days };
+  }
+
   async punch(actor: RequestUser, qrToken?: string) {
     return this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`

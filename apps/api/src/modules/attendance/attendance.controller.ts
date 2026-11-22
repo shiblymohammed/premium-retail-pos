@@ -23,6 +23,11 @@ export class AttendanceController {
     return { data: await this.attendance.getToday(actor) };
   }
 
+  @Get('me/history')
+  async myHistory(@CurrentUser() actor: RequestUser) {
+    return { data: await this.attendance.getMyHistory(actor) };
+  }
+
   @Post('me/punch')
   async punch(@Body() dto: AttendancePunchDto | undefined, @CurrentUser() actor: RequestUser) {
     return { message: 'Attendance recorded', data: await this.attendance.punch(actor, dto?.qrToken) };

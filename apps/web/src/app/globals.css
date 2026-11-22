@@ -1121,3 +1121,58 @@ button:disabled { cursor: not-allowed; }
 .pos-shell { width: 100% !important; }
 .app-frame-content { overflow-x: clip; }
 
+/* Cashier workspace: remove the former empty terminal bar and match the compact POS reference. */
+.pos-shell { height: 100%; min-height: 0; overflow: hidden; background: #f5f7fb; }
+.pos-content { width: 100%; max-width: none; min-width: 0; flex: 1; align-self: stretch; grid-template-columns: minmax(0, 1.48fr) minmax(355px, .92fr); gap: 14px; padding: 14px 16px 16px; }
+.catalog-panel { padding: 12px; border-color: #e5eaf2; border-radius: 15px; box-shadow: 0 3px 16px #244b8a0a; }
+.pos-shell .search-wrap { height: 46px; border-color: #cfd9ec; border-radius: 10px; background: #fff; }
+.catalog-browser { margin-top: 8px; }
+.catalog-heading { min-height: 40px; }
+.catalog-heading h1 { font-size: 19px; }
+.category-chips { gap: 7px; padding: 7px 0 9px; }
+.category-chips button { min-height: 31px; padding-inline: 12px; border-color: #e1e7f0; background: #f8faff; }
+.product-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; padding-right: 3px; }
+.product-tile { position: relative; display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 142px; padding: 9px; border-radius: 11px; }
+.product-tile-art { width: 68px; height: 98px; flex: none; margin: 0; border: 1px solid #e8edf5; border-radius: 9px; background: linear-gradient(155deg, #f5f8ff, #edf3ff); }
+.product-tile-art::before, .product-tile-art::after { width: 50px; height: 50px; }
+.product-tile-art span { width: 48px; height: 56px; border: 0; border-radius: 8px; background: transparent; font-family: inherit; font-size: 34px; box-shadow: none; }
+.product-tile-info { min-width: 0; align-self: stretch; justify-content: center; padding: 0 20px 0 0; }
+.product-category { font-size: 9px; letter-spacing: .04em; }
+.product-tile-info > strong:not(.product-price) { margin-top: 3px; font-size: 12px; }
+.product-variant-name { margin-top: 2px; font-size: 10.5px; }
+.product-sku { margin-top: 3px; font-size: 10px; }
+.product-price { margin-top: 4px; font-size: 12px; }
+.pos-shell .product-price, .pos-shell .sale-totals strong, .pos-shell .basket-item-copy small { font-variant-numeric: tabular-nums; font-style: normal; }
+.product-price small { font-size: 10px; }
+.pos-shell .stock-chip { max-width: 100%; overflow: hidden; padding: 3px 6px; font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+.tile-add-button { position: absolute; right: 9px; bottom: 9px; width: 27px; min-height: 27px; height: 27px; display: grid; place-items: center; margin: 0; padding: 0; border: 1px solid #d8e4fb; border-radius: 50%; background: #edf3ff; }
+.tile-add-button > span:first-child { font-size: 18px; }
+.tile-add-button .tile-add-label { display: none; }
+.basket-panel { border-radius: 15px; box-shadow: 0 3px 16px #244b8a0a; }
+.pos-shell .basket-heading { min-height: 64px; padding-inline: 17px; }
+.pos-shell .basket-empty { min-height: 210px; }
+.pos-shell .basket-empty-icon { width: 76px; height: 76px; border-radius: 24px; background: #edf3ff; color: #155eef; font-size: 38px; }
+.pos-shell .checkout-button { min-height: 46px; font-size: 12px; }
+@media (max-width: 1050px) and (min-width: 761px) {
+  .pos-content { grid-template-columns: minmax(0, 1.25fr) minmax(325px, .95fr); gap: 10px; padding: 10px; }
+  .product-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .pos-shell { height: auto; min-height: 100%; overflow: visible; }
+  .pos-content { display: flex; flex-direction: column; gap: 12px; padding: 10px; }
+  .catalog-panel { min-height: 540px; }
+  .product-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .product-tile { min-height: 142px; }
+  .basket-panel { height: auto; min-height: 390px; overflow: visible; }
+  .pos-shell .basket-empty { min-height: 175px; }
+}
+@media (max-width: 420px) {
+  .pos-content { padding: 7px; }
+  .catalog-panel { padding: 9px; }
+  .product-tiles { gap: 7px; }
+  .product-tile { grid-template-columns: 52px minmax(0, 1fr); min-height: 132px; gap: 7px; padding: 7px; }
+  .product-tile-art { width: 52px; height: 82px; }
+  .product-tile-art span { font-size: 28px; }
+  .product-tile-info { padding-right: 15px; }
+}
+

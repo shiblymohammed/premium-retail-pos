@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { NavGroup } from './nav-data';
 
 export interface SidebarProps {
@@ -57,27 +58,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   pathname,
   handleSignOut,
 }) => {
+  const activeHref = visibleGroups
+    .flatMap((group) => group.links)
+    .filter((link) => pathname === link.href || (link.href !== '/' && pathname.startsWith(`${link.href}/`)))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
     <aside className="drive-sidebar" aria-label="Application sidebar">
       {/* Brand */}
-      <a className="drive-sidebar-brand" href={homeRoute} aria-label="Premium Retail workspace">
+      <Link className="drive-sidebar-brand" href={homeRoute} aria-label="Premium Retail workspace">
         <span className="drive-sidebar-brand-icon"><NavIcon name="brand" size={22} /></span>
         {!collapsed && <span>Premium Retail</span>}
-      </a>
+      </Link>
 
       {/* Navigation Links, groups separated by a thin divider like the reference */}
       <nav className="drive-nav-list" aria-label="Main navigation">
         {visibleGroups.map((group) => (
           <div key={group.title} className="drive-nav-group" role="group" aria-label={group.title}>
             {group.links.map((link) => {
-              const active =
-                link.href === '/'
-                  ? pathname === '/'
-                  : pathname === link.href ||
-                    (link.href !== '/dashboard' && pathname.startsWith(`${link.href}/`));
+              const active = activeHref === link.href;
               return (
-                <a
+                <Link
                   key={link.href}
                   href={link.href}
                   className={`drive-nav-item${active ? ' active' : ''}`}
@@ -88,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <NavIcon name={link.icon} />
                   </span>
                   {!collapsed && <span className="drive-nav-label">{link.label}</span>}
-                </a>
+                </Link>
               );
             })}
           </div>

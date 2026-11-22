@@ -22,6 +22,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [location, setLocation] = useState('All retail locations');
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLocationOpen, setIsLocationOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
@@ -32,6 +33,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
 
     // Initial session load
     setSession(getStoredSession());
+    setSessionLoaded(true);
 
     // Close dropdowns on outside click
     const handleGlobalClick = (e: MouseEvent) => {
@@ -44,10 +46,12 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
     const handleAuthChange = (event: Event) => {
       const updated = (event as CustomEvent<AuthSession | null>).detail;
       setSession(updated);
+      setSessionLoaded(true);
     };
 
     const handlePopState = () => {
       setSession(getStoredSession());
+      setSessionLoaded(true);
     };
 
     const handleLocationChange = (event: Event) => {
@@ -121,14 +125,16 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
       : true);
 
   // Filter links visible strictly to current role
-  const visibleGroups = ALL_NAV_GROUPS
-    .map((group) => ({
-      ...group,
-      links: group.links.filter(
-        (link) => link.roles.includes(rawRole) || link.roles.includes(userRole)
-      ),
-    }))
-    .filter((group) => group.links.length > 0);
+  const visibleGroups = sessionLoaded
+    ? ALL_NAV_GROUPS
+        .map((group) => ({
+          ...group,
+          links: group.links.filter(
+            (link) => link.roles.includes(rawRole) || link.roles.includes(userRole)
+          ),
+        }))
+        .filter((group) => group.links.length > 0)
+    : [];
 
   const isLocationLocked = ['CASHIER', 'STAFF'].includes(rawRole);
 
