@@ -2,11 +2,11 @@
 
 import React from 'react';
 import { AuthSession } from '@/lib/auth';
-import { LOCATIONS } from './nav-data';
 
 export interface TopBarProps {
   homeRoute: string;
   location: string;
+  locationOptions: string[];
   isLocationLocked: boolean;
   isLocationOpen: boolean;
   setIsLocationOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
@@ -25,6 +25,7 @@ export interface TopBarProps {
 
 export const TopBar: React.FC<TopBarProps> = ({
   location,
+  locationOptions,
   isLocationLocked,
   isLocationOpen,
   setIsLocationOpen,
@@ -92,7 +93,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <span style={{ color: isLocationLocked ? '#64748b' : '#3e64a0', fontSize: '13px' }}>
               {isLocationLocked ? '🔒' : '⌖'}
             </span>
-            <span>{isLocationLocked ? 'Downtown Store' : location}</span>
+            <span className="drive-location-name">{location || 'Location unavailable'}</span>
             {!isLocationLocked && (
               <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
             )}
@@ -116,8 +117,8 @@ export const TopBar: React.FC<TopBarProps> = ({
               <div style={{ padding: '6px 10px', fontSize: '10.5px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 ACTIVE STORE SCOPE
               </div>
-              {LOCATIONS.map((item) => {
-                const isSelected = (isLocationLocked ? 'Downtown Store' : location) === item;
+              {locationOptions.map((item) => {
+                const isSelected = location === item;
                 return (
                   <button
                     key={item}
@@ -162,35 +163,14 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Topbar Right Actions */}
+      {/* Workspace controls and account actions stay in distinct, aligned groups. */}
       <div className="drive-topbar-right">
-        <button
-          type="button"
-          className="drive-icon-button"
-          title="Notifications"
-          aria-label="Notifications"
-          onClick={() => alert('No new enterprise notifications.')}
-        >
-          🔔
-        </button>
-        <button
-          type="button"
-          className="drive-icon-button"
-          title="Help & Documentation"
-          aria-label="Help"
-          onClick={() => window.open('/operations', '_blank')}
-        >
-          ?
-        </button>
-        <a
-          href="/settings"
-          className="drive-icon-button"
-          title="System Settings"
-          aria-label="Settings"
-          style={{ textDecoration: 'none' }}
-        >
-          ⚙️
-        </a>
+        <div className="drive-header-tools" aria-label="Workspace tools">
+          <button type="button" className="drive-icon-button" title="Notifications" aria-label="Notifications" onClick={() => alert('No new enterprise notifications.')}>🔔</button>
+          <button type="button" className="drive-icon-button" title="Help & Documentation" aria-label="Help" onClick={() => window.open('/operations', '_blank')}>?</button>
+          <a href="/settings" className="drive-icon-button" title="System Settings" aria-label="Settings" style={{ textDecoration: 'none' }}>⚙️</a>
+        </div>
+        <span className="drive-header-divider" aria-hidden="true" />
 
         {/* User Profile Pill & Dropdown Menu */}
         <div className="drive-profile-wrap" style={{ position: 'relative' }}>
@@ -212,7 +192,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               cursor: 'pointer',
             }}
           >
-            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>
+            <span className="drive-profile-name" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>
               {session?.user?.name?.split(' ')[0] || 'Administrator'}
             </span>
             <div className="drive-profile-avatar">
@@ -257,7 +237,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                     {session?.user?.name || 'Administrator'}
                   </strong>
                   <span style={{ display: 'block', fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {session?.user?.email || 'admin@premiumretail.com'}
+                    {session?.user?.email || 'Signed in'}
                   </span>
                   <span
                     style={{
@@ -346,6 +326,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
         </div>
 
+        <span className="drive-header-divider" aria-hidden="true" />
         {/* Sidebar Collapse Toggle */}
         <button
           type="button"

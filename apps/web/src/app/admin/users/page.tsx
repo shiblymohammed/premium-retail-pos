@@ -21,6 +21,8 @@ export interface ManagedUser {
   joinedDate: string;
 }
 
+type ManagedLocation = { id: string; name: string };
+
 const ROLE_OPTIONS = [
   { value: 'ALL', label: 'All Roles' },
   { value: 'SUPER_ADMIN', label: 'Super Admin' },
@@ -43,159 +45,18 @@ const roleLabels: Record<string, string> = {
   STAFF: 'Floor Staff',
 };
 
-const DEFAULT_USERS: ManagedUser[] = [
-  {
-    id: 'usr-001',
-    name: 'System Administrator',
-    email: 'admin@premiumretail.com',
-    employeeCode: 'EMP-ADM-001',
-    role: 'SUPER_ADMIN',
-    assignedLocations: ['Downtown Store', 'North Mall', 'West End Outlet', 'Central Warehouse'],
-    discountLimitPercent: 100,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: true,
-    isActive: true,
-    joinedDate: '01-Jan-2025',
-  },
-  {
-    id: 'usr-002',
-    name: 'Regional Admin Director',
-    email: 'sysadmin@premiumretail.com',
-    employeeCode: 'EMP-ADM-002',
-    role: 'ADMIN',
-    assignedLocations: ['Downtown Store', 'North Mall', 'West End Outlet'],
-    discountLimitPercent: 50,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: true,
-    isActive: true,
-    joinedDate: '15-Mar-2025',
-  },
-  {
-    id: 'usr-003',
-    name: 'Asha Patel',
-    email: 'manager@premiumretail.com',
-    employeeCode: 'EMP-MGR-0841',
-    role: 'STORE_MANAGER',
-    assignedLocations: ['Downtown Store', 'North Mall'],
-    discountLimitPercent: 20,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: true,
-    isActive: true,
-    joinedDate: '10-Apr-2025',
-  },
-  {
-    id: 'usr-004',
-    name: 'Vikram Singh',
-    email: 'warehouse@premiumretail.com',
-    employeeCode: 'EMP-WH-0501',
-    role: 'CENTRAL_MANAGER',
-    assignedLocations: ['Central Warehouse'],
-    discountLimitPercent: 0,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: true,
-    isActive: true,
-    joinedDate: '01-May-2025',
-  },
-  {
-    id: 'usr-005',
-    name: 'Rajesh Kumar',
-    email: 'subwarehouse@premiumretail.com',
-    employeeCode: 'EMP-WH-0502',
-    role: 'SUB_WAREHOUSE_MANAGER',
-    assignedLocations: ['Central Warehouse'],
-    discountLimitPercent: 0,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: true,
-    isActive: true,
-    joinedDate: '12-Jun-2025',
-  },
-  {
-    id: 'usr-006',
-    name: 'Ravi Menon',
-    email: 'cashier@premiumretail.com',
-    employeeCode: 'EMP-CSH-0842',
-    role: 'CASHIER',
-    assignedLocations: ['Downtown Store'],
-    discountLimitPercent: 5,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: false,
-    isActive: true,
-    joinedDate: '01-Aug-2025',
-  },
-  {
-    id: 'usr-007',
-    name: 'Neel Shah',
-    email: 'n.shah@premiumretail.com',
-    employeeCode: 'EMP-CSH-0843',
-    role: 'CASHIER',
-    assignedLocations: ['Downtown Store'],
-    discountLimitPercent: 5,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: false,
-    isActive: true,
-    joinedDate: '15-Aug-2025',
-  },
-  {
-    id: 'usr-008',
-    name: 'Maya Das',
-    email: 'm.das@premiumretail.com',
-    employeeCode: 'EMP-CSH-0844',
-    role: 'CASHIER',
-    assignedLocations: ['West End Outlet'],
-    discountLimitPercent: 10,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: false,
-    isActive: true,
-    joinedDate: '01-Sep-2025',
-  },
-  {
-    id: 'usr-009',
-    name: 'Priya Sharma',
-    email: 'staff@premiumretail.com',
-    employeeCode: 'EMP-STF-0109',
-    role: 'STAFF',
-    assignedLocations: ['Downtown Store'],
-    discountLimitPercent: 0,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: false,
-    isActive: true,
-    joinedDate: '10-Oct-2025',
-  },
-  {
-    id: 'usr-010',
-    name: 'Kabir Rao',
-    email: 'k.rao@premiumretail.com',
-    employeeCode: 'EMP-CSH-0845',
-    role: 'CASHIER',
-    assignedLocations: ['North Mall'],
-    discountLimitPercent: 5,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: false,
-    isActive: false,
-    joinedDate: '12-May-2025',
-  },
-];
-
-const AVAILABLE_LOCATIONS = ['Downtown Store', 'North Mall', 'West End Outlet', 'Central Warehouse'];
-
 export default function UserManagementPage() {
-  const [users, setUsers] = useState<ManagedUser[]>(DEFAULT_USERS);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [availableLocations, setAvailableLocations] = useState<ManagedLocation[]>([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [locationFilter, setLocationFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [notice, setNotice] = useState('');
-  const [currentUserRole, setCurrentUserRole] = useState('SUPER_ADMIN');
+  const [savingUser, setSavingUser] = useState(false);
+  // Fail closed while the signed-in role is being hydrated; never briefly
+  // render Super Admin-only role options for another administrator.
+  const [currentUserRole, setCurrentUserRole] = useState('');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -207,19 +68,10 @@ export default function UserManagementPage() {
   const [formPassword, setFormPassword] = useState('');
   const [formEmployeeCode, setFormEmployeeCode] = useState('');
   const [formRole, setFormRole] = useState<ManagedUser['role']>('CASHIER');
-  const [formLocations, setFormLocations] = useState<string[]>(['Downtown Store']);
-  const [formDiscountLimit, setFormDiscountLimit] = useState('5');
-  const [formCanCancel, setFormCanCancel] = useState(false);
-  const [formCanReturns, setFormCanReturns] = useState(false);
-  const [formCanAudits, setFormCanAudits] = useState(false);
-  const [formIsActive, setFormIsActive] = useState(true);
-
-  // Password Reset Modal
-  const [resetModalUser, setResetModalUser] = useState<ManagedUser | null>(null);
-  const [generatedPassword, setGeneratedPassword] = useState('');
+  const [formLocations, setFormLocations] = useState<string[]>([]);
 
   // Google Drive Reference UI State
-  const [selectedUserId, setSelectedUserId] = useState<string>('usr-003');
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
   const [openDropdown, setOpenDropdown] = useState<'ROLE' | 'LOCATION' | 'STATUS' | null>(null);
@@ -258,37 +110,39 @@ export default function UserManagementPage() {
       setCurrentUserRole(session.user.role);
     }
 
-    // Try fetching from server if online
-    if (session?.accessToken) {
-      fetch(`${API_BASE}/users`, {
-        headers: { Authorization: `Bearer ${session.accessToken}` },
-        cache: 'no-store',
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data && Array.isArray(data.data) && data.data.length > 0) {
-            // Map API users
-            const mapped: ManagedUser[] = data.data.map((u: any, idx: number) => ({
-              id: u.id || `usr-${idx}`,
-              name: u.name || u.email.split('@')[0],
-              email: u.email,
-              employeeCode: u.employeeCode || `EMP-${1000 + idx}`,
-              role: u.role || 'CASHIER',
-              assignedLocations: u.locationScopes?.map((ls: any) => ls.location?.name || ls.locationId) || ['Downtown Store'],
-              discountLimitPercent: Number(u.discountLimitPercent) || 0,
-              canCancelSales: Boolean(u.canCancelSales),
-              canProcessReturns: Boolean(u.canProcessReturns),
-              canCountStockAudits: Boolean(u.canCountStockAudits),
-              isActive: u.isActive !== false,
-              joinedDate: u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '01-Aug-2025',
-            }));
-            setUsers(mapped);
-          }
-        })
-        .catch(() => {
-          // Local fallback active
-        });
+    if (!session?.accessToken) {
+      setNotice('Sign in as Super Admin to manage real user accounts.');
+      return;
     }
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+    Promise.all([
+      fetch(`${API_BASE}/users`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
+    ])
+      .then(async ([usersResponse, locationsResponse]) => {
+        if (!usersResponse.ok || !locationsResponse.ok) throw new Error('Could not load users and locations from the API.');
+        const [userPayload, locationPayload] = await Promise.all([usersResponse.json(), locationsResponse.json()]);
+        const locationRecords: ManagedLocation[] = Array.isArray(locationPayload.data) ? locationPayload.data.map((location: any) => ({ id: location.id, name: location.name })) : [];
+        setAvailableLocations(locationRecords);
+        const locationNameById = new Map(locationRecords.map((location) => [location.id, location.name]));
+        const mapped: ManagedUser[] = Array.isArray(userPayload.data) ? userPayload.data.map((user: any) => ({
+          id: user.id,
+          name: user.employee ? `${user.employee.firstName} ${user.employee.lastName}` : user.email.split('@')[0],
+          email: user.email,
+          employeeCode: user.employee?.employeeCode || '',
+          role: user.role,
+          assignedLocations: (user.locationScopes || []).map((scope: any) => locationNameById.get(scope.locationId) || scope.locationId),
+          discountLimitPercent: Number(user.discountLimitPercent) || 0,
+          canCancelSales: Boolean(user.canCancelSales),
+          canProcessReturns: Boolean(user.canProcessReturns),
+          canCountStockAudits: Boolean(user.canCountStockAudits),
+          isActive: user.isActive !== false,
+          joinedDate: user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
+        })) : [];
+        setUsers(mapped);
+        setNotice('');
+      })
+      .catch((error: unknown) => setNotice(error instanceof Error ? error.message : 'Could not load users from the API.'));
   }, []);
 
   const filteredUsers = useMemo(() => {
@@ -323,14 +177,9 @@ export default function UserManagementPage() {
     setFormName('');
     setFormEmail('');
     setFormPassword('');
-    setFormEmployeeCode(`EMP-${Math.floor(1000 + Math.random() * 9000)}`);
+    setFormEmployeeCode('');
     setFormRole('CASHIER');
-    setFormLocations(['Downtown Store']);
-    setFormDiscountLimit('5');
-    setFormCanCancel(false);
-    setFormCanReturns(false);
-    setFormCanAudits(false);
-    setFormIsActive(true);
+    setFormLocations([]);
     setIsModalOpen(true);
   };
 
@@ -342,11 +191,6 @@ export default function UserManagementPage() {
     setFormEmployeeCode(u.employeeCode);
     setFormRole(u.role);
     setFormLocations([...u.assignedLocations]);
-    setFormDiscountLimit(String(u.discountLimitPercent));
-    setFormCanCancel(u.canCancelSales);
-    setFormCanReturns(u.canProcessReturns);
-    setFormCanAudits(u.canCountStockAudits);
-    setFormIsActive(u.isActive);
     setIsModalOpen(true);
   };
 
@@ -356,83 +200,87 @@ export default function UserManagementPage() {
     );
   };
 
-  const handleSaveUser = (e: FormEvent) => {
+  const handleSaveUser = async (e: FormEvent) => {
     e.preventDefault();
-    if (!formEmail.trim() || !formName.trim()) {
-      alert('Name and Email are required.');
+    if (!formEmail.trim() || (formRole !== 'SUPER_ADMIN' && !formName.trim())) {
+      alert('Name and Email are required for employee accounts.');
       return;
     }
-    if (formLocations.length === 0) {
-      alert('At least one physical location must be assigned (Dual-Axis Security Invariant 11).');
+    if (formRole !== 'SUPER_ADMIN' && formLocations.length === 0) {
+      alert('Choose at least one active location for this role.');
       return;
     }
-
-    if (editingUser) {
-      // Update
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === editingUser.id
-            ? {
-                ...u,
-                name: formName,
-                email: formEmail,
-                employeeCode: formEmployeeCode,
-                role: formRole,
-                assignedLocations: formLocations,
-                discountLimitPercent: Number(formDiscountLimit) || 0,
-                canCancelSales: formCanCancel,
-                canProcessReturns: formCanReturns,
-                canCountStockAudits: formCanAudits,
-                isActive: formIsActive,
-              }
-            : u
-        )
-      );
-      setNotice(`User account ${formEmail} updated successfully.`);
-    } else {
-      // Create
-      const newUser: ManagedUser = {
-        id: `usr-${Date.now()}`,
-        name: formName,
-        email: formEmail,
-        employeeCode: formEmployeeCode,
-        role: formRole,
+    if (!editingUser && formRole !== 'SUPER_ADMIN' && (!formName.trim() || !formEmployeeCode.trim())) {
+      alert('Enter the employee name and code for this account.');
+      return;
+    }
+    const session = getStoredSession();
+    if (!session?.accessToken) { setNotice('Your session has expired. Sign in again.'); return; }
+    if (!editingUser && formPassword.length < 12) { alert('Set an initial password with at least 12 characters.'); return; }
+    const locationIds = formLocations.map((name) => availableLocations.find((location) => location.name === name)?.id).filter((id): id is string => Boolean(id));
+    setSavingUser(true);
+    try {
+      const response = await fetch(`${API_BASE}/users${editingUser ? `/${editingUser.id}` : ''}`, {
+        method: editingUser ? 'PATCH' : 'POST',
+        headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify(editingUser
+          ? { role: formRole, locationIds }
+          : { email: formEmail.trim(), password: formPassword, role: formRole, locationIds }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'The server could not save this user.');
+      const saved = payload.data;
+      const mapped: ManagedUser = {
+        id: saved.id,
+        name: formName.trim() || saved.email.split('@')[0],
+        email: saved.email,
+        employeeCode: formEmployeeCode.trim(),
+        role: saved.role,
         assignedLocations: formLocations,
-        discountLimitPercent: Number(formDiscountLimit) || 0,
-        canCancelSales: formCanCancel,
-        canProcessReturns: formCanReturns,
-        canCountStockAudits: formCanAudits,
-        isActive: formIsActive,
-        joinedDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        discountLimitPercent: Number(saved.discountLimitPercent) || 0,
+        canCancelSales: Boolean(saved.canCancelSales),
+        canProcessReturns: Boolean(saved.canProcessReturns),
+        canCountStockAudits: Boolean(saved.canCountStockAudits),
+        isActive: saved.isActive !== false,
+        joinedDate: saved.createdAt ? new Date(saved.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
       };
-      setUsers((prev) => [newUser, ...prev]);
-      setNotice(`New account ${formEmail} created and bound to ${formLocations.join(', ')}.`);
-    }
-
-    setIsModalOpen(false);
-  };
-
-  const handleToggleStatus = (userId: string) => {
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id === userId) {
-          const nextState = !u.isActive;
-          setNotice(
-            nextState
-              ? `User ${u.email} reactivated.`
-              : `User ${u.email} deactivated. Sessions revoked immediately.`
-          );
-          return { ...u, isActive: nextState };
+      setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
+      setNotice(`User account ${saved.email} ${editingUser ? 'updated' : 'created'} successfully.`);
+      setIsModalOpen(false);
+      if (!editingUser && formRole !== 'SUPER_ADMIN') {
+        const nameParts = formName.trim().split(/\s+/);
+        const employeeResponse = await fetch(`${API_BASE}/employees`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ userId: saved.id, employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0], hireDate: new Date().toISOString().slice(0, 10) }),
+        });
+        const employeePayload = await employeeResponse.json().catch(() => ({}));
+        if (!employeeResponse.ok) {
+          setNotice(`Account ${saved.email} was created, but the employee profile failed: ${employeePayload.message || 'create it from Employee Management.'}`);
+          return;
         }
-        return u;
-      })
-    );
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'The user could not be saved.');
+    } finally {
+      setSavingUser(false);
+    }
   };
 
-  const openResetPassword = (u: ManagedUser) => {
-    setResetModalUser(u);
-    const pass = `Retail@${Math.floor(1000 + Math.random() * 9000)}`;
-    setGeneratedPassword(pass);
+  const handleToggleStatus = async (userId: string) => {
+    const user = users.find((item) => item.id === userId);
+    const session = getStoredSession();
+    if (!user || !session?.accessToken) return;
+    if (!user.isActive) { setNotice('Reactivation is not currently available from this screen.'); return; }
+    try {
+      const response = await fetch(`${API_BASE}/users/${userId}/deactivate`, { method: 'PATCH', headers: { Authorization: `Bearer ${session.accessToken}` }, cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'Could not deactivate this account.');
+      setUsers((current) => current.map((item) => item.id === userId ? { ...item, isActive: false } : item));
+      setNotice(`User ${user.email} deactivated. Existing refresh sessions were revoked.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not deactivate this account.'); }
   };
 
   const getRoleBadgeStyle = (role: ManagedUser['role']) => {
@@ -505,7 +353,7 @@ export default function UserManagementPage() {
   };
 
   return (
-    <div style={{ padding: '28px 36px 60px', maxWidth: '1440px', margin: '0 auto', color: '#1e293b' }}>
+    <div className="app-page" style={{ color: '#1e293b' }}>
       {notice && (
         <div
           style={{
@@ -914,7 +762,8 @@ export default function UserManagementPage() {
                     <span>All Store Locations</span>
                     {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
                   </button>
-                  {AVAILABLE_LOCATIONS.map((loc) => {
+                  {availableLocations.map((location) => {
+                    const loc = location.name;
                     const isSelected = locationFilter === loc;
                     return (
                       <button
@@ -1362,29 +1211,6 @@ export default function UserManagementPage() {
                                     type="button"
                                     onClick={() => {
                                       setActiveActionMenuId(null);
-                                      openResetPassword(u);
-                                    }}
-                                    style={{
-                                      width: '100%',
-                                      padding: '8px 10px',
-                                      borderRadius: '6px',
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: '#1e293b',
-                                      fontSize: '12.5px',
-                                      fontWeight: 600,
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '8px',
-                                    }}
-                                  >
-                                    <span>⚿</span> Reset Password
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setActiveActionMenuId(null);
                                       handleToggleStatus(u.id);
                                     }}
                                     style={{
@@ -1464,6 +1290,7 @@ export default function UserManagementPage() {
             </div>
 
             <form onSubmit={handleSaveUser}>
+              {formRole !== 'SUPER_ADMIN' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
@@ -1492,6 +1319,7 @@ export default function UserManagementPage() {
                   />
                 </div>
               </div>
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
@@ -1521,8 +1349,12 @@ export default function UserManagementPage() {
                     <option value="STORE_MANAGER">STORE_MANAGER (Store Lead)</option>
                     <option value="CENTRAL_MANAGER">CENTRAL_MANAGER (Main WH)</option>
                     <option value="SUB_WAREHOUSE_MANAGER">SUB_WAREHOUSE_MANAGER (Depot)</option>
-                    <option value="ADMIN">ADMIN (Regional Director)</option>
-                    <option value="SUPER_ADMIN">SUPER_ADMIN (Global)</option>
+                    {currentUserRole === 'SUPER_ADMIN' && (
+                      <>
+                        <option value="ADMIN">ADMIN (Scoped Administrator)</option>
+                        <option value="SUPER_ADMIN">SUPER_ADMIN (Global)</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>
@@ -1534,7 +1366,9 @@ export default function UserManagementPage() {
                   </label>
                   <input
                     type="password"
-                    placeholder="Leave blank for auto-generated password"
+                    required
+                    minLength={12}
+                    placeholder="At least 12 characters"
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
@@ -1543,12 +1377,14 @@ export default function UserManagementPage() {
               )}
 
               {/* Physical Location Binding */}
+              {formRole !== 'SUPER_ADMIN' && (
               <div style={{ marginBottom: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
                   Authorized Physical Store Locations (Dual-Axis Invariant) *
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-                  {AVAILABLE_LOCATIONS.map((loc) => {
+                  {availableLocations.map((location) => {
+                    const loc = location.name;
                     const checked = formLocations.includes(loc);
                     return (
                       <label
@@ -1573,66 +1409,7 @@ export default function UserManagementPage() {
                   })}
                 </div>
               </div>
-
-              {/* Discount Limit Cap & Invariant Permissions */}
-              <div style={{ marginBottom: '16px', display: 'grid', gridTemplateColumns: '120px 1fr', gap: '14px', alignItems: 'center' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>
-                    Discount Cap (%)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={formDiscountLimit}
-                    onChange={(e) => setFormDiscountLimit(e.target.value)}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
-                    Privileged Operations
-                  </label>
-                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#475569' }}>
-                      <input
-                        type="checkbox"
-                        checked={formCanCancel}
-                        onChange={(e) => setFormCanCancel(e.target.checked)}
-                      />
-                      <span>Void Sales</span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#475569' }}>
-                      <input
-                        type="checkbox"
-                        checked={formCanReturns}
-                        onChange={(e) => setFormCanReturns(e.target.checked)}
-                      />
-                      <span>Process Returns</span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#475569' }}>
-                      <input
-                        type="checkbox"
-                        checked={formCanAudits}
-                        onChange={(e) => setFormCanAudits(e.target.checked)}
-                      />
-                      <span>Stock Audits</span>
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Switch */}
-              <div style={{ marginBottom: '22px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#334155' }}>
-                  <input
-                    type="checkbox"
-                    checked={formIsActive}
-                    onChange={(e) => setFormIsActive(e.target.checked)}
-                  />
-                  <span>User account is active and permitted to sign in</span>
-                </label>
-              </div>
+              )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button
@@ -1672,101 +1449,6 @@ export default function UserManagementPage() {
         </div>
       )}
 
-      {/* RESET PASSWORD MODAL */}
-      {resetModalUser && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.55)',
-            zIndex: 1000,
-            display: 'grid',
-            placeItems: 'center',
-            padding: '20px',
-            backdropFilter: 'blur(3px)',
-          }}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              maxWidth: '420px',
-              width: '100%',
-              padding: '24px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
-              textAlign: 'center',
-            }}
-          >
-            <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#eff6ff', color: '#2563eb', margin: '0 auto 14px', display: 'grid', placeItems: 'center', fontSize: '20px' }}>
-              ⚿
-            </div>
-            <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 6px', color: '#0f172a' }}>
-              Reset Operator Password
-            </h3>
-            <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 16px' }}>
-              A temporary password has been generated for <strong>{resetModalUser.email}</strong>:
-            </p>
-            <div
-              style={{
-                padding: '12px',
-                borderRadius: '8px',
-                background: '#f8fafc',
-                border: '1px dashed #cbd5e1',
-                fontSize: '18px',
-                fontWeight: 800,
-                color: '#155eef',
-                fontFamily: 'monospace',
-                letterSpacing: '0.06em',
-                marginBottom: '18px',
-                userSelect: 'all',
-              }}
-            >
-              {generatedPassword}
-            </div>
-            <p style={{ fontSize: '11px', color: '#94a3b8', margin: '0 0 20px' }}>
-              The operator will be prompted to replace this temporary password on next terminal login.
-            </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(generatedPassword);
-                  setNotice(`Password for ${resetModalUser.email} copied to clipboard!`);
-                  setResetModalUser(null);
-                }}
-                style={{
-                  padding: '9px 18px',
-                  borderRadius: '8px',
-                  background: '#155eef',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                Copy & Dismiss
-              </button>
-              <button
-                type="button"
-                onClick={() => setResetModalUser(null)}
-                style={{
-                  padding: '9px 14px',
-                  borderRadius: '8px',
-                  background: '#f1f5f9',
-                  color: '#475569',
-                  border: '1px solid #cbd5e1',
-                  fontSize: '13px',
-                  fontWeight: 650,
-                  cursor: 'pointer',
-                }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

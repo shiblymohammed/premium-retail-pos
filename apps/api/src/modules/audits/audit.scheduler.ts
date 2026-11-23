@@ -1,7 +1,14 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { LocationType, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AuditsService } from './audits.service';
+
+const AUDIT_MANAGERS: Role[] = [
+  Role.SUPER_ADMIN,
+  Role.ADMIN,
+  Role.STORE_MANAGER,
+  Role.CENTRAL_MANAGER,
+  Role.SUB_WAREHOUSE_MANAGER,
+];
 
 @Injectable()
 export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
@@ -9,7 +16,7 @@ export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running = false;
 
-  constructor(private readonly prisma: PrismaService, private readonly audits: AuditsService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   onModuleInit() {
     void this.tick();
@@ -29,33 +36,47 @@ export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
         where: { isActive: true, dailyAuditEnabled: true },
         select: { id: true, name: true, type: true, dailyAuditTime: true, company: { select: { timezone: true } } },
       });
-      if (!locations.length) return;
-
-      const actor = await this.prisma.user.findFirst({
+      const globalAdmins = await this.prisma.user.findMany({
         where: { role: Role.SUPER_ADMIN, isActive: true },
         select: { id: true },
       });
-      if (!actor) {
-        this.logger.error('Daily audit schedules are configured, but no active super admin exists to own scheduled sessions.');
-        return;
-      }
 
-      const now = new Date();
       for (const location of locations) {
-        try {
-          const local = this.localClock(now, location.company.timezone);
-          if (local.time < location.dailyAuditTime!) continue;
-          if (location.type === LocationType.RETAIL_STORE && local.time < '19:00') continue;
-          if (location.type !== LocationType.RETAIL_STORE && (local.weekday !== 'Sun' || local.time < '19:00')) continue;
-          const result = await this.audits.startScheduled(location.id, local.date, local.time, local.weekday, actor.id);
-          if (!result.started) continue;
-          if (result.started) this.logger.log(`Started scheduled stock audit for ${location.name} (${local.date} ${location.dailyAuditTime} ${location.company.timezone}).`);
-        } catch (error) {
-          this.logger.error(`Could not start scheduled audit for ${location.name}: ${error instanceof Error ? error.message : String(error)}`);
-        }
+        const local = this.localClock(new Date(), location.company.timezone);
+        if (local.time < location.dailyAuditTime || local.time < '19:00') continue;
+        if (location.type !== LocationType.RETAIL_STORE && local.weekday !== 'Sun') continue;
+
+        const activeSession = await this.prisma.auditSession.findFirst({
+          where: { locationId: location.id, status: { in: ['ACTIVE', 'SUBMITTED'] } },
+          select: { id: true },
+        });
+        if (activeSession) continue;
+
+        const scopedUsers = await this.prisma.userLocationScope.findMany({
+          where: { locationId: location.id, user: { isActive: true, OR: [{ role: { in: AUDIT_MANAGERS } }, { canCountStockAudits: true }] } },
+          select: { userId: true },
+        });
+        const recipientIds = new Set([...globalAdmins.map((user) => user.id), ...scopedUsers.map((scope) => scope.userId)]);
+        const dedupeKey = `audit-due:${location.id}:${local.date}`;
+        await Promise.all([...recipientIds].map((userId) => this.prisma.inAppNotification.upsert({
+          where: { userId_dedupeKey: { userId, dedupeKey } },
+          create: {
+            userId,
+            dedupeKey,
+            type: 'AUDIT_DUE',
+            title: `Stock audit due · ${location.name}`,
+            message: 'The scheduled physical count window is open. Start the audit when the location is ready to stop stock movements.',
+            href: `/audits?locationId=${encodeURIComponent(location.id)}`,
+          },
+          update: {
+            title: `Stock audit due · ${location.name}`,
+            message: 'The scheduled physical count window is open. Start the audit when the location is ready to stop stock movements.',
+            href: `/audits?locationId=${encodeURIComponent(location.id)}`,
+          },
+        })));
       }
     } catch (error) {
-      this.logger.error(`Daily audit scheduler tick failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(`Audit reminder scheduler tick failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       this.running = false;
     }

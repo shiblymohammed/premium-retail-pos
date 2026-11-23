@@ -83,7 +83,7 @@ export default function SettingsPage() {
   const initials = (session?.user?.name || session?.user?.email || 'PR').slice(0, 2).toUpperCase();
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} app-page`}>
       <header className={styles.header}>
         <div>
           <h1>Settings</h1>
@@ -101,7 +101,7 @@ export default function SettingsPage() {
           </div>
           <ul className={styles.metaList}>
             <li><i><Icon name="mail" size={16} /></i><div><small>Email</small><b title={email}>{email}</b></div></li>
-            <li><i><Icon name="store" size={16} /></i><div><small>Assigned store</small><b>Downtown Store</b></div></li>
+            <li><i><Icon name="store" size={16} /></i><div><small>Assigned store</small><b>Use the location selector</b></div></li>
             <li><i><Icon name="lock" size={16} /></i><div><small>Screen lock</small><b>{prefs.autoLockMinutes ? `After ${prefs.autoLockMinutes} minutes` : 'Never'}</b></div></li>
           </ul>
           <div className={styles.savedNote}>

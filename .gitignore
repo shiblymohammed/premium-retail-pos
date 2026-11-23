@@ -46,7 +46,9 @@ apps/api/prisma/*.db-journal
 
 # Docker
 docker-data/
+.backups/
 
 # Misc
 *.tsbuildinfo
 .turbo/
+.vercel/

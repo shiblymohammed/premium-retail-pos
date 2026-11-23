@@ -42,166 +42,6 @@ type ReportKind =
   | 'cancellations'
   | 'itemDeletions';
 
-const DEMO_LOCATIONS: Location[] = [
-  { id: 'loc_downtown', name: 'Downtown Store', type: 'RETAIL_STORE' },
-  { id: 'loc_north_mall', name: 'North Mall', type: 'RETAIL_STORE' },
-  { id: 'loc_west_end', name: 'West End Outlet', type: 'RETAIL_STORE' },
-  { id: 'loc_warehouse', name: 'Central Warehouse', type: 'WAREHOUSE' },
-];
-
-const DEMO_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: 'notif_1',
-    dedupeKey: 'low_stock_bev',
-    type: 'LOW_STOCK',
-    title: 'Low Stock Alert: Green Tea Bags',
-    message: 'North Mall stock dropped to 8 packs (reorder point: 12). Replenishment transfer advised.',
-    createdAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-    readAt: null,
-    href: '/products',
-  },
-  {
-    id: 'notif_2',
-    dedupeKey: 'negative_stock_pc',
-    type: 'NEGATIVE_STOCK',
-    title: 'Negative Inventory Warning (OD-03)',
-    message: 'West End Outlet has -2 units recorded for Herbal Shampoo. Audit reconciliation needed.',
-    createdAt: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
-    readAt: null,
-    href: '/audits',
-  },
-  {
-    id: 'notif_3',
-    dedupeKey: 'audit_freeze_active',
-    type: 'AUDIT_LOCK',
-    title: 'ADR-010 Location Freeze Enforced',
-    message: 'Downtown Store is currently locked for physical stocktake. Point of sale checkout paused.',
-    createdAt: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
-    readAt: null,
-    href: '/audits',
-  },
-];
-
-const DEMO_SALES: SalesSummary = {
-  period: { from: '2026-10-19', to: '2026-11-18' },
-  totals: { netSales: '1482000.00', completedInvoices: 384, cancelledInvoices: 6 },
-  locations: [
-    { locationId: 'loc_downtown', locationName: 'Downtown Store', invoices: 198, netSales: '824000.00', cancelled: 3 },
-    { locationId: 'loc_north_mall', locationName: 'North Mall', invoices: 112, netSales: '416000.00', cancelled: 2 },
-    { locationId: 'loc_west_end', locationName: 'West End Outlet', invoices: 74, netSales: '242000.00', cancelled: 1 },
-  ],
-  daily: [
-    { date: '2026-11-14', invoices: 48, netSales: '184000.00', cancelled: 1 },
-    { date: '2026-11-15', invoices: 62, netSales: '246000.00', cancelled: 0 },
-    { date: '2026-11-16', invoices: 54, netSales: '210000.00', cancelled: 2 },
-    { date: '2026-11-17', invoices: 78, netSales: '312000.00', cancelled: 1 },
-    { date: '2026-11-18', invoices: 64, netSales: '254000.00', cancelled: 0 },
-  ],
-  truncated: false,
-};
-
-const DEMO_SALES_DETAILS: SalesDetails = {
-  page: 1,
-  pageSize: 10,
-  total: 5,
-  totalPages: 1,
-  rows: [
-    { id: '1', invoiceNumber: 'INV-2026-0842', location: { name: 'Downtown Store' }, status: 'FINALIZED', netTotal: '1130.00', createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString() },
-    { id: '2', invoiceNumber: 'INV-2026-0841', location: { name: 'Downtown Store' }, status: 'FINALIZED', netTotal: '485.00', createdAt: new Date(Date.now() - 5 * 3600 * 1000).toISOString() },
-    { id: '3', invoiceNumber: 'INV-2026-0711', location: { name: 'North Mall' }, status: 'FINALIZED', netTotal: '612.00', createdAt: new Date(Date.now() - 28 * 3600 * 1000).toISOString() },
-    { id: '4', invoiceNumber: 'INV-2026-0699', location: { name: 'West End Outlet' }, status: 'FINALIZED', netTotal: '890.00', createdAt: new Date(Date.now() - 48 * 3600 * 1000).toISOString() },
-    { id: '5', invoiceNumber: 'INV-2026-0600', location: { name: 'West End Outlet' }, status: 'CANCELLED', netTotal: '598.00', createdAt: new Date(Date.now() - 72 * 3600 * 1000).toISOString() },
-  ],
-};
-
-const DEMO_STOCK: StockReport = {
-  totals: {
-    variants: 248,
-    availableBaseUnits: 12480,
-    lowStockVariants: 18,
-    negativeStockVariants: 3,
-  },
-  rows: [
-    { sku: 'BEV-1048', productName: 'Arabica Ground Coffee', variantName: 'Medium roast - 250 g', locationName: 'Downtown Store', baseUnit: 'pack', available: 27, cartons: 2, looseBaseUnits: 3, unitsPerCarton: 12, inTransit: 36, reserved: 6, quarantined: 2, reorderLevelBase: 12, lowStock: false, negativeStock: false },
-    { sku: 'BEV-1056', productName: 'Green Tea Bags', variantName: 'Lemon Mint - 25 bags', locationName: 'North Mall', baseUnit: 'pack', available: 8, cartons: 0, looseBaseUnits: 8, unitsPerCarton: 12, inTransit: 24, reserved: 4, quarantined: 0, reorderLevelBase: 12, lowStock: true, negativeStock: false },
-    { sku: 'PC-2031', productName: 'Herbal Shampoo', variantName: 'Aloe vera - 500 ml', locationName: 'West End Outlet', baseUnit: 'bottle', available: -2, cartons: null, looseBaseUnits: -2, unitsPerCarton: null, inTransit: 10, reserved: 0, quarantined: 0, reorderLevelBase: 6, lowStock: true, negativeStock: true },
-    { sku: 'HL-J108', productName: 'Facial Tissue Box', variantName: '2 ply - 100 sheets', locationName: 'Central Warehouse', baseUnit: 'box', available: 144, cartons: 12, looseBaseUnits: 0, unitsPerCarton: 12, inTransit: 48, reserved: 24, quarantined: 6, reorderLevelBase: 24, lowStock: false, negativeStock: false },
-    { sku: 'SNK-4172', productName: 'Potato Chips', variantName: 'Classic salted - 52 g', locationName: 'Downtown Store', baseUnit: 'pack', available: 9, cartons: 0, looseBaseUnits: 9, unitsPerCarton: 24, inTransit: 36, reserved: 12, quarantined: 1, reorderLevelBase: 18, lowStock: true, negativeStock: false },
-    { sku: 'PAN-5012', productName: 'Basmati Royal Rice', variantName: 'Long Grain - 5 kg', locationName: 'Central Warehouse', baseUnit: 'bag', available: 64, cartons: 15, looseBaseUnits: 4, unitsPerCarton: 4, inTransit: 40, reserved: 8, quarantined: 0, reorderLevelBase: 16, lowStock: false, negativeStock: false },
-  ],
-};
-
-/** Specialised report datasets (demo data until the matching API endpoints are wired). */
-const SPECIALIZED_REPORTS: Partial<Record<ReportKind, TableData>> = {
-  lowStock: {
-    title: 'Low Stock & Replenishment Reorder Points',
-    description: 'Variants at or below reorder threshold across stores',
-    headers: ['Location', 'SKU', 'Product & Variant', 'On Hand', 'Reorder Level', 'Replenishment Status'],
-    rows: [
-      ['North Mall', 'BEV-1056', 'Green Tea Bags (Lemon Mint - 25 bags)', '8 packs', '12 packs', 'Suggested 12 packs'],
-      ['Downtown Store', 'SNK-4172', 'Potato Chips (Classic salted - 52 g)', '9 packs', '18 packs', 'Suggested 24 packs'],
-      ['Downtown Store', 'PAN-5020', 'Olive Oil Extra Virgin (Cold Pressed - 1 L)', '4 bottles', '8 bottles', 'Suggested 8 bottles'],
-      ['West End Outlet', 'PC-2031', 'Herbal Shampoo (Aloe vera - 500 ml)', '-2 bottles', '6 bottles', 'Deficit: Audit Freeze Alert'],
-    ],
-  },
-  ledger: {
-    title: 'Immutable Inventory Movement Ledger',
-    description: 'Append-only ledger entries recording all physical inventory movements',
-    headers: ['Timestamp', 'Type', 'Location', 'SKU', 'Quantity', 'State', 'Source / Destination', 'Actor'],
-    rows: [
-      ['Today 14:10', 'SALE', 'Downtown Store', 'BEV-1048', '-2 packs', 'AVAILABLE', 'Point of Sale (INV-0842)', 'Rajesh Kumar (Cashier)'],
-      ['Today 12:45', 'RETURN_INWARD', 'North Mall', 'SNK-4172', '+1 pack', 'RESTOCKED', 'Customer Return (RET-0041)', 'Anita Sharma (Cashier)'],
-      ['Yesterday 18:00', 'STOCK_ADJUSTMENT', 'Downtown Store', 'PAN-5012', '+4 bags', 'AVAILABLE', 'Physical Audit (audit_7891)', 'Store Manager'],
-      ['16-Nov 11:30', 'TRANSFER_DISPATCH', 'Central Warehouse', 'HL-J108', '-24 boxes', 'IN_TRANSIT', 'Warehouse -> Downtown', 'Warehouse Logistics'],
-    ],
-  },
-  transferDiscrepancies: {
-    title: 'Inter-Store Transfer Discrepancies',
-    description: 'Dispatched manifests vs goods physically verified upon arrival',
-    headers: ['Transfer Manifest', 'Route', 'SKU', 'Dispatched', 'Received Good', 'Damaged (Quarantine)', 'Shortage'],
-    rows: [
-      ['TRF-2026-0182', 'Central Warehouse -> North Mall', 'BEV-1056', '24 packs', '22 packs', '2 packs (broken box)', '0 units'],
-      ['TRF-2026-0155', 'Central Warehouse -> West End', 'PC-2031', '12 bottles', '10 bottles', '0 units', '2 units missing'],
-    ],
-  },
-  auditVariances: {
-    title: 'Stocktake Audit Variance History',
-    description: 'Discrepancy logs from off-hours physical counts',
-    headers: ['Audit Session', 'Store', 'Date', 'Product & SKU', 'Expected', 'Physical Count', 'Delta Variance', 'Resolution'],
-    rows: [
-      ['audit_7891', 'Downtown Store', '12-Nov-2026', 'Basmati Royal Rice (PAN-5012)', '60 bags', '64 bags', '+4 bags (Surplus)', 'Approved by Manager (Stock In)'],
-      ['audit_6542', 'Downtown Store', '05-Nov-2026', 'Potato Chips (SNK-4172)', '12 packs', '9 packs', '-3 packs (Deficit)', 'Approved: Shelf breakage written off'],
-    ],
-  },
-  priceChanges: {
-    title: 'Master Price Alteration Audit Trail (Invariant 10)',
-    description: 'Super Admin price change log with documented business justification',
-    headers: ['Effective Date', 'SKU & Product', 'Field', 'Old Price (INR)', 'New Price (INR)', 'Authorized By', 'Mandatory Reason'],
-    rows: [
-      ['10-Nov-2026', 'BEV-1048 (Arabica Coffee)', 'Retail Selling Price', '₹450.00', '₹485.00', 'superadmin@retail.com', 'Supplier raw bean cost increase +8%'],
-      ['01-Nov-2026', 'PAN-5020 (Olive Oil 1L)', 'Retail Selling Price', '₹850.00', '₹890.00', 'superadmin@retail.com', 'Import tariff revision quarterly adjust'],
-    ],
-  },
-  cancellations: {
-    title: 'Cancelled Invoices & Void Audit Log (OD-08)',
-    description: 'Voided transaction records with manual refund tracking and ledger reversal status',
-    headers: ['Invoice #', 'Store Branch', 'Cancelled Timestamp', 'Supervisor Authorizer', 'Net Refund (INR)', 'Method', 'Cancellation Reason'],
-    rows: [
-      ['INV-2026-0600', 'West End Outlet', '15-Nov-2026 14:15', 'Vikram Mehta (Supervisor)', '₹598.00', 'Card (manual)', 'Customer billing error: Duplicate payment charged by terminal'],
-      ['INV-2026-0512', 'Downtown Store', '08-Nov-2026 18:30', 'Rajesh Manager', '₹485.00', 'Cash', 'Customer requested walkout before bagging completion'],
-    ],
-  },
-  itemDeletions: {
-    title: 'Cashier Cart Line Item Deletions',
-    description: 'POS cart deletion security audit trail to detect cashier shrinkage or tampering',
-    headers: ['Timestamp', 'Cashier', 'Terminal', 'Product Scanned & Removed', 'Qty', 'Unit Price', 'Supervisor Override'],
-    rows: [
-      ['Today 13:22', 'Rajesh Kumar (Cashier)', 'Downtown Register 1', 'Organic Dark Chocolate (SNK-4180)', '1 pack', '₹180.00', 'None (Below threshold)'],
-      ['Yesterday 17:05', 'Amit Verma (Cashier)', 'West End Register 2', 'Olive Oil 1 L (PAN-5020)', '2 bottles', '₹890.00', 'Authorized by Store Supervisor'],
-    ],
-  },
-};
-
 type RangePreset = 'last7' | 'last30' | 'custom';
 
 const SHARE_COLORS = ['#3e64a0', '#7f9cc9', '#c3d2e8', '#dce5f2'];
@@ -285,23 +125,20 @@ function downloadPdf(title: string, description: string, headers: string[], rows
 }
 
 export default function ReportsPage() {
-  const [token, setToken] = useState('demo_token');
-  const [role] = useState('SUPER_ADMIN');
-  const [locations] = useState<Location[]>(DEMO_LOCATIONS);
+  const [token, setToken] = useState('');
+  const [role, setRole] = useState('');
+  const [locations, setLocations] = useState<Location[]>([]);
   const [locationId, setLocationId] = useState('');
   const [from, setFrom] = useState(isoDate(new Date(Date.now() - 30 * 86400000)));
   const [to, setTo] = useState(isoDate(new Date()));
   const [report, setReport] = useState<ReportKind>('overview');
 
-  const [sales] = useState<SalesSummary | null>(DEMO_SALES);
-  const [salesDetails] = useState<SalesDetails | null>(DEMO_SALES_DETAILS);
-  const [stock] = useState<StockReport | null>(DEMO_STOCK);
-  const [notifications, setNotifications] = useState<Notifications | null>({
-    generatedAt: new Date().toISOString(),
-    total: DEMO_NOTIFICATIONS.length,
-    unread: DEMO_NOTIFICATIONS.filter(n => !n.readAt).length,
-    items: DEMO_NOTIFICATIONS,
-  });
+  const [sales, setSales] = useState<SalesSummary | null>(null);
+  const [salesDetails, setSalesDetails] = useState<SalesDetails | null>(null);
+  const [stock, setStock] = useState<StockReport | null>(null);
+
+  const [notifications, setNotifications] = useState<Notifications | null>(null);
+
   const [showNotifications, setShowNotifications] = useState(false);
   const [tableData, setTableData] = useState<TableData | null>(null);
 
@@ -326,17 +163,14 @@ export default function ReportsPage() {
     if (authSession?.accessToken) {
       setToken(authSession.accessToken);
     }
+    setRole(authSession?.user?.role ?? '');
 
     const stored = window.localStorage.getItem('premium-retail-location-scope');
-    if (stored && stored !== 'All retail locations' && stored !== 'All locations') {
-      const matched = DEMO_LOCATIONS.find((l) => l.name === stored);
-      if (matched) setLocationId(matched.id);
-    }
+    // Global location selection is applied by the API query when a location ID is selected.
 
     const syncLocation = (event: Event) => {
       const locName = (event as CustomEvent<string>).detail;
-      const found = DEMO_LOCATIONS.find((l) => l.name === locName);
-      setLocationId(found ? found.id : '');
+      setLocationId('');
     };
 
     window.addEventListener('premium-retail-location-change', syncLocation);
@@ -346,8 +180,22 @@ export default function ReportsPage() {
   // Deep link: /reports?tab=stock opens that tab; switching tabs keeps the URL in sync.
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get('tab');
-    if (requested && REPORT_TABS.some((t) => t.key === requested)) setReport(requested as ReportKind);
-  }, []);
+    if (!requested || !REPORT_TABS.some((t) => t.key === requested)) return;
+    const requestedTab = requested as ReportKind;
+    if (requestedTab === 'priceChanges' && role !== 'SUPER_ADMIN') return;
+    if (requestedTab === 'itemDeletions' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
+    setReport(requestedTab);
+  }, [role]);
+
+  const visibleReportTabs = REPORT_TABS.filter((tab) => {
+    if (tab.key === 'priceChanges') return role === 'SUPER_ADMIN';
+    if (tab.key === 'itemDeletions') return role === 'SUPER_ADMIN' || role === 'ADMIN';
+    return true;
+  });
+
+  useEffect(() => {
+    if (!visibleReportTabs.some((tab) => tab.key === report)) setReport('overview');
+  }, [visibleReportTabs, report]);
   useEffect(() => {
     const url = new URL(window.location.href);
     if (report === 'overview') url.searchParams.delete('tab');
@@ -358,7 +206,7 @@ export default function ReportsPage() {
   // Load Specialized Report datasets
   useEffect(() => {
     if (report === 'overview' || report === 'sales' || report === 'stock' || report === 'salesDetails') return;
-    setTableData(SPECIALIZED_REPORTS[report] ?? null);
+    setTableData(null);
   }, [report]);
 
   function markRead(id: string) {
@@ -474,10 +322,10 @@ export default function ReportsPage() {
   const rangeDays = Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
   const rangePreset: RangePreset = to === isoDate(new Date()) && (rangeDays === 7 || rangeDays === 30) ? (rangeDays === 7 ? 'last7' : 'last30') : 'custom';
   const rangeLabel = `${formatDay(from)} – ${formatDay(to)}`;
-  const reportLabel = REPORT_TABS.find((t) => t.key === report)?.label ?? 'Overview';
+  const reportLabel = visibleReportTabs.find((t) => t.key === report)?.label ?? 'Overview';
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} app-page`}>
       {/* ---------- Header ---------- */}
       <header className={styles.header}>
         <div>
@@ -518,7 +366,7 @@ export default function ReportsPage() {
       {/* ---------- Tabs + filters ---------- */}
       <div className={styles.toolbar}>
         <div className={styles.tabs} role="tablist" aria-label="Report type">
-          {REPORT_TABS.map((tab) => (
+          {visibleReportTabs.map((tab) => (
             <button key={tab.key} type="button" role="tab" aria-selected={report === tab.key} className={report === tab.key ? styles.tabActive : ''} onClick={() => setReport(tab.key)}>
               {tab.label}
             </button>

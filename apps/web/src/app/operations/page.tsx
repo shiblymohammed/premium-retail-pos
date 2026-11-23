@@ -7,15 +7,22 @@ import styles from './operations.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
-type TransferStatus = 'IN_TRANSIT' | 'PENDING_DISPATCH' | 'RECEIVED' | 'REJECTED';
+type TransferStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED' | 'PARTIALLY_DISPATCHED' | 'DISPATCHED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'REJECTED' | 'CANCELLED';
 
 interface TransferItem {
+  variantId: string;
   sku: string;
   name: string;
   cartons: number;
   unitsPerCarton: number;
   looseUnits: number;
   totalUnits: number;
+  requestedQtyBase: number;
+  approvedQtyBase: number;
+  dispatchedQtyBase: number;
+  receivedQtyBase: number;
+  shortQtyBase: number;
+  damagedQtyBase: number;
 }
 
 interface ReceiptSummary {
@@ -26,6 +33,8 @@ interface ReceiptSummary {
 
 interface StockTransfer {
   id: string;
+  sourceLocationId: string;
+  destLocationId: string;
   transferCode: string;
   sourceLocation: string;
   destLocation: string;
@@ -39,100 +48,32 @@ interface StockTransfer {
   items: TransferItem[];
   receipt?: ReceiptSummary;
 }
+interface ReplenishmentRequest {
+  id: string;
+  requestNumber: string;
+  status: string;
+  generatedByUserId: string;
+  sourceLocation: { id: string; name: string };
+  destLocation: { id: string; name: string };
+  lines: Array<{ variantId: string; systemSuggestedQtyBase: number; unitsPerCarton: number; variant?: { sku: string; name: string; product?: { name: string } } }>;
+}
 
-const LOCATIONS = ['Central Warehouse', 'Downtown Store', 'North Mall', 'West End Outlet'];
-const CARRIERS = [
-  { name: 'BlueDart Logistics', hint: 'Courier · same day' },
-  { name: 'Express Logistics', hint: 'Courier · next day' },
-  { name: 'FastTrack Fleet', hint: 'Own fleet' },
-  { name: 'Internal Van #02', hint: 'Store-to-store' },
-];
+type LocationOption = { id: string; name: string; type: string; parentId: string | null };
+type CatalogOption = { variantId: string; sku: string; name: string; unitsPerCarton: number };
 
-/** Products that can be transferred, with their carton size. */
-const CATALOG = [
-  { sku: 'BEV-1048', name: 'Premium Arabica Coffee Beans', unitsPerCarton: 12 },
-  { sku: 'BEV-1082', name: 'Sparkling Mineral Water', unitsPerCarton: 12 },
-  { sku: 'PAN-5012', name: 'Basmati Royal Rice (5kg)', unitsPerCarton: 6 },
-  { sku: 'PAN-5020', name: 'Extra Virgin Olive Oil 1L', unitsPerCarton: 12 },
-  { sku: 'SNK-4180', name: 'Organic Dark Chocolate 85%', unitsPerCarton: 20 },
-  { sku: 'PC-2076', name: 'Daily Moisturizer SPF 30', unitsPerCarton: 10 },
-];
-
-const INITIAL_TRANSFERS: StockTransfer[] = [
-  {
-    id: 'trf-001',
-    transferCode: 'TRF-2026-0041',
-    sourceLocation: 'Central Warehouse',
-    destLocation: 'Downtown Store',
-    status: 'IN_TRANSIT',
-    createdAt: '18-Nov-2026 09:30 AM',
-    dispatchedAt: '18-Nov-2026 11:15 AM',
-    carrier: 'BlueDart Logistics',
-    trackingNumber: 'BD-8849201',
-    notes: 'Weekly staples replenishment for peak sales counter',
-    items: [
-      { sku: 'BEV-1048', name: 'Premium Arabica Coffee Beans', cartons: 4, unitsPerCarton: 12, looseUnits: 0, totalUnits: 48 },
-      { sku: 'PAN-5012', name: 'Basmati Royal Rice (5kg)', cartons: 6, unitsPerCarton: 6, looseUnits: 2, totalUnits: 38 },
-      { sku: 'SNK-4180', name: 'Organic Dark Chocolate 85%', cartons: 5, unitsPerCarton: 20, looseUnits: 0, totalUnits: 100 },
-    ],
-  },
-  {
-    id: 'trf-002',
-    transferCode: 'TRF-2026-0042',
-    sourceLocation: 'Central Warehouse',
-    destLocation: 'North Mall',
-    status: 'IN_TRANSIT',
-    createdAt: '18-Nov-2026 10:45 AM',
-    dispatchedAt: '18-Nov-2026 01:20 PM',
-    carrier: 'Express Logistics',
-    trackingNumber: 'EXP-109284',
-    notes: 'Beverage restocking request',
-    items: [
-      { sku: 'BEV-1082', name: 'Sparkling Mineral Water', cartons: 8, unitsPerCarton: 12, looseUnits: 0, totalUnits: 96 },
-      { sku: 'PAN-2240', name: 'Artisan Penne Pasta', cartons: 4, unitsPerCarton: 15, looseUnits: 0, totalUnits: 60 },
-    ],
-  },
-  {
-    id: 'trf-003',
-    transferCode: 'TRF-2026-0039',
-    sourceLocation: 'Downtown Store',
-    destLocation: 'West End Outlet',
-    status: 'PENDING_DISPATCH',
-    createdAt: '18-Nov-2026 02:15 PM',
-    carrier: 'Internal Van #02',
-    trackingNumber: 'VAN-INT-02',
-    notes: 'Inter-branch rebalance of slow-moving inventory',
-    items: [
-      { sku: 'PC-2076', name: 'Daily Moisturizer SPF 30', cartons: 2, unitsPerCarton: 10, looseUnits: 4, totalUnits: 24 },
-    ],
-  },
-  {
-    id: 'trf-004',
-    transferCode: 'TRF-2026-0038',
-    sourceLocation: 'Central Warehouse',
-    destLocation: 'West End Outlet',
-    status: 'RECEIVED',
-    createdAt: '17-Nov-2026 08:00 AM',
-    dispatchedAt: '17-Nov-2026 10:30 AM',
-    receivedAt: '17-Nov-2026 04:45 PM',
-    carrier: 'BlueDart Logistics',
-    trackingNumber: 'BD-8847621',
-    notes: 'Stock received intact into local store ledger',
-    items: [
-      { sku: 'PAN-5020', name: 'Extra Virgin Olive Oil 1L', cartons: 3, unitsPerCarton: 12, looseUnits: 0, totalUnits: 36 },
-    ],
-    receipt: { good: 36, damaged: 0, missing: 0 },
-  },
-];
-
-type StatusFilter = 'ALL' | TransferStatus;
+type StatusFilter = 'ALL' | 'PENDING' | 'TRANSIT' | 'RECEIVED';
 type SortKey = 'newest' | 'oldest' | 'units';
 
 const STATUS_META: Record<TransferStatus, { label: string; tone: string }> = {
-  IN_TRANSIT: { label: 'In transit', tone: 'transit' },
-  PENDING_DISPATCH: { label: 'Awaiting dispatch', tone: 'pending' },
+  DRAFT: { label: 'Draft', tone: 'pending' },
+  PENDING_APPROVAL: { label: 'Pending approval', tone: 'pending' },
+  APPROVED: { label: 'Approved · awaiting dispatch', tone: 'pending' },
+  PARTIALLY_DISPATCHED: { label: 'Partially dispatched', tone: 'transit' },
+  DISPATCHED: { label: 'In transit', tone: 'transit' },
+  PARTIALLY_RECEIVED: { label: 'Partially received', tone: 'transit' },
   RECEIVED: { label: 'Received', tone: 'received' },
   REJECTED: { label: 'Rejected', tone: 'rejected' },
+  CANCELLED: { label: 'Cancelled', tone: 'rejected' },
 };
 
 /** "18-Nov-2026 09:30 AM" style timestamp, matching the existing data. */
@@ -153,13 +94,19 @@ function parseStamp(value?: string) {
 }
 /** "18-Nov-2026 09:30 AM" → { day: "18 Nov", time: "09:30 AM" } */
 function splitStamp(value: string) {
+  if (value.includes('T')) {
+    const date = new Date(value);
+    return { day: date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }), time: date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) };
+  }
   const [d, ...rest] = value.split(' ');
   return { day: d.split('-').slice(0, 2).join(' '), time: rest.join(' ') };
 }
 const unitsOf = (t: StockTransfer) => t.items.reduce((s, i) => s + i.totalUnits, 0);
 const cartonsOf = (t: StockTransfer) => t.items.reduce((s, i) => s + i.cartons, 0);
 const hasIssues = (t: StockTransfer) => !!t.receipt && t.receipt.damaged + t.receipt.missing > 0;
-const isWarehouse = (loc: string) => loc.includes('Warehouse');
+const isWarehouse = (loc: string) => /warehouse/i.test(loc);
+const isPending = (status: TransferStatus) => ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(status);
+const isInTransit = (status: TransferStatus) => ['PARTIALLY_DISPATCHED', 'DISPATCHED', 'PARTIALLY_RECEIVED'].includes(status);
 
 function Icon({ name, size = 16 }: { name: string; size?: number }) {
   const icons: Record<string, React.ReactNode> = {
@@ -196,9 +143,17 @@ function Icon({ name, size = 16 }: { name: string; size?: number }) {
 type DraftQty = { cartons: number; loose: number };
 
 export default function OperationsPage() {
-  const [transfers, setTransfers] = useState<StockTransfer[]>(INITIAL_TRANSFERS);
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  const [replenishments, setReplenishments] = useState<ReplenishmentRequest[]>([]);
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [catalog, setCatalog] = useState<CatalogOption[]>([]);
+  const [apiToken, setApiToken] = useState('');
+  const [apiUserId, setApiUserId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState('');
+  const [isCreatingBusy, setIsCreatingBusy] = useState(false);
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('ALL');
-  const [locationFilter, setLocationFilter] = useState('ALL'); // store chosen in the top bar
+  const [locationFilter, setLocationFilter] = useState('ALL'); // selected location ID from the top bar
   const [fromFilter, setFromFilter] = useState('ALL');
   const [toFilter, setToFilter] = useState('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
@@ -211,15 +166,14 @@ export default function OperationsPage() {
   const [receivingTransfer, setReceivingTransfer] = useState<StockTransfer | null>(null);
   const [damagedUnits, setDamagedUnits] = useState(0);
   const [missingUnits, setMissingUnits] = useState(0);
-  const [receiveNotes, setReceiveNotes] = useState('All packages sealed and barcodes inspected.');
+  const [receiveNotes, setReceiveNotes] = useState('');
   const [receiveError, setReceiveError] = useState('');
   const [isReceivingBusy, setIsReceivingBusy] = useState(false);
 
   // Create modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [newOrigin, setNewOrigin] = useState('Central Warehouse');
-  const [newDest, setNewDest] = useState('Downtown Store');
-  const [newCarrier, setNewCarrier] = useState(CARRIERS[0].name);
+  const [newOrigin, setNewOrigin] = useState('');
+  const [newDest, setNewDest] = useState('');
   const [draft, setDraft] = useState<Record<string, DraftQty>>({});
   const [newNotes, setNewNotes] = useState('');
   const [dispatchNow, setDispatchNow] = useState(true);
@@ -233,14 +187,126 @@ export default function OperationsPage() {
   const [benchStatus, setBenchStatus] = useState<number | null>(null);
   const [benchBusy, setBenchBusy] = useState(false);
 
+  const locationName = (id: string) => locations.find((location) => location.id === id)?.name ?? id;
+
+  const normalizeTransfer = (row: any): StockTransfer => {
+    const items: TransferItem[] = (row.lines || []).map((line: any) => {
+      const unitsPerCarton = Number(line.unitsPerCarton || 1);
+      const requestedQtyBase = Number(line.requestedQtyBase || 0);
+      const dispatchedQtyBase = Number(line.dispatchedQtyBase || 0);
+      const availableQty = Number(line.receivedQtyBase || 0);
+      const variant = line.variant || {};
+      return {
+        variantId: line.variantId,
+        sku: variant.sku || line.variantId,
+        name: variant.product?.name || variant.name || variant.sku || 'Product',
+        cartons: Math.floor(requestedQtyBase / unitsPerCarton),
+        unitsPerCarton,
+        looseUnits: requestedQtyBase % unitsPerCarton,
+        totalUnits: requestedQtyBase,
+        requestedQtyBase,
+        approvedQtyBase: Number(line.approvedQtyBase ?? requestedQtyBase),
+        dispatchedQtyBase,
+        receivedQtyBase: availableQty,
+        shortQtyBase: Number(line.shortQtyBase || 0),
+        damagedQtyBase: Number(line.damagedQtyBase || 0),
+      };
+    });
+    const damaged = items.reduce((sum, item) => sum + item.damagedQtyBase, 0);
+    const missing = items.reduce((sum, item) => sum + item.shortQtyBase, 0);
+    return {
+      id: row.id,
+      sourceLocationId: row.sourceLocationId,
+      destLocationId: row.destLocationId,
+      transferCode: row.transferNumber,
+      sourceLocation: row.sourceLocation?.name || row.sourceLocationId,
+      destLocation: row.destLocation?.name || row.destLocationId,
+      status: row.status,
+      createdAt: row.createdAt,
+      dispatchedAt: row.dispatchedAt,
+      receivedAt: row.receivedAt,
+      carrier: '—',
+      trackingNumber: '—',
+      notes: row.notes || '',
+      items,
+      receipt: row.receivedAt ? { good: items.reduce((sum, item) => sum + Math.max(0, item.receivedQtyBase - item.damagedQtyBase), 0), damaged, missing } : undefined,
+    };
+  };
+
+  const reloadOperations = async (token = apiToken) => {
+    if (!token) { setLoading(false); return; }
+    const headers = { Authorization: `Bearer ${token}` };
+    const [transferRes, locationRes, productRes, replenishmentRes] = await Promise.all([
+      fetch(`${API_BASE}/transfers`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/products?isActive=true`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/transfers/replenishment`, { headers, cache: 'no-store' }),
+    ]);
+    const [transferBody, locationBody, productBody, replenishmentBody] = await Promise.all([
+      transferRes.json().catch(() => ({})), locationRes.json().catch(() => ({})), productRes.json().catch(() => ({})), replenishmentRes.json().catch(() => ({})),
+    ]);
+    const failed = [transferRes, locationRes, productRes, replenishmentRes].find((response) => !response.ok);
+    if (failed) throw new Error([transferBody, locationBody, productBody, replenishmentBody][[transferRes, locationRes, productRes, replenishmentRes].indexOf(failed)]?.message || 'Could not load transfer data from the API.');
+    const nextLocations: LocationOption[] = Array.isArray(locationBody.data)
+      ? locationBody.data.filter((item: any) => item && typeof item.id === 'string' && typeof item.name === 'string')
+      : [];
+    setLocations(nextLocations);
+    setTransfers((Array.isArray(transferBody.data) ? transferBody.data : []).filter(Boolean).map(normalizeTransfer));
+    const locationLabel = (relation: any, id: unknown) => {
+      if (typeof relation?.name === 'string' && relation.name.trim()) return relation.name;
+      const locationId = typeof id === 'string' ? id : typeof relation?.id === 'string' ? relation.id : '';
+      return nextLocations.find((location) => location.id === locationId)?.name || (locationId ? `Location ${locationId.slice(0, 8)}` : 'Unknown location');
+    };
+    setReplenishments((Array.isArray(replenishmentBody.data) ? replenishmentBody.data : [])
+      .filter((request: any) => request && typeof request === 'object')
+      .map((request: any, index: number) => ({
+        ...request,
+        id: typeof request.id === 'string' ? request.id : `replenishment-${index}`,
+        requestNumber: typeof request.requestNumber === 'string' ? request.requestNumber : 'Replenishment request',
+        status: typeof request.status === 'string' ? request.status : 'DRAFT',
+        generatedByUserId: typeof request.generatedByUserId === 'string' ? request.generatedByUserId : '',
+        sourceLocation: {
+          id: request.sourceLocation?.id || request.sourceLocationId || '',
+          name: locationLabel(request.sourceLocation, request.sourceLocationId),
+        },
+        destLocation: {
+          id: request.destLocation?.id || request.destLocationId || '',
+          name: locationLabel(request.destLocation, request.destLocationId),
+        },
+        lines: Array.isArray(request.lines) ? request.lines : [],
+      })));
+    setCatalog((Array.isArray(productBody.data) ? productBody.data : []).filter(Boolean).flatMap((product: any) => (Array.isArray(product.variants) ? product.variants : []).filter((variant: any) => variant?.isActive).map((variant: any) => ({
+      variantId: variant.id,
+      sku: variant.sku,
+      name: typeof product.name === 'string' && product.name.trim() ? product.name : variant.name || variant.sku || 'Product',
+      unitsPerCarton: Number(product.unitsPerCarton || 1),
+    }))));
+  };
+
+  useEffect(() => {
+    const session = getStoredSession();
+    if (!session?.accessToken) {
+      setApiError('Sign in with a manager account to view and manage transfers.');
+      setLoading(false);
+      return;
+    }
+    setApiToken(session.accessToken);
+    setApiUserId(session.user?.id || '');
+    reloadOperations(session.accessToken).catch((error) => setApiError(error instanceof Error ? error.message : 'Could not load transfers.')).finally(() => setLoading(false));
+  }, []);
+
   // Follow the store chosen in the top bar
   useEffect(() => {
-    const apply = (name: string | null) => setLocationFilter(name && LOCATIONS.includes(name) ? name : 'ALL');
+    const apply = (value: string | null) => {
+      if (!value || ['All retail locations', 'All locations'].includes(value)) { setLocationFilter('ALL'); return; }
+      const location = locations.find((item) => item.id === value || item.name === value);
+      setLocationFilter(location?.id || 'ALL');
+    };
     apply(window.localStorage.getItem('premium-retail-location-scope'));
     const sync = (event: Event) => apply((event as CustomEvent<string>).detail);
     window.addEventListener('premium-retail-location-change', sync);
     return () => window.removeEventListener('premium-retail-location-change', sync);
-  }, []);
+  }, [locations]);
 
   // Escape closes modals / menus; clicking elsewhere closes the row menu
   useEffect(() => {
@@ -266,15 +332,15 @@ export default function OperationsPage() {
   }, [notice]);
 
   const scoped = useMemo(
-    () => transfers.filter((t) => locationFilter === 'ALL' || t.sourceLocation === locationFilter || t.destLocation === locationFilter),
+    () => transfers.filter((t) => locationFilter === 'ALL' || t.sourceLocationId === locationFilter || t.destLocationId === locationFilter),
     [transfers, locationFilter],
   );
 
   const filteredTransfers = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = scoped.filter((t) => {
-      const matchStatus = filterStatus === 'ALL' || t.status === filterStatus;
-      if ((fromFilter !== 'ALL' && t.sourceLocation !== fromFilter) || (toFilter !== 'ALL' && t.destLocation !== toFilter)) return false;
+      const matchStatus = filterStatus === 'ALL' || (filterStatus === 'PENDING' ? isPending(t.status) : filterStatus === 'TRANSIT' ? isInTransit(t.status) : t.status === 'RECEIVED');
+      if ((fromFilter !== 'ALL' && t.sourceLocationId !== fromFilter) || (toFilter !== 'ALL' && t.destLocationId !== toFilter)) return false;
       const matchSearch = !q
         || t.transferCode.toLowerCase().includes(q)
         || t.sourceLocation.toLowerCase().includes(q)
@@ -288,8 +354,8 @@ export default function OperationsPage() {
   }, [scoped, filterStatus, fromFilter, toFilter, sortKey, search]);
 
   const kpis = useMemo(() => {
-    const inTransit = scoped.filter((t) => t.status === 'IN_TRANSIT');
-    const pending = scoped.filter((t) => t.status === 'PENDING_DISPATCH');
+    const inTransit = scoped.filter((t) => isInTransit(t.status));
+    const pending = scoped.filter((t) => isPending(t.status));
     const received = scoped.filter((t) => t.status === 'RECEIVED');
     return {
       inTransit: inTransit.length,
@@ -298,11 +364,24 @@ export default function OperationsPage() {
       pendingUnits: pending.reduce((s, t) => s + unitsOf(t), 0),
       received: received.length,
       withIssues: received.filter(hasIssues).length,
-      openUnits: scoped.filter((t) => t.status !== 'RECEIVED').reduce((s, t) => s + unitsOf(t), 0),
+      openUnits: scoped.filter((t) => !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status)).reduce((s, t) => s + unitsOf(t), 0),
     };
   }, [scoped]);
 
-  const count = (s: StatusFilter) => (s === 'ALL' ? scoped.length : scoped.filter((t) => t.status === s).length);
+  const count = (s: StatusFilter) => s === 'ALL' ? scoped.length : s === 'PENDING' ? scoped.filter((t) => isPending(t.status)).length : s === 'TRANSIT' ? scoped.filter((t) => isInTransit(t.status)).length : scoped.filter((t) => t.status === 'RECEIVED').length;
+
+  async function mutate(path: string, method: 'POST' | 'PATCH', body?: unknown) {
+    if (!apiToken) throw new Error('Sign in with a manager account before changing transfers.');
+    const response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.message || `Request failed (${response.status})`);
+    await reloadOperations();
+    return payload.data;
+  }
 
   // ---------- actions ----------
   function openReceive(t: StockTransfer) {
@@ -310,59 +389,119 @@ export default function OperationsPage() {
     setReceivingTransfer(t);
     setDamagedUnits(0);
     setMissingUnits(0);
-    setReceiveNotes('All packages sealed and barcodes inspected.');
+    setReceiveNotes('');
     setReceiveError('');
   }
 
-  function handleReceiveConfirm(e: FormEvent) {
+  async function handleReceiveConfirm(e: FormEvent) {
     e.preventDefault();
     if (!receivingTransfer) return;
-    const total = unitsOf(receivingTransfer);
+    const lines = receivingTransfer.items.map((item) => ({ ...item, outstanding: Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase) }));
+    const total = lines.reduce((sum, line) => sum + line.outstanding, 0);
     if (damagedUnits + missingUnits > total) {
       setReceiveError(`Damaged and missing (${damagedUnits + missingUnits}) can't be more than the ${total} units sent.`);
       return;
     }
-    if (!receiveNotes.trim()) { setReceiveError('Please add a short note.'); return; }
+    if ((damagedUnits || missingUnits) && !receiveNotes.trim()) { setReceiveError('A note is required when receipt quantities differ.'); return; }
+    if ((damagedUnits || missingUnits) && lines.filter((line) => line.outstanding > 0).length !== 1) {
+      setReceiveError('For a receipt discrepancy, process one product per transfer line so quantities can be attributed correctly.');
+      return;
+    }
     setIsReceivingBusy(true);
-    const { id, transferCode } = receivingTransfer;
-    const damaged = damagedUnits;
-    const missing = missingUnits;
-    window.setTimeout(() => {
-      setTransfers((prev) => prev.map((t) => (t.id === id
-        ? { ...t, status: 'RECEIVED', receivedAt: stamp(), notes: `${t.notes} | Received: ${receiveNotes.trim()}`, receipt: { good: total - damaged - missing, damaged, missing } }
-        : t)));
-      setNotice(damaged + missing
-        ? `${transferCode} received. ${damaged} damaged and ${missing} missing units were logged.`
-        : `${transferCode} received in full. ${total} units added to stock.`);
-      setIsReceivingBusy(false);
+    try {
+      const line = lines.filter((item) => item.outstanding > 0);
+      await mutate(`/transfers/${receivingTransfer.id}/receive`, 'POST', { lines: line.map((item) => ({
+        variantId: item.variantId,
+        receivedQtyBase: item.outstanding - missingUnits,
+        ...(damagedUnits ? { damagedQtyBase: damagedUnits } : {}),
+        ...(missingUnits ? { shortQtyBase: missingUnits, finalizeLine: true } : {}),
+        ...((damagedUnits || missingUnits) ? { discrepancyNotes: receiveNotes.trim() } : {}),
+      })) });
       setReceivingTransfer(null);
-      setExpanded(id);
-    }, 400);
+      setNotice('Receipt recorded by the server; inventory ledger updated.');
+    } catch (error) { setReceiveError(error instanceof Error ? error.message : 'Could not record receipt.'); }
+    finally { setIsReceivingBusy(false); }
   }
 
-  function dispatchTransfer(t: StockTransfer) {
+  async function dispatchTransfer(t: StockTransfer) {
     setMenuFor(null);
-    setTransfers((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: 'IN_TRANSIT', dispatchedAt: stamp() } : x)));
-    setNotice(`${t.transferCode} dispatched and now on its way to ${t.destLocation}.`);
+    try {
+      await mutate(`/transfers/${t.id}/dispatch`, 'POST', { lines: t.items.filter((item) => item.approvedQtyBase > item.dispatchedQtyBase).map((item) => ({ variantId: item.variantId, looseBaseUnits: item.approvedQtyBase - item.dispatchedQtyBase })) });
+      setNotice('Dispatch recorded by the server; stock moved to in-transit.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not dispatch this transfer.'); }
+  }
+
+  async function submitTransfer(t: StockTransfer) {
+    setMenuFor(null);
+    try { await mutate(`/transfers/${t.id}/submit`, 'POST'); setNotice('Transfer submitted for approval.'); }
+    catch (error) { setNotice(error instanceof Error ? error.message : 'Could not submit this transfer.'); }
+  }
+
+  async function approveTransfer(t: StockTransfer) {
+    setMenuFor(null);
+    try {
+      await mutate(`/transfers/${t.id}/approve`, 'POST', { lines: t.items.map((item) => ({ variantId: item.variantId, approvedQtyBase: item.requestedQtyBase })) });
+      setNotice('Transfer approved by the server.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not approve this transfer.'); }
+  }
+
+  async function rejectTransfer(t: StockTransfer) {
+    const reason = window.prompt(`Reason for rejecting ${t.transferCode}?`)?.trim();
+    if (!reason) return;
+    setMenuFor(null);
+    try { await mutate(`/transfers/${t.id}/reject`, 'POST', { reason }); setNotice(`Transfer ${t.transferCode} rejected.`); }
+    catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reject this transfer.'); }
+  }
+
+  async function cancelTransfer(t: StockTransfer) {
+    const reason = window.prompt(`Reason for cancelling ${t.transferCode}?`)?.trim();
+    if (!reason) return;
+    setMenuFor(null);
+    try { await mutate(`/transfers/${t.id}/cancel`, 'PATCH', { reason }); setNotice(`Transfer ${t.transferCode} cancelled; inventory adjustments were recorded by the server.`); }
+    catch (error) { setNotice(error instanceof Error ? error.message : 'Could not cancel this transfer.'); }
+  }
+
+  async function generateReplenishment() {
+    if (locationFilter === 'ALL') { setNotice('Choose a destination location in the top bar first.'); return; }
+    try {
+      const request = await mutate('/transfers/replenishment/generate', 'POST', { destLocationId: locationFilter });
+      setNotice(request?.id ? `Replenishment request ${request.requestNumber} created for manager review.` : 'No replenishment is needed for the selected location.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not generate replenishment.'); }
+  }
+
+  async function approveReplenishment(request: ReplenishmentRequest) {
+    try {
+      await mutate(`/transfers/replenishment/${request.id}/approve`, 'POST', { lines: request.lines.map((line) => ({ variantId: line.variantId, approvedQtyBase: line.systemSuggestedQtyBase })) });
+      setNotice(`Replenishment ${request.requestNumber} approved and transfer draft created.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not approve replenishment.'); }
+  }
+
+  async function rejectReplenishment(request: ReplenishmentRequest) {
+    const reason = window.prompt(`Reason for rejecting ${request.requestNumber}?`)?.trim();
+    if (!reason) return;
+    try {
+      await mutate(`/transfers/replenishment/${request.id}/reject`, 'POST', { reason });
+      setNotice(`Replenishment ${request.requestNumber} rejected.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reject replenishment.'); }
   }
 
   function openCreate() {
     // Start from the route filters if set, otherwise warehouse → the store chosen in the top bar
-    const origin = fromFilter !== 'ALL' ? fromFilter : 'Central Warehouse';
-    const fallbackDest = locationFilter !== 'ALL' && locationFilter !== origin ? locationFilter : LOCATIONS.find((l) => l !== origin && !isWarehouse(l)) ?? LOCATIONS[1];
+    const origin = fromFilter !== 'ALL' ? fromFilter : '';
+    const fallbackDest = locationFilter !== 'ALL' && locationFilter !== origin ? locationFilter : '';
     setNewOrigin(origin);
     setNewDest(toFilter !== 'ALL' && toFilter !== origin ? toFilter : fallbackDest);
-    setNewCarrier(CARRIERS[0].name);
-    setDraft({ [CATALOG[0].sku]: { cartons: 3, loose: 0 } });
+    setDraft({});
     setNewNotes('');
     setDispatchNow(true);
     setCreateError('');
     setCreateModalOpen(true);
   }
 
-  const draftItems: TransferItem[] = CATALOG.filter((p) => draft[p.sku]).map((p) => {
+  const draftItems: TransferItem[] = catalog.filter((p) => draft[p.sku]).map((p) => {
     const q = draft[p.sku];
-    return { sku: p.sku, name: p.name, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: q.loose, totalUnits: q.cartons * p.unitsPerCarton + q.loose };
+    const totalUnits = q.cartons * p.unitsPerCarton + q.loose;
+    return { variantId: p.variantId, sku: p.sku, name: p.name, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: q.loose, totalUnits, requestedQtyBase: totalUnits, approvedQtyBase: 0, dispatchedQtyBase: 0, receivedQtyBase: 0, shortQtyBase: 0, damagedQtyBase: 0 };
   });
   const draftTotal = draftItems.reduce((s, i) => s + i.totalUnits, 0);
   const setQty = (sku: string, key: keyof DraftQty, value: number) => setDraft((d) => ({ ...d, [sku]: { ...d[sku], [key]: Math.max(0, value) } }));
@@ -372,32 +511,27 @@ export default function OperationsPage() {
     return next;
   });
 
-  function handleCreateTransfer(e: FormEvent) {
+  async function handleCreateTransfer(e: FormEvent) {
     e.preventDefault();
     if (newOrigin === newDest) { setCreateError('Pick a different destination.'); return; }
     if (!draftItems.length) { setCreateError('Choose at least one product to send.'); return; }
     if (draftItems.some((i) => i.totalUnits <= 0)) { setCreateError('Each product needs at least one carton or loose unit.'); return; }
 
-    const now = stamp();
-    const prefix = newCarrier.startsWith('Internal') ? 'VAN-INT' : newCarrier.split(' ')[0].slice(0, 3).toUpperCase();
-    const created: StockTransfer = {
-      id: `trf-${Date.now()}`,
-      transferCode: `TRF-2026-${String(Math.floor(1000 + Math.random() * 9000))}`,
-      sourceLocation: newOrigin,
-      destLocation: newDest,
-      status: dispatchNow ? 'IN_TRANSIT' : 'PENDING_DISPATCH',
-      createdAt: now,
-      dispatchedAt: dispatchNow ? now : undefined,
-      carrier: newCarrier,
-      trackingNumber: `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`,
-      notes: newNotes.trim() || 'Stock transfer request',
-      items: draftItems,
-    };
-    setTransfers((prev) => [created, ...prev]);
-    setExpanded(created.id);
-    setFilterStatus('ALL');
-    setCreateModalOpen(false);
-    setNotice(`${created.transferCode} ${dispatchNow ? 'dispatched' : 'saved'}: ${draftTotal} units from ${newOrigin} to ${newDest}.`);
+    setIsCreatingBusy(true);
+    try {
+      const created = await mutate('/transfers', 'POST', {
+        sourceLocationId: newOrigin,
+        destLocationId: newDest,
+        notes: newNotes.trim() || undefined,
+        lines: draftItems.map((item) => ({ variantId: item.variantId, cartons: item.cartons, looseBaseUnits: item.looseUnits })),
+      });
+      if (dispatchNow && created?.id) {
+        await mutate(`/transfers/${created.id}/submit`, 'POST');
+        setNotice('Transfer created and submitted for approval.');
+      } else setNotice('Transfer draft saved. Submit it when ready for approval.');
+      setCreateModalOpen(false);
+    } catch (error) { setCreateError(error instanceof Error ? error.message : 'Transfer could not be saved.'); }
+    finally { setIsCreatingBusy(false); }
   }
 
   function exportCsv(list: StockTransfer[]) {
@@ -442,12 +576,12 @@ export default function OperationsPage() {
 
   const statusTabs: Array<{ key: StatusFilter; label: string }> = [
     { key: 'ALL', label: 'All' },
-    { key: 'PENDING_DISPATCH', label: 'Awaiting dispatch' },
-    { key: 'IN_TRANSIT', label: 'In transit' },
+    { key: 'PENDING', label: 'Needs action' },
+    { key: 'TRANSIT', label: 'In transit' },
     { key: 'RECEIVED', label: 'Received' },
   ];
 
-  const receiveTotal = receivingTransfer ? unitsOf(receivingTransfer) : 0;
+  const receiveTotal = receivingTransfer ? receivingTransfer.items.reduce((sum, item) => sum + Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase), 0) : 0;
   const receiveGood = Math.max(0, receiveTotal - damagedUnits - missingUnits);
 
   const Stepper = ({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) => (
@@ -459,15 +593,20 @@ export default function OperationsPage() {
   );
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} app-page`}>
       {/* ---------- Header (same pattern as Products / Reports) ---------- */}
       <header className={styles.header}>
         <div>
           <h1>Transfers &amp; Logistics</h1>
           <p>Send stock between locations, follow it on the road and receive it into inventory.</p>
         </div>
-        <button type="button" className={styles.primaryButton} onClick={openCreate}><Icon name="plus" size={16} /> New transfer</button>
+        <div className={styles.headerActions}>
+          <button type="button" className={styles.ghostButton} onClick={generateReplenishment} disabled={!apiToken || locationFilter === 'ALL'}>Generate replenishment</button>
+          <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={!apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
+        </div>
       </header>
+
+      {apiError && <div className={styles.notice} role="alert"><Icon name="alert" size={16} /><span>{apiError}</span><button type="button" onClick={() => { setLoading(true); reloadOperations().then(() => setApiError('')).catch((error) => setApiError(error.message)).finally(() => setLoading(false)); }}>Retry</button></div>}
 
       {notice && (
         <div className={styles.notice} role="status">
@@ -478,10 +617,10 @@ export default function OperationsPage() {
 
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Transfer summary">
-        <button type="button" className={`${styles.summaryCard} ${styles.summaryAmber} ${filterStatus === 'PENDING_DISPATCH' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'PENDING_DISPATCH' ? 'ALL' : 'PENDING_DISPATCH')}>
+        <button type="button" className={`${styles.summaryCard} ${styles.summaryAmber} ${filterStatus === 'PENDING' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'PENDING' ? 'ALL' : 'PENDING')}>
           <i className={styles.summaryIcon}><Icon name="clock" size={18} /></i>
           <div className={styles.summaryMain}>
-            <span className={styles.summaryLabel}>Awaiting dispatch</span>
+            <span className={styles.summaryLabel}>Pending action</span>
             <strong className={styles.summaryValue}>{kpis.pending}</strong>
           </div>
           <div className={styles.summaryDetail}>
@@ -489,7 +628,7 @@ export default function OperationsPage() {
             <b className={`${styles.chip} ${styles.chipAmber}`}>{kpis.pendingUnits}</b>
           </div>
         </button>
-        <button type="button" className={`${styles.summaryCard} ${styles.summaryBlue} ${filterStatus === 'IN_TRANSIT' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'IN_TRANSIT' ? 'ALL' : 'IN_TRANSIT')}>
+        <button type="button" className={`${styles.summaryCard} ${styles.summaryBlue} ${filterStatus === 'TRANSIT' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'TRANSIT' ? 'ALL' : 'TRANSIT')}>
           <i className={styles.summaryIcon}><Icon name="truck" size={18} /></i>
           <div className={styles.summaryMain}>
             <span className={styles.summaryLabel}>In transit</span>
@@ -524,6 +663,18 @@ export default function OperationsPage() {
         </div>
       </section>
 
+      <section className={styles.tableCard} aria-labelledby="replenishment-heading">
+        <div className={styles.tableTop}><div><h2 id="replenishment-heading">Replenishment requests</h2><p>Server generated suggestions require approval by a different manager.</p></div></div>
+        {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p></div> : (
+          <ul className={styles.rows}>{replenishments.map((request) => <li className={styles.row} key={request.id}>
+            <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} → {request.destLocation.name}</small></span>
+            <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
+            <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
+            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => approveReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Approve</button><button type="button" className={styles.ghostButton} onClick={() => rejectReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Reject</button></span> : <span />}
+          </li>)}</ul>
+        )}
+      </section>
+
       {/* ---------- Transfers table ---------- */}
       <section className={styles.tableCard}>
         <div className={styles.tableTop}>
@@ -546,9 +697,9 @@ export default function OperationsPage() {
                 value={fromFilter}
                 heading="Sent from"
                 ariaLabel="Filter by origin"
-                icon={<Icon name={fromFilter !== 'ALL' && isWarehouse(fromFilter) ? 'warehouse' : 'store'} size={14} />}
-                buttonLabel={fromFilter === 'ALL' ? 'From: any' : `From: ${fromFilter}`}
-                options={[{ value: 'ALL', label: 'Any location' }, ...LOCATIONS.map((l) => ({ value: l, label: l }))]}
+                icon={<Icon name={fromFilter !== 'ALL' && isWarehouse(locationName(fromFilter)) ? 'warehouse' : 'store'} size={14} />}
+                buttonLabel={fromFilter === 'ALL' ? 'From: any' : `From: ${locationName(fromFilter)}`}
+                options={[{ value: 'ALL', label: 'Any location' }, ...locations.map((l) => ({ value: l.id, label: l.name }))]}
                 onChange={(v) => { setFromFilter(v); if (v !== 'ALL' && v === toFilter) setToFilter('ALL'); }}
               />
               <button type="button" className={styles.swapButton} onClick={() => { setFromFilter(toFilter); setToFilter(fromFilter); }} disabled={fromFilter === 'ALL' && toFilter === 'ALL'} title="Swap From and To" aria-label="Swap From and To filters"><Icon name="swap" size={14} /></button>
@@ -556,9 +707,9 @@ export default function OperationsPage() {
                 value={toFilter}
                 heading="Sent to"
                 ariaLabel="Filter by destination"
-                icon={<Icon name={toFilter !== 'ALL' && isWarehouse(toFilter) ? 'warehouse' : 'store'} size={14} />}
-                buttonLabel={toFilter === 'ALL' ? 'To: any' : `To: ${toFilter}`}
-                options={[{ value: 'ALL', label: 'Any location' }, ...LOCATIONS.filter((l) => l !== fromFilter).map((l) => ({ value: l, label: l }))]}
+                icon={<Icon name={toFilter !== 'ALL' && isWarehouse(locationName(toFilter)) ? 'warehouse' : 'store'} size={14} />}
+                buttonLabel={toFilter === 'ALL' ? 'To: any' : `To: ${locationName(toFilter)}`}
+                options={[{ value: 'ALL', label: 'Any location' }, ...locations.filter((l) => l.id !== fromFilter).map((l) => ({ value: l.id, label: l.name }))]}
                 onChange={setToFilter}
               />
             </div>
@@ -588,7 +739,7 @@ export default function OperationsPage() {
               <Fragment key={t.id}>
                 <li className={`${styles.row} ${isOpen ? styles.rowOpen : ''}`}>
                   <button type="button" className={styles.rowMain} onClick={() => setExpanded(isOpen ? null : t.id)} aria-expanded={isOpen}>
-                    <span className={`${styles.rowIcon} ${styles[`icon_${issues ? 'issue' : meta.tone}`]}`}><Icon name={t.status === 'RECEIVED' ? 'inbox' : t.status === 'IN_TRANSIT' ? 'truck' : 'clock'} size={17} /></span>
+                    <span className={`${styles.rowIcon} ${styles[`icon_${issues ? 'issue' : meta.tone}`]}`}><Icon name={t.status === 'RECEIVED' ? 'inbox' : isInTransit(t.status) ? 'truck' : 'clock'} size={17} /></span>
                     <span className={styles.rowTitle}>
                       <strong>{t.transferCode}</strong>
                       <small>{created.day} · {created.time}</small>
@@ -609,16 +760,22 @@ export default function OperationsPage() {
                   <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? 'Received · issues' : meta.label}</span></span>
 
                   <span className={styles.rowActions}>
-                    {t.status === 'IN_TRANSIT' && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
-                    {t.status === 'PENDING_DISPATCH' && <button type="button" className={styles.actionButton} onClick={() => dispatchTransfer(t)}>Dispatch</button>}
+                    {t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
+                    {t.status === 'PENDING_APPROVAL' && <button type="button" className={styles.actionButton} onClick={() => approveTransfer(t)}>Approve</button>}
+                    {['APPROVED', 'PARTIALLY_DISPATCHED'].includes(t.status) && <button type="button" className={styles.actionButton} onClick={() => dispatchTransfer(t)}>Dispatch</button>}
+                    {['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
                     <span className={styles.menuWrap} data-row-menu>
                       <button type="button" className={`${styles.moreButton} ${menuFor === t.id ? styles.moreOn : ''}`} onClick={() => setMenuFor(menuFor === t.id ? null : t.id)} aria-haspopup="menu" aria-expanded={menuFor === t.id} aria-label={`Options for ${t.transferCode}`}><Icon name="more" size={16} /></button>
                       {menuFor === t.id && (
                         <div className={styles.menu} role="menu">
                           <div className={styles.menuHeading}>{t.transferCode}</div>
                           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setExpanded(isOpen ? null : t.id); }}><Icon name="eye" size={15} /><span><b>{isOpen ? 'Hide details' : 'View details'}</b><small>Products, timeline and notes</small></span></button>
-                          {t.status === 'PENDING_DISPATCH' && <button type="button" role="menuitem" onClick={() => dispatchTransfer(t)}><Icon name="send" size={15} /><span><b>Dispatch now</b><small>Mark as on the road</small></span></button>}
-                          {t.status === 'IN_TRANSIT' && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
+                          {t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
+                          {t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => approveTransfer(t)}><Icon name="check" size={15} /><span><b>Approve</b><small>Approver cannot be the requester</small></span></button>}
+                          {t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => rejectTransfer(t)}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
+                          {['APPROVED', 'PARTIALLY_DISPATCHED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => dispatchTransfer(t)}><Icon name="send" size={15} /><span><b>Dispatch remaining stock</b><small>Server checks available inventory</small></span></button>}
+                          {['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
+                          {!['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => cancelTransfer(t)}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
                           <button type="button" role="menuitem" onClick={() => copyTracking(t)}><Icon name="copy" size={15} /><span><b>Copy tracking number</b><small>{t.trackingNumber}</small></span></button>
                           <div className={styles.menuDivider} />
                           <button type="button" role="menuitem" onClick={() => exportCsv([t])}><Icon name="download" size={15} /><span><b>Download as CSV</b><small>This transfer only</small></span></button>
@@ -650,10 +807,7 @@ export default function OperationsPage() {
                         <li className={t.dispatchedAt ? styles.done : styles.next}><i /><span><strong>Dispatched</strong><small>{t.dispatchedAt ?? 'Waiting to be sent'}</small></span></li>
                         <li className={t.receivedAt ? (issues ? styles.warn : styles.done) : t.dispatchedAt ? styles.next : ''}><i /><span><strong>Received</strong><small>{t.receivedAt ?? (t.dispatchedAt ? 'On the way' : '—')}</small></span></li>
                       </ol>
-                      <div className={styles.facts}>
-                        <span><small>Carrier</small><b>{t.carrier}</b></span>
-                        <span><small>Tracking</small><b className={styles.mono}>{t.trackingNumber}</b></span>
-                      </div>
+                      <div className={styles.facts}><span><small>Transfer status</small><b>{meta.label}</b></span><span><small>Requested by</small><b>See audit record</b></span></div>
                       {t.receipt && (
                         <div className={styles.receipt}>
                           <span><small>Good</small><b>{t.receipt.good}</b></span>
@@ -673,8 +827,8 @@ export default function OperationsPage() {
         {!filteredTransfers.length && (
           <div className={styles.empty}>
             <span><Icon name="truck" size={26} /></span>
-            <strong>No transfers found</strong>
-            <p>Try another status, location or search.</p>
+            <strong>{loading ? 'Loading transfers…' : 'No transfers found'}</strong>
+            <p>{loading ? 'Loading current transfers from the server.' : apiToken ? 'Create the first transfer after setting up locations and products.' : 'Sign in with a manager account to access transfers.'}</p>
             <button type="button" className={styles.ghostButton} onClick={() => { setFilterStatus('ALL'); setLocationFilter('ALL'); setFromFilter('ALL'); setToFilter('ALL'); setSearch(''); }}>Clear filters</button>
           </div>
         )}
@@ -769,9 +923,9 @@ export default function OperationsPage() {
                     <div>
                       <small className={styles.groupLabel}>From</small>
                       <div className={styles.options}>
-                        {LOCATIONS.map((l) => (
-                          <button key={l} type="button" className={`${styles.option} ${newOrigin === l ? styles.optionOn : ''}`} onClick={() => { setNewOrigin(l); if (newDest === l) setNewDest(LOCATIONS.find((x) => x !== l) ?? ''); }} aria-pressed={newOrigin === l}>
-                            <Icon name={isWarehouse(l) ? 'warehouse' : 'store'} size={15} />{l}
+                        {locations.map((l) => (
+                          <button key={l.id} type="button" className={`${styles.option} ${newOrigin === l.id ? styles.optionOn : ''}`} onClick={() => { setNewOrigin(l.id); if (newDest === l.id) setNewDest(locations.find((x) => x.id !== l.id)?.id ?? ''); }} aria-pressed={newOrigin === l.id}>
+                            <Icon name={isWarehouse(l.name) ? 'warehouse' : 'store'} size={15} />{l.name}
                           </button>
                         ))}
                       </div>
@@ -780,9 +934,9 @@ export default function OperationsPage() {
                     <div>
                       <small className={styles.groupLabel}>To</small>
                       <div className={styles.options}>
-                        {LOCATIONS.map((l) => (
-                          <button key={l} type="button" className={`${styles.option} ${newDest === l ? styles.optionOn : ''}`} onClick={() => setNewDest(l)} disabled={l === newOrigin} aria-pressed={newDest === l}>
-                            <Icon name={isWarehouse(l) ? 'warehouse' : 'store'} size={15} />{l}
+                        {locations.map((l) => (
+                          <button key={l.id} type="button" className={`${styles.option} ${newDest === l.id ? styles.optionOn : ''}`} onClick={() => setNewDest(l.id)} disabled={l.id === newOrigin} aria-pressed={newDest === l.id}>
+                            <Icon name={isWarehouse(l.name) ? 'warehouse' : 'store'} size={15} />{l.name}
                           </button>
                         ))}
                       </div>
@@ -794,7 +948,7 @@ export default function OperationsPage() {
                 <section className={styles.formSection}>
                   <h3><span>2</span> Products <em>{draftItems.length ? `${draftItems.length} selected · ${draftTotal} units` : 'Tap to add'}</em></h3>
                   <div className={styles.productGrid}>
-                    {CATALOG.map((p) => {
+                    {catalog.map((p) => {
                       const q = draft[p.sku];
                       return (
                         <div key={p.sku} className={`${styles.productCard} ${q ? styles.productOn : ''}`}>
@@ -818,13 +972,7 @@ export default function OperationsPage() {
                 {/* 3. Delivery */}
                 <section className={styles.formSection}>
                   <h3><span>3</span> Delivery</h3>
-                  <div className={styles.carrierGrid}>
-                    {CARRIERS.map((c) => (
-                      <button key={c.name} type="button" className={`${styles.carrierOption} ${newCarrier === c.name ? styles.optionOn : ''}`} onClick={() => setNewCarrier(c.name)} aria-pressed={newCarrier === c.name}>
-                        <strong>{c.name}</strong><small>{c.hint}</small>
-                      </button>
-                    ))}
-                  </div>
+                  <p>Carrier and tracking details can be recorded after the transfer is created.</p>
                   <div className={styles.whenRow}>
                     <div className={styles.segmented} role="group" aria-label="When to send">
                       <button type="button" className={dispatchNow ? styles.segOn : ''} onClick={() => setDispatchNow(true)} aria-pressed={dispatchNow}><Icon name="send" size={14} /> Send now</button>
@@ -836,9 +984,9 @@ export default function OperationsPage() {
                 {createError && <p className={styles.formError}><Icon name="alert" size={14} /> {createError}</p>}
               </div>
               <div className={styles.modalFoot}>
-                <span className={styles.footSummary}>{draftTotal} units · {newOrigin} → {newDest}</span>
+                <span className={styles.footSummary}>{draftTotal} units · {locationName(newOrigin)} → {locationName(newDest)}</span>
                 <button type="button" className={styles.ghostButton} onClick={() => setCreateModalOpen(false)}>Cancel</button>
-                <button type="submit" className={styles.primaryButton}><Icon name={dispatchNow ? 'send' : 'check'} size={15} /> {dispatchNow ? 'Create & send' : 'Save transfer'}</button>
+                <button type="submit" disabled={isCreatingBusy} className={styles.primaryButton}><Icon name={dispatchNow ? 'send' : 'check'} size={15} /> {isCreatingBusy ? 'Saving…' : dispatchNow ? 'Create & submit' : 'Save draft'}</button>
               </div>
             </form>
           </div>

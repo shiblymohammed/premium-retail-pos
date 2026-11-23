@@ -1,150 +1,61 @@
-import { PrismaClient, Role, LocationType } from '@prisma/client';
+import { PrismaClient, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
+/**
+ * Bootstrap exactly one global administrator. Organization data and all other
+ * users are created later by the authenticated Super Admin through the app.
+ * The seed is intentionally idempotent so operators can rotate this password
+ * by changing the environment variable and running the seed again.
+ */
 async function main() {
-  if (process.env.NODE_ENV !== 'development') {
-    throw new Error('The sample seed accounts may only be created with NODE_ENV=development');
+  const email = process.env.INITIAL_SUPER_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.INITIAL_SUPER_ADMIN_PASSWORD;
+
+  if (!email || !password) {
+    throw new Error('Set INITIAL_SUPER_ADMIN_EMAIL and INITIAL_SUPER_ADMIN_PASSWORD before running the database seed.');
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('INITIAL_SUPER_ADMIN_EMAIL must be a valid email address.');
+  }
+  if (password.length < 14 || Buffer.byteLength(password, 'utf8') > 72) {
+    throw new Error('INITIAL_SUPER_ADMIN_PASSWORD must be at least 14 characters and at most 72 UTF-8 bytes.');
   }
 
-  console.log('🌱 Seeding database...');
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing && existing.role !== Role.SUPER_ADMIN) {
+    throw new Error('The configured bootstrap email already belongs to a non-Super Admin. Choose a different email; no account was changed.');
+  }
 
-  // 1. Create default company
-  const company = await prisma.company.upsert({
-    where: { id: 'seed-company-001' },
-    update: {},
-    create: {
-      id: 'seed-company-001',
-      name: 'Premium Retail',
-      currency: 'INR',
-      timezone: 'Asia/Kolkata',
-      invoicePrefix: 'INV',
-    },
-  });
-  console.log(`✅ Company: ${company.name}`);
-
-  // 2. Create main warehouse
-  const mainWarehouse = await prisma.location.upsert({
-    where: { id: 'seed-location-main' },
-    update: {},
-    create: {
-      id: 'seed-location-main',
-      companyId: company.id,
-      name: 'Main Warehouse',
-      type: LocationType.MAIN_WAREHOUSE,
-      address: 'Central Distribution Hub',
-    },
-  });
-  console.log(`✅ Location: ${mainWarehouse.name}`);
-
-  // 3. Create a sample sub-warehouse
-  const subWarehouse = await prisma.location.upsert({
-    where: { id: 'seed-location-sub-01' },
-    update: {},
-    create: {
-      id: 'seed-location-sub-01',
-      companyId: company.id,
-      name: 'Sub-Warehouse North',
-      type: LocationType.SUB_WAREHOUSE,
-      parentId: mainWarehouse.id,
-      address: 'North Region Warehouse',
-    },
-  });
-  console.log(`✅ Location: ${subWarehouse.name}`);
-
-  // 4. Create a sample retail store
-  const retailStore = await prisma.location.upsert({
-    where: { id: 'seed-location-store-01' },
-    update: {},
-    create: {
-      id: 'seed-location-store-01',
-      companyId: company.id,
-      name: 'Retail Store Downtown',
-      type: LocationType.RETAIL_STORE,
-      parentId: subWarehouse.id,
-      address: 'Downtown Shopping District',
-      latitude: 12.9716,
-      longitude: 77.5946,
-      geofenceRadius: 50,
-    },
-  });
-  console.log(`✅ Location: ${retailStore.name}`);
-
-  // 5. Create Super Admin user
-  const superAdminPassword = await bcrypt.hash('SuperAdmin@123', 12);
+  const passwordHash = await bcrypt.hash(password, 12);
   const superAdmin = await prisma.user.upsert({
-    where: { email: 'admin@premiumretail.com' },
-    update: {},
-    create: {
-      email: 'admin@premiumretail.com',
-      passwordHash: superAdminPassword,
-      role: Role.SUPER_ADMIN,
-    },
-  });
-  console.log(`✅ Super Admin: ${superAdmin.email}`);
-
-  // 6. Create a sample Store Manager with location scope
-  const managerPassword = await bcrypt.hash('Manager@123', 12);
-  const storeManager = await prisma.user.upsert({
-    where: { email: 'manager@premiumretail.com' },
-    update: {},
-    create: {
-      email: 'manager@premiumretail.com',
-      passwordHash: managerPassword,
-      role: Role.STORE_MANAGER,
-      locationScopes: {
-        create: [{ locationId: retailStore.id }],
-      },
-    },
-  });
-  console.log(`✅ Store Manager: ${storeManager.email} (scoped to ${retailStore.name})`);
-
-  // 7. Create a sample Cashier with location scope
-  const cashierPassword = await bcrypt.hash('Cashier@123', 12);
-  const cashier = await prisma.user.upsert({
-    where: { email: 'cashier@premiumretail.com' },
-    update: {},
-    create: {
-      email: 'cashier@premiumretail.com',
-      passwordHash: cashierPassword,
-      role: Role.CASHIER,
-      locationScopes: {
-        create: [{ locationId: retailStore.id }],
-      },
-    },
-  });
-  console.log(`✅ Cashier: ${cashier.email} (scoped to ${retailStore.name})`);
-
-  // Link the sample cashier to an employee record so the real self-service
-  // attendance endpoints work with the seeded demo account.
-  const cashierEmployee = await prisma.employee.upsert({
-    where: { userId: cashier.id },
+    where: { email },
     update: {
-      locationId: retailStore.id,
+      passwordHash,
+      isActive: true,
+      refreshTokenHash: null,
+      sessionVersion: { increment: 1 },
+      locationScopes: { deleteMany: {} },
+    },
+    create: {
+      email,
+      passwordHash,
+      role: Role.SUPER_ADMIN,
       isActive: true,
     },
-    create: {
-      userId: cashier.id,
-      employeeCode: 'EMP-0842',
-      firstName: 'Ravi',
-      lastName: 'Menon',
-      locationId: retailStore.id,
-      hireDate: new Date('2026-01-01T00:00:00.000Z'),
-    },
+    select: { id: true, email: true, role: true },
   });
-  console.log(`✅ Cashier employee: ${cashierEmployee.employeeCode} at ${retailStore.name}`);
 
-  console.log('\n🎉 Seed complete! Development credentials:');
-  console.log('  Super Admin : admin@premiumretail.com / SuperAdmin@123');
-  console.log('  Store Mgr   : manager@premiumretail.com / Manager@123');
-  console.log('  Cashier     : cashier@premiumretail.com / Cashier@123');
+  console.log(`Super Admin bootstrap ready: ${superAdmin.email} (${superAdmin.role}).`);
+  console.log('No company, location, product, employee, or demo accounts were created.');
+  console.log('The bootstrap password is not printed.');
 }
 
 main()
-  .catch((e) => {
-    console.error('❌ Seed failed:', e);
-    process.exit(1);
+  .catch((error) => {
+    console.error('Super Admin bootstrap failed:', error instanceof Error ? error.message : error);
+    process.exitCode = 1;
   })
   .finally(async () => {
     await prisma.$disconnect();

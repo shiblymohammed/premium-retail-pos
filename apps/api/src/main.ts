@@ -35,7 +35,14 @@ async function bootstrap() {
     }),
   );
 
-  const port = process.env.PORT || 4000;
+  // `PORT` is commonly supplied by deployment platforms and the root `.env`.
+  // `API_PORT` gives local developers an explicit override when another API
+  // process already owns the default port.
+  const configuredPort = process.env.API_PORT || process.env.PORT || '4000';
+  const port = Number(configuredPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid API port: ${configuredPort}`);
+  }
   await app.listen(port);
   console.log(`[POS API] Running on http://localhost:${port}/api/v1`);
 }

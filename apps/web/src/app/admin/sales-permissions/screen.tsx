@@ -62,156 +62,6 @@ const CAPABILITY_OPTIONS = [
   { value: 'RESTRICTED', label: 'No Overrides (Standard)' },
 ];
 
-const FALLBACK_LOCATIONS: LocationRecord[] = [
-  { id: 'loc-1', name: 'Downtown Flagship Store', type: 'RETAIL_STORE' },
-  { id: 'loc-2', name: 'North Mall Retail Store', type: 'RETAIL_STORE' },
-  { id: 'loc-3', name: 'West End Outlet', type: 'RETAIL_STORE' },
-  { id: 'loc-4', name: 'Main Central Warehouse', type: 'CENTRAL_WAREHOUSE' },
-];
-
-const FALLBACK_USERS: UserRecord[] = [
-  {
-    id: 'usr-003',
-    name: 'Asha Patel',
-    email: 'manager@premiumretail.com',
-    employeeCode: 'EMP-MGR-0841',
-    role: 'STORE_MANAGER',
-    isActive: true,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: true,
-    lastReason: 'Store manager operational override privileges',
-    lastUpdated: '18-Nov-2026',
-    locationScopes: [{ locationId: 'loc-1' }, { locationId: 'loc-2' }],
-  },
-  {
-    id: 'usr-006',
-    name: 'Ravi Menon',
-    email: 'cashier@premiumretail.com',
-    employeeCode: 'EMP-CSH-0842',
-    role: 'CASHIER',
-    isActive: true,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: false,
-    lastReason: 'Lead cashier register authorization',
-    lastUpdated: '16-Nov-2026',
-    locationScopes: [{ locationId: 'loc-1' }],
-  },
-  {
-    id: 'usr-007',
-    name: 'Neel Shah',
-    email: 'n.shah@premiumretail.com',
-    employeeCode: 'EMP-CSH-0843',
-    role: 'CASHIER',
-    isActive: true,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: false,
-    lastReason: 'Junior cashier checkout lane - sales only',
-    lastUpdated: '14-Nov-2026',
-    locationScopes: [{ locationId: 'loc-1' }],
-  },
-  {
-    id: 'usr-008',
-    name: 'Maya Das',
-    email: 'm.das@premiumretail.com',
-    employeeCode: 'EMP-CSH-0844',
-    role: 'CASHIER',
-    isActive: true,
-    canCancelSales: true,
-    canProcessReturns: true,
-    canCountStockAudits: false,
-    lastReason: 'Senior cashier West End customer service desk',
-    lastUpdated: '12-Nov-2026',
-    locationScopes: [{ locationId: 'loc-3' }],
-  },
-  {
-    id: 'usr-010',
-    name: 'Kabir Rao',
-    email: 'k.rao@premiumretail.com',
-    employeeCode: 'EMP-CSH-0845',
-    role: 'CASHIER',
-    isActive: true,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: false,
-    lastReason: 'North Mall sales terminal operator',
-    lastUpdated: '10-Nov-2026',
-    locationScopes: [{ locationId: 'loc-2' }],
-  },
-  {
-    id: 'usr-012',
-    name: 'Divya Nair',
-    email: 'd.nair@premiumretail.com',
-    employeeCode: 'EMP-CSH-0846',
-    role: 'CASHIER',
-    isActive: true,
-    canCancelSales: false,
-    canProcessReturns: true,
-    canCountStockAudits: false,
-    lastReason: 'Customer desk returns processor',
-    lastUpdated: '08-Nov-2026',
-    locationScopes: [{ locationId: 'loc-2' }],
-  },
-  {
-    id: 'usr-004',
-    name: 'Vikram Singh',
-    email: 'warehouse@premiumretail.com',
-    employeeCode: 'EMP-WH-0501',
-    role: 'CENTRAL_MANAGER',
-    isActive: true,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: true,
-    lastReason: 'Logistics hub manager - stock audit auditor',
-    lastUpdated: '05-Nov-2026',
-    locationScopes: [{ locationId: 'loc-4' }],
-  },
-  {
-    id: 'usr-005',
-    name: 'Rajesh Kumar',
-    email: 'subwarehouse@premiumretail.com',
-    employeeCode: 'EMP-WH-0502',
-    role: 'SUB_WAREHOUSE_MANAGER',
-    isActive: true,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: true,
-    lastReason: 'Regional sub-warehouse manager - stock audit auditor',
-    lastUpdated: '04-Nov-2026',
-    locationScopes: [{ locationId: 'loc-4' }],
-  },
-  {
-    id: 'usr-009',
-    name: 'Priya Sharma',
-    email: 'staff@premiumretail.com',
-    employeeCode: 'EMP-STF-0109',
-    role: 'STAFF',
-    isActive: true,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: false,
-    lastReason: 'Floor operations staff - standard catalog view',
-    lastUpdated: '28-Oct-2026',
-    locationScopes: [{ locationId: 'loc-1' }],
-  },
-  {
-    id: 'usr-011',
-    name: 'Anita Verma',
-    email: 'a.verma@premiumretail.com',
-    employeeCode: 'EMP-STF-0110',
-    role: 'STAFF',
-    isActive: true,
-    canCancelSales: false,
-    canProcessReturns: false,
-    canCountStockAudits: false,
-    lastReason: 'Floor support staff - standard catalog view',
-    lastUpdated: '24-Oct-2026',
-    locationScopes: [{ locationId: 'loc-3' }],
-  },
-];
-
 async function errorMessage(response: Response) {
   try {
     const result = await response.json();
@@ -226,18 +76,19 @@ export default function SalesPermissionsAdmin() {
   const [activeTab, setActiveTab] = useState<'MATRIX' | 'TEMPLATES'>('MATRIX');
 
   // Session & Authority
-  const [token, setToken] = useState<string>('demo_token');
-  const [actorEmail, setActorEmail] = useState<string>('admin@premiumretail.com');
+  const [token, setToken] = useState<string>('');
+  const [actorEmail, setActorEmail] = useState<string>('');
   const [authority, setAuthority] = useState<Authority>({
-    role: 'SUPER_ADMIN',
-    canCancelSales: true,
-    canProcessReturns: true,
-    permissionsInherited: true,
+    role: '',
+    canCancelSales: false,
+    canProcessReturns: false,
+    permissionsInherited: false,
   });
 
   // Data
-  const [users, setUsers] = useState<UserRecord[]>(FALLBACK_USERS);
-  const [locations, setLocations] = useState<LocationRecord[]>(FALLBACK_LOCATIONS);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [locations, setLocations] = useState<LocationRecord[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -250,7 +101,7 @@ export default function SalesPermissionsAdmin() {
   const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
 
   // Selected row for highlight
-  const [selectedUserId, setSelectedUserId] = useState<string>('usr-003');
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
 
   // Status & Feedback
   const [savingUserId, setSavingUserId] = useState<string>('');
@@ -288,38 +139,38 @@ export default function SalesPermissionsAdmin() {
       });
     }
 
-    if (session?.accessToken) {
-      const headers = { Authorization: `Bearer ${session.accessToken}` };
-      Promise.all([
+    if (!session?.accessToken) {
+      setError('Sign in with an administrator account to load live permissions.');
+      setLoading(false);
+      return;
+    }
+    setToken(session.accessToken);
+    const headers = { Authorization: `Bearer ${session.accessToken}` };
+    Promise.all([
         fetch(`${API_BASE}/users/me/sales-permissions`, { headers, cache: 'no-store' }),
         fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
         fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
       ])
         .then(async ([authRes, usersRes, locsRes]) => {
-          if (authRes.ok && usersRes.ok && locsRes.ok) {
-            const [authData, usersData, locsData] = await Promise.all([
-              authRes.json(),
-              usersRes.json(),
-              locsRes.json(),
-            ]);
-            if (authData?.data) {
-              setAuthority(authData.data);
-            }
-            if (Array.isArray(usersData?.data) && usersData.data.length > 0) {
-              const manageable = usersData.data.filter(
-                (u: UserRecord) => u.email.toLowerCase() !== session.user?.email.toLowerCase(),
-              );
-              setUsers(manageable);
-            }
-            if (Array.isArray(locsData?.data) && locsData.data.length > 0) {
-              setLocations(locsData.data);
-            }
+          const failed = [authRes, usersRes, locsRes].find((response) => !response.ok);
+          if (failed) throw new Error(await errorMessage(failed));
+          const [authData, usersData, locsData] = await Promise.all([
+            authRes.json(),
+            usersRes.json(),
+            locsRes.json(),
+          ]);
+          if (authData?.data) setAuthority(authData.data);
+          if (Array.isArray(usersData?.data)) {
+            setUsers(usersData.data.filter(
+              (u: UserRecord) => u.email.toLowerCase() !== session.user?.email.toLowerCase(),
+            ));
           }
+          if (Array.isArray(locsData?.data)) setLocations(locsData.data);
         })
-        .catch(() => {
-          // Keep fallback data
-        });
-    }
+        .catch((loadError: unknown) => {
+          setError(loadError instanceof Error ? loadError.message : 'Could not load permissions from the server.');
+        })
+        .finally(() => setLoading(false));
   }, []);
 
   // Global click to dismiss menus
@@ -415,10 +266,11 @@ export default function SalesPermissionsAdmin() {
 
     setSavingUserId(editingUser.id);
     setError('');
+    let salesPermissionSaved = false;
 
     try {
-      if (token && token !== 'demo_token') {
-        const salesRes = await fetch(`${API_BASE}/users/${editingUser.id}/sales-permissions`, {
+      if (!token) throw new Error('No authenticated session. Sign in again and retry.');
+      const salesRes = await fetch(`${API_BASE}/users/${editingUser.id}/sales-permissions`, {
           method: 'PATCH',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -428,6 +280,7 @@ export default function SalesPermissionsAdmin() {
           }),
         });
         if (!salesRes.ok) throw new Error(await errorMessage(salesRes));
+        salesPermissionSaved = true;
 
         const auditRes = await fetch(`${API_BASE}/users/${editingUser.id}/stock-audit-permission`, {
           method: 'PATCH',
@@ -438,7 +291,6 @@ export default function SalesPermissionsAdmin() {
           }),
         });
         if (!auditRes.ok) throw new Error(await errorMessage(auditRes));
-      }
 
       setUsers((prev) =>
         prev.map((item) =>
@@ -456,24 +308,11 @@ export default function SalesPermissionsAdmin() {
       );
       setEditingUser(null);
       setNotice(`Updated sales permissions for ${editingUser.name || editingUser.email}.`);
-    } catch {
-      // Local fallback for offline/demo
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === editingUser.id
-            ? {
-                ...item,
-                canCancelSales: modalCanCancel,
-                canProcessReturns: modalCanReturn,
-                canCountStockAudits: modalCanAudit,
-                lastReason: reason || 'Permissions updated via admin console',
-                lastUpdated: 'Today',
-              }
-            : item,
-        ),
-      );
-      setEditingUser(null);
-      setNotice(`Updated sales permissions for ${editingUser.name || editingUser.email} (Audit record saved).`);
+    } catch (saveError: unknown) {
+      const detail = saveError instanceof Error ? saveError.message : 'Request failed.';
+      setError(salesPermissionSaved
+        ? `Sales permissions were saved, but the stock-audit permission was not confirmed. Refresh the page to load the server state. ${detail}`
+        : `Permissions were not saved. ${detail}`);
     } finally {
       setSavingUserId('');
     }
@@ -492,8 +331,8 @@ export default function SalesPermissionsAdmin() {
     setActiveActionMenuId(null);
 
     try {
-      if (token && token !== 'demo_token') {
-        await Promise.all([
+      if (!token) throw new Error('No authenticated session. Sign in again and retry.');
+      const responses = await Promise.all([
           fetch(`${API_BASE}/users/${user.id}/sales-permissions`, {
             method: 'PATCH',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -505,7 +344,8 @@ export default function SalesPermissionsAdmin() {
             body: JSON.stringify({ canCountStockAudits: audit, reason }),
           }),
         ]);
-      }
+      const failed = responses.find((response) => !response.ok);
+      if (failed) throw new Error(await errorMessage(failed));
       setUsers((prev) =>
         prev.map((item) =>
           item.id === user.id
@@ -521,22 +361,8 @@ export default function SalesPermissionsAdmin() {
         ),
       );
       setNotice(`Assigned ${label} to ${user.name || user.email}.`);
-    } catch {
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === user.id
-            ? {
-                ...item,
-                canCancelSales: cancel,
-                canProcessReturns: returns,
-                canCountStockAudits: audit,
-                lastReason: reason,
-                lastUpdated: 'Today',
-              }
-            : item,
-        ),
-      );
-      setNotice(`Assigned ${label} to ${user.name || user.email}.`);
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? `Preset was not confirmed by the server. ${saveError.message}` : 'Preset was not saved.');
     } finally {
       setSavingUserId('');
     }
@@ -545,26 +371,7 @@ export default function SalesPermissionsAdmin() {
   // Bulk Apply
   const handleApplyBulk = (e: FormEvent) => {
     e.preventDefault();
-    const reason = bulkReason.trim() || 'Role-wide sales permission template application';
-
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.role === bulkRole) {
-          return {
-            ...u,
-            canCancelSales: bulkCanCancel,
-            canProcessReturns: bulkCanReturn,
-            canCountStockAudits: bulkCanAudit,
-            lastReason: reason,
-            lastUpdated: 'Today',
-          };
-        }
-        return u;
-      }),
-    );
-
-    setIsBulkModalOpen(false);
-    setNotice(`Updated all active ${roleLabels[bulkRole]} accounts with the requested permission policy.`);
+    setError('Bulk permission changes are not supported by the API yet. Use the per-user permission editor so each change is recorded by the server.');
   };
 
   // Copy User Policy
@@ -581,7 +388,7 @@ export default function SalesPermissionsAdmin() {
   };
 
   return (
-    <div style={{ padding: '28px 36px 60px', maxWidth: '1440px', margin: '0 auto', color: '#1e293b' }}>
+    <div className="app-page" style={{ color: '#1e293b' }}>
       {/* Alert Notice (Matching users, company, discount-limits) */}
       {notice && (
         <div
@@ -634,6 +441,11 @@ export default function SalesPermissionsAdmin() {
           >
             ✕
           </button>
+        </div>
+      )}
+      {loading && (
+        <div role="status" style={{ padding: '12px 16px', marginBottom: '16px', borderRadius: '9px', background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', fontSize: '13px' }}>
+          Loading current permissions from the server…
         </div>
       )}
 
@@ -727,6 +539,7 @@ export default function SalesPermissionsAdmin() {
           <button
             type="button"
             onClick={() => setIsBulkModalOpen(true)}
+            disabled={loading || users.length === 0}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -738,7 +551,8 @@ export default function SalesPermissionsAdmin() {
               border: 'none',
               fontWeight: 700,
               fontSize: '13px',
-              cursor: 'pointer',
+              cursor: loading || users.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: loading || users.length === 0 ? 0.55 : 1,
               boxShadow: '0 2px 10px rgba(26, 98, 234, 0.28)',
             }}
           >
@@ -1847,12 +1661,7 @@ export default function SalesPermissionsAdmin() {
                 <div>Justification Reason</div>
               </div>
 
-              {[
-                { time: 'Today, 17:50', target: 'm.das@premiumretail.com', delta: 'Returns Granted', reason: 'Senior cashier West End customer service desk' },
-                { time: 'Yesterday, 14:10', target: 'manager@premiumretail.com', delta: 'All Privileges', reason: 'Store manager operational override privileges' },
-                { time: '14-Nov-2026', target: 'cashier@premiumretail.com', delta: 'Voids Granted', reason: 'Lead cashier register authorization' },
-                { time: '10-Nov-2026', target: 'warehouse@premiumretail.com', delta: 'Audit Granted', reason: 'Logistics hub manager - stock audit auditor' },
-              ].map((entry, idx) => (
+              {Array.from([] as Array<{ time: string; target: string; delta: string; reason: string }>).map((entry, idx) => (
                 <div
                   key={idx}
                   style={{
@@ -1875,6 +1684,7 @@ export default function SalesPermissionsAdmin() {
                   <div style={{ color: '#475569', fontSize: '11.5px' }}>{entry.reason}</div>
                 </div>
               ))}
+              <p style={{ margin: 0, padding: 18, color: '#64748b', fontSize: 13 }}>No permission changes have been recorded yet.</p>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

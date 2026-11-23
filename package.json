@@ -24,7 +24,9 @@
     "test:e2e": "npm run test:e2e --workspace=apps/api",
     "db:migrate": "npm run db:migrate --workspace=apps/api",
     "db:seed": "npm run db:seed --workspace=apps/api",
-    "db:studio": "npm run db:studio --workspace=apps/api"
+    "db:studio": "npm run db:studio --workspace=apps/api",
+    "db:backup": "node scripts/db-backup.cjs",
+    "db:restore:verify": "node scripts/db-restore-verify.cjs"
   },
   "engines": {
     "node": ">=20.0.0"

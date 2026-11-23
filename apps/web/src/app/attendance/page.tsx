@@ -38,18 +38,6 @@ type HistoryDay = {
   workMinutes: number;
 };
 
-const DEMO_STAFF_TODAY: Today = {
-  employee: { id: 'emp_0842', name: 'Ravi Menon', employeeCode: 'EMP-0842' },
-  location: { id: 'loc_downtown', name: 'Downtown Store' },
-  localDate: new Date().toLocaleDateString('en-CA'),
-  timezone: 'Asia/Kolkata',
-  targetStartTime: '09:00',
-  qrRequired: true,
-  status: 'NOT_STARTED',
-  nextAction: 'IN',
-  punches: [],
-};
-
 const HISTORY_LABEL: Record<HistoryDay['status'], string> = {
   present: 'On time', late: 'Late arrival', absent: 'No attendance', off: 'No punch recorded', future: 'Not yet',
 };
@@ -82,42 +70,10 @@ function prettyDay(dateKey: string, options: Intl.DateTimeFormatOptions) {
   return new Intl.DateTimeFormat('en-IN', { ...options, timeZone: 'UTC' }).format(new Date(`${dateKey}T12:00:00Z`));
 }
 
-function makeDemoHistory(anchor: Date): HistoryDay[] {
-  const start = new Date(anchor);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) - 25 * 7);
-
-  return Array.from({ length: 26 * 7 }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    const key = date.getDate() + (date.getMonth() + 1) * 31 + date.getFullYear();
-    const dateKey = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-    let status: HistoryDay['status'];
-    if (date > anchor) status = 'future';
-    else if (date.getDay() === 0 || date.getDay() === 6) status = 'off';
-    else if (key % 23 === 0) status = 'absent';
-    else if (key % 7 === 0) status = 'late';
-    else status = 'present';
-
-    const inMinutes = status === 'late' ? 9 * 60 + 4 + key % 20 : 8 * 60 + 42 + key % 18;
-    const outMinutes = 17 * 60 + 20 + key % 45;
-    const workMinutes = status === 'present' || status === 'late' ? outMinutes - inMinutes : 0;
-    return {
-      date: dateKey,
-      status,
-      clockIn: status === 'present' || status === 'late' ? `${pad(Math.floor(inMinutes / 60))}:${pad(inMinutes % 60)}` : '—',
-      clockOut: status === 'present' || status === 'late' ? `${pad(Math.floor(outMinutes / 60))}:${pad(outMinutes % 60)}` : '—',
-      hours: workMinutes ? formatWorkMinutes(workMinutes) : '—',
-      workMinutes,
-    };
-  });
-}
-
 export default function AttendancePage() {
   const [today, setToday] = useState<Today | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [demoMode, setDemoMode] = useState(false);
   const [profileMissing, setProfileMissing] = useState(false);
   const [apiToken, setApiToken] = useState('');
   const [error, setError] = useState('');
@@ -130,7 +86,6 @@ export default function AttendancePage() {
     const session = getStoredSession();
     const now = new Date();
     setClockNow(now);
-    setHistory(makeDemoHistory(now));
     const timer = window.setInterval(() => setClockNow(new Date()), 1000);
 
     const code = new URLSearchParams(window.location.hash.slice(1)).get('qr');
@@ -140,8 +95,7 @@ export default function AttendancePage() {
     }
 
     if (!session?.accessToken) {
-      setToday({ ...DEMO_STAFF_TODAY, employee: { ...DEMO_STAFF_TODAY.employee, name: session?.user?.name || DEMO_STAFF_TODAY.employee.name } });
-      setDemoMode(true);
+      setError('Sign in with an employee account to view attendance.');
       setLoading(false);
     } else {
       setApiToken(session.accessToken);
@@ -192,9 +146,8 @@ export default function AttendancePage() {
           if (message.toLowerCase().includes('employee profile')) {
             setApiToken('');
             setProfileMissing(true);
-            setDemoMode(true);
-            setToday(DEMO_STAFF_TODAY);
-            setNotice('Demo preview · check-in and clock-out can be tried here, but these punches will not be saved.');
+            setToday(null);
+            setNotice('An administrator must link an employee profile to this account before attendance can be recorded.');
           } else {
             setError(message);
           }
@@ -304,14 +257,8 @@ export default function AttendancePage() {
     setBusy(false);
   }
 
-  function simulateQrScan() {
-    const token = `QR_${today?.location.id}_${Math.floor(Date.now() / 60000)}`;
-    setQrToken(token);
-    setNotice('Store counter QR verified. You can clock in now.');
-  }
-
-  if (loading) return <main className={styles.page}><div className={styles.loading}>Loading your attendance…</div></main>;
-  if (!today) return <main className={styles.page}><div className={styles.loadError}><strong>Attendance unavailable</strong><p>{error || 'Your account does not have an employee attendance profile.'}</p><button type="button" onClick={() => window.location.reload()}>Try again</button></div></main>;
+  if (loading) return <main className={`${styles.page} app-page`}><div className={styles.loading}>Loading your attendance…</div></main>;
+  if (!today) return <main className={`${styles.page} app-page`}><div className={styles.loadError}><strong>Attendance unavailable</strong><p>{error || 'Your account does not have an employee attendance profile.'}</p><button type="button" onClick={() => window.location.reload()}>Try again</button></div></main>;
 
   const statusLabel = today.status === 'NOT_STARTED' ? 'Not clocked in' : today.status === 'WORKING' ? 'On shift' : 'Shift complete';
   const statusClass = today.status === 'WORKING' ? styles.live : today.status === 'COMPLETED' ? styles.done : styles.waiting;
@@ -339,9 +286,9 @@ export default function AttendancePage() {
   const longDate = clockNow ? new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(clockNow) : today.localDate;
 
   return (
-    <main className={styles.page}>
+    <main className={`${styles.page} app-page`}>
       <div className={styles.content}>
-        <div className={styles.breadcrumb}><span>Workforce</span><b>›</b><strong>My attendance</strong>{demoMode && <span className={styles.demoTag}>DEMO VIEW</span>}</div>
+        <div className={styles.breadcrumb}><span>Workforce</span><b>›</b><strong>My attendance</strong></div>
         <header className={styles.pageHeading}>
           <div><p className={styles.eyebrow}>STAFF WORKSPACE · {today.employee.employeeCode}</p><h1>My attendance</h1><p className={styles.subtitle}>Record today’s shift and review your recent attendance.</p></div>
           <div className={styles.headingMeta}><span className={styles.locationPin}>⌖</span><span><strong>{today.location.name}</strong><small>{longDate}</small></span></div>
@@ -360,21 +307,21 @@ export default function AttendancePage() {
           <article className={styles.actionPanel}>
             <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><h2>Shift check-in</h2><p>Clock in when you’re ready to begin, then clock out at the end of your shift.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
 
-            {!profileMissing && today.qrRequired && today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}><span className={styles.qrIcon}>{qrToken ? '✓' : '⌗'}</span><div><strong>{qrToken ? 'Store verification ready' : 'Store QR check required'}</strong><small>{qrToken ? 'The current counter code will be checked by the server.' : demoMode ? 'Use the demo scan button to preview the flow.' : 'Open this page from the current attendance QR displayed at your store.'}</small></div>{!qrToken && demoMode && <button type="button" onClick={simulateQrScan}>Demo scan</button>}</div>}
+            {!profileMissing && today.qrRequired && today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}><span className={styles.qrIcon}>{qrToken ? '✓' : '⌗'}</span><div><strong>{qrToken ? 'Store verification ready' : 'Store QR check required'}</strong><small>{qrToken ? 'The current counter code will be checked by the server.' : 'Open this page from the current attendance QR displayed at your store.'}</small></div></div>}
 
             <div className={styles.shiftControls}>
               {today.status === 'NOT_STARTED' && <>
                 <div className={styles.localClock}><span>LOCAL TIME</span><strong>{clockValue}</strong><small>{today.targetStartTime ? `Scheduled start · ${today.targetStartTime}` : 'Ready when you are'}</small></div>
                 <button className={styles.attendanceOrb} type="button" disabled={busy || Boolean(apiToken && today.qrRequired && !qrToken)} onClick={handlePunch} aria-label="Clock in and start your shift">
                   <span className={styles.orbIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v9m-6.4-6.4a9 9 0 1 0 12.8 0" /></svg></span>
-                  <strong>{busy ? 'Saving…' : 'Clock in'}</strong><small>{demoMode ? 'Demo only' : 'Start shift'}</small>
+                  <strong>{busy ? 'Saving…' : 'Clock in'}</strong><small>Start shift</small>
                 </button>
-                {profileMissing && <div className={styles.profileNotice}><span>i</span><div><strong>Preview mode · profile not linked</strong><small>You can try check-in and clock-out here. Demo punches stay in this browser and are not saved to the attendance records. Ask a manager to link your employee profile for real attendance.</small></div></div>}
+                {profileMissing && <div className={styles.profileNotice}><span>i</span><div><strong>Attendance unavailable</strong><small>No employee profile is linked to this account. Ask an administrator to create or link your employee record before clocking in.</small></div></div>}
               </>}
 
               {today.status === 'WORKING' && <div className={styles.activeShift}>
                 <div className={styles.timerCircle}><span className={styles.timerLive}><i /> SHIFT IN PROGRESS</span><strong>{elapsed}</strong><small>HOURS : MINUTES</small><em>Clocked in at {clockIn ? formatTime(clockIn.punchTimestamp) : '—'}</em></div>
-                <button className={styles.clockOutAction} type="button" disabled={busy} onClick={handlePunch}><span aria-hidden="true">↙</span><strong>{busy ? 'Saving…' : 'Clock out'}</strong><small>{demoMode ? 'Demo only' : 'Finish today’s shift'}</small></button>
+                <button className={styles.clockOutAction} type="button" disabled={busy} onClick={handlePunch}><span aria-hidden="true">↙</span><strong>{busy ? 'Saving…' : 'Clock out'}</strong><small>Finish today’s shift</small></button>
               </div>}
 
               {today.status === 'COMPLETED' && <div className={styles.completedShift}><span className={styles.completedIcon}>✓</span><small>SHIFT COMPLETE</small><strong>{elapsed}</strong><p>{clockIn ? `Clocked in ${formatTime(clockIn.punchTimestamp)}` : 'Clock-in recorded'} · {clockOut ? `Clocked out ${formatTime(clockOut.punchTimestamp)}` : 'Clock-out recorded'}</p></div>}
@@ -403,7 +350,7 @@ export default function AttendancePage() {
               </div>
               {!history.length && <p className={styles.emptyHistory}>No attendance history is available for this period.</p>}
               <div className={styles.gridLegend}><span>On time</span><i className={`${styles.heatCell} ${styles.heat_present} ${styles.g1}`} /><i className={`${styles.heatCell} ${styles.heat_present} ${styles.g2}`} /><i className={`${styles.heatCell} ${styles.heat_present} ${styles.g3}`} /><span>Late</span><i className={`${styles.heatCell} ${styles.heat_late}`} /><span>Absent</span><i className={`${styles.heatCell} ${styles.heat_absent}`} /><span>No record</span><i className={`${styles.heatCell} ${styles.heat_off}`} /></div>
-              <p className={styles.gridNote}>{demoMode ? 'Demo history is illustrative. In a signed-in account, green shades reflect the recorded shift length.' : 'Darker green means a longer recorded shift. A day without a punch is left neutral; no schedule is inferred.'}</p>
+              <p className={styles.gridNote}>Darker green means a longer recorded shift. A day without a punch is left neutral; no schedule is inferred.</p>
             </article>
 
             <article className={styles.recentPanel}>

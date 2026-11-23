@@ -21,79 +21,6 @@ export interface LocationNode {
   address: string;
 }
 
-const INITIAL_NODES: LocationNode[] = [
-  {
-    id: 'loc-wh-01',
-    code: 'WH-MAIN-01',
-    name: 'Main Central Warehouse',
-    type: 'CENTRAL_WAREHOUSE',
-    parentId: null,
-    latitude: 12.9234,
-    longitude: 77.6189,
-    geofenceRadiusMeters: 150,
-    assignedManager: 'Vikram Singh (Central WH)',
-    terminalLanes: [],
-    isActive: true,
-    address: 'Plot 42, Hosur Logistics Park, Bangalore, KA 560100',
-  },
-  {
-    id: 'loc-sub-01',
-    code: 'WH-SUB-01',
-    name: 'Sub-Warehouse North Region',
-    type: 'SUB_WAREHOUSE',
-    parentId: 'loc-wh-01',
-    latitude: 28.4595,
-    longitude: 77.0266,
-    geofenceRadiusMeters: 100,
-    assignedManager: 'Rajesh Kumar (Sub-WH)',
-    terminalLanes: [],
-    isActive: true,
-    address: 'Sector 18 Industrial Area, Gurgaon, HR 122015',
-  },
-  {
-    id: 'loc-str-02',
-    code: 'STR-NM-02',
-    name: 'North Mall Retail Store',
-    type: 'RETAIL_STORE',
-    parentId: 'loc-sub-01',
-    latitude: 28.5355,
-    longitude: 77.2628,
-    geofenceRadiusMeters: 50,
-    assignedManager: 'Asha Patel (Store Manager)',
-    terminalLanes: ['POS-T01', 'POS-T02'],
-    isActive: true,
-    address: 'Ground Floor, North Avenue Mall, New Delhi, DL 110001',
-  },
-  {
-    id: 'loc-str-01',
-    code: 'STR-DT-01',
-    name: 'Downtown Flagship Store',
-    type: 'RETAIL_STORE',
-    parentId: 'loc-wh-01',
-    latitude: 12.9716,
-    longitude: 77.5946,
-    geofenceRadiusMeters: 50,
-    assignedManager: 'Asha Patel (Store Manager)',
-    terminalLanes: ['POS-T01', 'POS-T02', 'POS-T03'],
-    isActive: true,
-    address: '88 Brigade Road, CBD Area, Bangalore, KA 560001',
-  },
-  {
-    id: 'loc-str-03',
-    code: 'STR-WE-03',
-    name: 'West End Outlet',
-    type: 'RETAIL_STORE',
-    parentId: 'loc-wh-01',
-    latitude: 19.076,
-    longitude: 72.8777,
-    geofenceRadiusMeters: 50,
-    assignedManager: 'Asha Patel (Store Manager)',
-    terminalLanes: ['POS-T01'],
-    isActive: true,
-    address: 'Linking Road, Bandra West, Mumbai, MH 400050',
-  },
-];
-
 const TYPE_OPTIONS = [
   { value: 'ALL', label: 'All Facility Types' },
   { value: 'RETAIL_STORE', label: 'Retail Outlets (POS)' },
@@ -113,17 +40,19 @@ export default function CompanySettingsPage() {
   const [activeTab, setActiveTab] = useState<'NETWORK' | 'PROFILE'>('NETWORK');
 
   // Company Profile State
-  const [companyName, setCompanyName] = useState('Demo Retail Group Private Limited');
+  const [companyName, setCompanyName] = useState('');
   const [currency, setCurrency] = useState('INR');
   const [timezone, setTimezone] = useState('Asia/Kolkata');
-  const [invoicePrefix, setInvoicePrefix] = useState('DEMO');
-  const [taxId, setTaxId] = useState('29AAAAA0000A1Z5');
-  const [supportEmail, setSupportEmail] = useState('operations@premiumretail.com');
+  const [invoicePrefix, setInvoicePrefix] = useState('');
+  const [taxId, setTaxId] = useState('');
+  const [supportEmail, setSupportEmail] = useState('');
   const [fiscalYearStart, setFiscalYearStart] = useState('April');
+  const [companyId, setCompanyId] = useState('');
+  const [saving, setSaving] = useState(false);
 
   // Hierarchy State
-  const [nodes, setNodes] = useState<LocationNode[]>(INITIAL_NODES);
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('loc-str-01');
+  const [nodes, setNodes] = useState<LocationNode[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string>('');
   const [notice, setNotice] = useState('');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
@@ -147,12 +76,42 @@ export default function CompanySettingsPage() {
 
   // Add Node Modal
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [newCode, setNewCode] = useState('STR-SE-04');
+  const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<LocationNode['type']>('RETAIL_STORE');
-  const [newParent, setNewParent] = useState('loc-wh-01');
+  const [newParent, setNewParent] = useState('');
   const [newAddress, setNewAddress] = useState('');
-  const [newManager, setNewManager] = useState('Asha Patel (Store Manager)');
+  const [newManager, setNewManager] = useState('');
+
+  useEffect(() => {
+    const token = getStoredSession()?.accessToken;
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      fetch(`${API_BASE}/companies`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/locations`, { headers, cache: 'no-store' }),
+    ]).then(async ([companiesResponse, locationsResponse]) => {
+      if (!companiesResponse.ok || !locationsResponse.ok) throw new Error('Could not load company and location records.');
+      const [companiesPayload, locationsPayload] = await Promise.all([companiesResponse.json(), locationsResponse.json()]);
+      const company = companiesPayload.data?.[0];
+      if (company) {
+        setCompanyId(company.id);
+        setCompanyName(company.name || '');
+        setCurrency(company.currency || 'INR');
+        setTimezone(company.timezone || 'Asia/Kolkata');
+        setInvoicePrefix(company.invoicePrefix || '');
+      }
+      const mapped: LocationNode[] = (locationsPayload.data || []).map((loc: any) => ({
+        id: loc.id, code: loc.code || loc.id.slice(0, 8).toUpperCase(), name: loc.name,
+        type: loc.type === 'MAIN_WAREHOUSE' ? 'CENTRAL_WAREHOUSE' : loc.type,
+        parentId: loc.parentId || null, latitude: Number(loc.latitude || 0), longitude: Number(loc.longitude || 0),
+        geofenceRadiusMeters: Number(loc.geofenceRadius || 0), assignedManager: loc.manager?.name || '',
+        terminalLanes: [], isActive: Boolean(loc.isActive), address: loc.address || '',
+      }));
+      setNodes(mapped);
+      if (mapped[0]) setSelectedNodeId(mapped[0].id);
+    }).catch((error) => setNotice(error instanceof Error ? error.message : 'Could not load company data.'));
+  }, []);
 
   // Edit Node Modal
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -215,13 +174,28 @@ export default function CompanySettingsPage() {
     return { total, stores, central, sub, totalLanes };
   }, [nodes]);
 
-  const handleSaveCompany = (e: FormEvent) => {
+  const handleSaveCompany = async (e: FormEvent) => {
     e.preventDefault();
     if (!invoicePrefix.trim() || invoicePrefix.length < 2) {
       alert('Invoice prefix must be at least 2 characters.');
       return;
     }
-    setNotice(`Corporate profile updated: Invoice prefix "${invoicePrefix.toUpperCase()}", Currency ${currency}, Timezone ${timezone}.`);
+    const token = getStoredSession()?.accessToken;
+    if (!token) return setNotice('Sign in again to save company settings.');
+    setSaving(true);
+    try {
+      const response = await fetch(companyId ? `${API_BASE}/companies/${companyId}` : `${API_BASE}/companies`, {
+        method: companyId ? 'PATCH' : 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: companyName.trim(), currency, timezone, invoicePrefix: invoicePrefix.trim().toUpperCase() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'Company settings could not be saved.');
+      if (payload.data?.id) setCompanyId(payload.data.id);
+      setNotice(companyId ? 'Company settings saved.' : 'Company created. You can now add locations.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Company settings could not be saved.');
+    } finally { setSaving(false); }
   };
 
   const handleSaveNode = (e: FormEvent) => {
@@ -231,74 +205,47 @@ export default function CompanySettingsPage() {
       return;
     }
 
-    const lanesArray = nodeLanes
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.id === selectedNodeId
-          ? {
-              ...n,
-              name: nodeName,
-              code: nodeCode,
-              type: nodeType,
-              parentId: nodeParent || null,
-              latitude: Number(nodeLat) || 0,
-              longitude: Number(nodeLng) || 0,
-              geofenceRadiusMeters: Number(nodeRadius) || 50,
-              assignedManager: nodeManager,
-              address: nodeAddress,
-              isActive: nodeActive,
-              terminalLanes: lanesArray,
-            }
-          : n
-      )
-    );
     setIsEditModalOpen(false);
-    setNotice(`Facility node "${nodeName}" (${nodeCode}) updated successfully.`);
+    setNotice('Location editing is not available through the current API. No changes were saved.');
   };
 
-  const handleAddNode = (e: FormEvent) => {
+  const handleAddNode = async (e: FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newCode.trim()) {
       alert('Name and Code are required.');
       return;
     }
 
-    const newNode: LocationNode = {
-      id: `loc-${Date.now()}`,
-      code: newCode.toUpperCase(),
-      name: newName,
-      type: newType,
-      parentId: newParent || null,
-      latitude: 12.9716,
-      longitude: 77.5946,
-      geofenceRadiusMeters: 50,
-      assignedManager: newManager || 'Asha Patel (Store Manager)',
-      terminalLanes: newType === 'RETAIL_STORE' ? ['POS-T01'] : [],
-      isActive: true,
-      address: newAddress || 'Commercial Hub, Main Boulevard',
-    };
-
-    setNodes((prev) => [...prev, newNode]);
-    setSelectedNodeId(newNode.id);
-    setIsAddModalOpen(false);
-    setNotice(`New location facility "${newName}" provisioned successfully.`);
+    const token = getStoredSession()?.accessToken;
+    if (!token) return setNotice('Sign in again to create a location.');
+    if (!companyId) return setNotice('Create the company profile before adding locations.');
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/locations`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId, name: newName.trim(), type: newType === 'CENTRAL_WAREHOUSE' ? 'MAIN_WAREHOUSE' : newType, address: newAddress.trim() || undefined, parentId: newParent || undefined }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'Location could not be created.');
+      const loc = payload.data;
+      const node: LocationNode = { id: loc.id, code: loc.code || loc.id.slice(0, 8).toUpperCase(), name: loc.name, type: loc.type === 'MAIN_WAREHOUSE' ? 'CENTRAL_WAREHOUSE' : loc.type, parentId: loc.parentId || null, latitude: Number(loc.latitude || 0), longitude: Number(loc.longitude || 0), geofenceRadiusMeters: Number(loc.geofenceRadius || 0), assignedManager: '', terminalLanes: [], isActive: Boolean(loc.isActive), address: loc.address || '' };
+      setNodes((prev) => [...prev, node]); setSelectedNodeId(node.id); setIsAddModalOpen(false); setNewName(''); setNewCode(''); setNewAddress(''); setNotice(`Location "${node.name}" created.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Location could not be created.'); }
+    finally { setSaving(false); }
   };
 
-  const handleToggleNodeStatus = (nodeId: string) => {
-    setNodes((prev) =>
-      prev.map((n) => {
-        if (n.id === nodeId) {
-          const next = !n.isActive;
-          setNotice(next ? `Facility ${n.name} reactivated.` : `Facility ${n.name} deactivated (archived).`);
-          return { ...n, isActive: next };
-        }
-        return n;
-      })
-    );
+  const handleToggleNodeStatus = async (nodeId: string) => {
+    const node = nodes.find((location) => location.id === nodeId);
+    if (!node || !node.isActive) return;
+    const token = getStoredSession()?.accessToken;
+    if (!token) return setNotice('Sign in again to deactivate a location.');
+    try {
+      const response = await fetch(`${API_BASE}/locations/${nodeId}/deactivate`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}` } });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'Location could not be deactivated.');
+      setNodes((prev) => prev.map((entry) => entry.id === nodeId ? { ...entry, isActive: false } : entry));
+      setNotice(`Location ${node.name} deactivated.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Location could not be deactivated.'); }
   };
 
   const copyLocationInfo = (n: LocationNode) => {
@@ -338,7 +285,7 @@ export default function CompanySettingsPage() {
   };
 
   return (
-    <div style={{ padding: '28px 36px 60px', maxWidth: '1440px', margin: '0 auto', color: '#1e293b' }}>
+    <div className="app-page" style={{ color: '#1e293b' }}>
       {/* Toast Alert Notice */}
       {notice && (
         <div
@@ -1640,7 +1587,7 @@ export default function CompanySettingsPage() {
                     type="text"
                     value={newManager}
                     onChange={(e) => setNewManager(e.target.value)}
-                    placeholder="e.g. Asha Patel"
+                    placeholder="Manager name"
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 </div>

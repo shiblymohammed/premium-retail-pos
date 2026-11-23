@@ -1,7 +1,7 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
+import { FormEvent, useEffect, useState } from 'react';
+import { AUTH_CHANGE_EVENT, getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './audits.module.css';
 
@@ -15,6 +15,11 @@ type AuditItem = {
   countedQtyBase: number | null;
   recountQtyBase: number | null;
   requiresRecount: boolean;
+  countedAt?: string | null;
+  recountedAt?: string | null;
+  recountRequestReason?: string | null;
+  countedBy?: { id: string; email: string } | null;
+  recountedBy?: { id: string; email: string } | null;
   varianceBase: number | null;
   variancePercent: string | number | null;
   approvedQtyBase?: number | null;
@@ -47,6 +52,8 @@ type SessionRow = {
   _count: { countItems: number };
 };
 
+type Capabilities = { canCount: boolean; canManage: boolean; canChangeThresholds: boolean };
+
 type Threshold = {
   scopeKey: string;
   categoryId: string | null;
@@ -68,79 +75,30 @@ type Schedule = {
   canStartNow: boolean;
 };
 
-const DEMO_LOCATIONS: Location[] = [
-  { id: 'loc_downtown', name: 'Downtown Store', type: 'RETAIL_STORE' },
-  { id: 'loc_north_mall', name: 'North Mall', type: 'RETAIL_STORE' },
-  { id: 'loc_west_end', name: 'West End Outlet', type: 'RETAIL_STORE' },
-  { id: 'loc_warehouse', name: 'Central Warehouse', type: 'WAREHOUSE' },
-];
+type GlobalScheduleResult = {
+  storeStartTime: string;
+  warehouseStartTime: string;
+  storesUpdated: number;
+  warehousesUpdated: number;
+};
 
-const INITIAL_DEMO_ITEMS: AuditItem[] = [
-  {
-    id: 'item_1',
-    expectedQtyBase: 27,
-    countedQtyBase: null,
-    recountQtyBase: null,
-    requiresRecount: false,
-    varianceBase: null,
-    variancePercent: null,
-    highCountAlert: false,
-    variant: {
-      id: 'var_1',
-      sku: 'BEV-1048',
-      name: 'Medium roast - 250 g',
-      product: { name: 'Arabica Ground Coffee', baseUnit: 'pack' },
+async function auditApi<T>(path: string, token: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init?.headers,
     },
-  },
-  {
-    id: 'item_2',
-    expectedQtyBase: 8,
-    countedQtyBase: null,
-    recountQtyBase: null,
-    requiresRecount: false,
-    varianceBase: null,
-    variancePercent: null,
-    highCountAlert: false,
-    variant: {
-      id: 'var_2',
-      sku: 'BEV-1056',
-      name: 'Lemon Mint - 25 bags',
-      product: { name: 'Green Tea Bags', baseUnit: 'pack' },
-    },
-  },
-  {
-    id: 'item_3',
-    expectedQtyBase: 9,
-    countedQtyBase: null,
-    recountQtyBase: null,
-    requiresRecount: false,
-    varianceBase: null,
-    variancePercent: null,
-    highCountAlert: false,
-    variant: {
-      id: 'var_3',
-      sku: 'SNK-4172',
-      name: 'Classic salted - 52 g',
-      product: { name: 'Potato Chips', baseUnit: 'pack' },
-    },
-  },
-  {
-    id: 'item_4',
-    expectedQtyBase: 42,
-    countedQtyBase: null,
-    recountQtyBase: null,
-    requiresRecount: false,
-    varianceBase: null,
-    variancePercent: null,
-    highCountAlert: false,
-    variant: {
-      id: 'var_4',
-      sku: 'SNK-4180',
-      name: '72% Cacao - 100 g',
-      product: { name: 'Organic Dark Chocolate', baseUnit: 'pack' },
-    },
-  },
-];
+    cache: 'no-store',
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = Array.isArray(payload.message) ? payload.message.join(', ') : payload.message;
+    throw new Error(message || `Audit request failed (${response.status})`);
+  }
+  return payload.data as T;
+}
 
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const icons: Record<string, React.ReactNode> = {
@@ -172,283 +130,303 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 }
 
 export default function AuditsPage() {
-  const [email, setEmail] = useState('manager.downtown@premiumretail.com');
-  const [password, setPassword] = useState('Password123!');
-  const [token, setToken] = useState('demo_token');
-  const [locations, setLocations] = useState<Location[]>(DEMO_LOCATIONS);
-  const [locationId, setLocationId] = useState('loc_downtown');
-  const [sessions, setSessions] = useState<SessionRow[]>([
-    {
-      id: 'audit_7891',
-      status: 'APPROVED',
-      startedAt: new Date(Date.now() - 7 * 86400 * 1000).toISOString(),
-      completedAt: new Date(Date.now() - 7 * 86400 * 1000 + 3600 * 1000).toISOString(),
-      _count: { countItems: 24 },
-    },
-    {
-      id: 'audit_6542',
-      status: 'APPROVED',
-      startedAt: new Date(Date.now() - 14 * 86400 * 1000).toISOString(),
-      completedAt: new Date(Date.now() - 14 * 86400 * 1000 + 4200 * 1000).toISOString(),
-      _count: { countItems: 22 },
-    },
-  ]);
+  const [token, setToken] = useState('');
+  const [capabilities, setCapabilities] = useState<Capabilities>({ canCount: false, canManage: false, canChangeThresholds: false });
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [locationId, setLocationId] = useState('');
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [session, setSession] = useState<Session | null>(null);
-
-  // Policy threshold settings
-  const [thresholds, setThresholds] = useState<Threshold[]>([
-    {
-      scopeKey: 'default',
-      categoryId: null,
-      recountVariancePercent: 2.0,
-      recountVarianceUnits: 5,
-      highCountAlertQty: 100,
-      category: null,
-    },
-  ]);
+  const [thresholds, setThresholds] = useState<Threshold[]>([]);
   const [policyScope, setPolicyScope] = useState('default');
   const [percent, setPercent] = useState('2.0');
   const [units, setUnits] = useState('5');
-  const [highCount, setHighCount] = useState('100');
+  const [highCount, setHighCount] = useState('');
   const [thresholdReason, setThresholdReason] = useState('');
-
-  // Schedule settings
   const [scheduleTime, setScheduleTime] = useState('19:00');
-  const [schedule, setSchedule] = useState<Schedule | null>({
-    locationId: 'loc_downtown',
-    enabled: true,
-    startTime: '19:00',
-    timezone: 'Asia/Kolkata',
-    lastRunDate: '2026-11-12',
-    locationType: 'RETAIL_STORE',
-    allowedDays: 'Daily after closing',
-    earliestStartTime: '19:00',
-    canStartNow: true,
-  });
-
-  // Count entry inputs
+  const [globalStoreTime, setGlobalStoreTime] = useState('19:00');
+  const [globalWarehouseTime, setGlobalWarehouseTime] = useState('19:00');
+  const [globalScheduleReason, setGlobalScheduleReason] = useState('');
+  const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [counts, setCounts] = useState<Record<string, string>>({});
   const [approvalReason, setApprovalReason] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
-
-  // Sync selected location from global app frame if present
-  useEffect(() => {
-    const authSession = getStoredSession();
-    if (authSession?.accessToken) {
-      setToken(authSession.accessToken);
-    }
-
-    const stored = window.localStorage.getItem('premium-retail-location-scope');
-    if (stored) {
-      const matched = DEMO_LOCATIONS.find((l) => l.name === stored);
-      if (matched) setLocationId(matched.id);
-    }
-
-    const syncLocation = (event: Event) => {
-      const locName = (event as CustomEvent<string>).detail;
-      const found = DEMO_LOCATIONS.find((l) => l.name === locName);
-      if (found) {
-        setLocationId(found.id);
-        setSession(null);
-      }
-    };
-
-    window.addEventListener('premium-retail-location-change', syncLocation);
-    return () => window.removeEventListener('premium-retail-location-change', syncLocation);
-  }, []);
-
+  const [loading, setLoading] = useState(true);
   const selectedLocation = locations.find((l) => l.id === locationId) || locations[0];
   const isLocationFrozen = session?.status === 'ACTIVE' || session?.status === 'SUBMITTED';
+  const locationName = selectedLocation?.name ?? 'your assigned location';
 
-  // Start a new physical audit session
-  function handleStartAudit() {
+  useEffect(() => {
+    let requestVersion = 0;
+    const loadAuditAccess = async () => {
+      const version = ++requestVersion;
+      const accessToken = getStoredSession()?.accessToken ?? '';
+      setToken(accessToken);
+      setLocations([]);
+      setLocationId('');
+      setSession(null);
+      setSessions([]);
+      setSchedule(null);
+      setThresholds([]);
+      setCapabilities({ canCount: false, canManage: false, canChangeThresholds: false });
+      setLoading(Boolean(accessToken));
+      setError(accessToken ? '' : 'Sign in with an authorized account to access stock audits.');
+      if (!accessToken) return;
+      try {
+        const [caps, locationRows] = await Promise.all([
+          auditApi<Capabilities>('/audits/capabilities', accessToken),
+          auditApi<Location[]>('/locations?isActive=true', accessToken),
+        ]);
+        if (version !== requestVersion) return;
+        setCapabilities(caps);
+        setLocations(locationRows);
+        const storedName = window.localStorage.getItem('premium-retail-location-scope');
+        const requestedId = new URLSearchParams(window.location.search).get('locationId');
+        const selected = locationRows.find((loc) => loc.id === requestedId)
+          ?? locationRows.find((loc) => loc.name === storedName)
+          ?? locationRows[0];
+        if (!selected) throw new Error('No active locations are assigned to this account. Ask an administrator to assign a location.');
+        setLocationId(selected.id);
+        window.localStorage.setItem('premium-retail-location-scope', selected.name);
+        window.dispatchEvent(new CustomEvent('premium-retail-location-change', { detail: selected.name }));
+      } catch (caught) {
+        if (version === requestVersion) setError(caught instanceof Error ? caught.message : 'Could not load audit access.');
+      } finally {
+        if (version === requestVersion) setLoading(false);
+      }
+    };
+    void loadAuditAccess();
+    const handleAuthChange = () => void loadAuditAccess();
+    window.addEventListener(AUTH_CHANGE_EVENT, handleAuthChange);
+    return () => {
+      requestVersion += 1;
+      window.removeEventListener(AUTH_CHANGE_EVENT, handleAuthChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!token || !locationId) return;
+    let cancelled = false;
+    setLoading(true);
+    void (async () => {
+      try {
+        const rows = await auditApi<SessionRow[]>(`/audits/locations/${encodeURIComponent(locationId)}/sessions`, token);
+        if (cancelled) return;
+        setSessions(rows);
+        const resumable = rows.find((row) => row.status === 'ACTIVE' || row.status === 'SUBMITTED');
+        const current = resumable ? await auditApi<Session>(`/audits/sessions/${encodeURIComponent(resumable.id)}`, token) : null;
+        if (cancelled) return;
+        setSession(current);
+        setCounts({});
+        const [scheduleResult, thresholdRows] = await Promise.all([
+          auditApi<Schedule>(`/audits/locations/${encodeURIComponent(locationId)}/schedule`, token),
+          capabilities.canManage ? auditApi<Threshold[]>('/audits/thresholds', token) : Promise.resolve<Threshold[]>([]),
+        ]);
+        if (cancelled) return;
+        setSchedule(scheduleResult);
+        setScheduleTime(scheduleResult.startTime ?? '19:00');
+        setThresholds(thresholdRows);
+        const global = thresholdRows.find((row) => row.scopeKey === 'default');
+        if (global) {
+          setPercent(String(global.recountVariancePercent));
+          setUnits(String(global.recountVarianceUnits));
+          setHighCount(global.highCountAlertQty === null ? '' : String(global.highCountAlertQty));
+        }
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : 'Could not load this location’s audits.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, locationId, capabilities.canManage]);
+
+  useEffect(() => {
+    const syncLocation = (event: Event) => {
+      const name = (event as CustomEvent<string>).detail;
+      const found = locations.find((location) => location.name === name);
+      if (found && !isLocationFrozen) {
+        setLocationId(found.id);
+        setError('');
+      } else if (isLocationFrozen && selectedLocation && name !== selectedLocation.name) {
+        window.localStorage.setItem('premium-retail-location-scope', selectedLocation.name);
+        window.dispatchEvent(new CustomEvent('premium-retail-location-change', { detail: selectedLocation.name }));
+      }
+    };
+    window.addEventListener('premium-retail-location-change', syncLocation);
+    return () => window.removeEventListener('premium-retail-location-change', syncLocation);
+  }, [locations, isLocationFrozen, selectedLocation]);
+
+  async function refreshLocationData() {
+    if (!token || !locationId) return;
+    const rows = await auditApi<SessionRow[]>(`/audits/locations/${encodeURIComponent(locationId)}/sessions`, token);
+    setSessions(rows);
+    const resumable = rows.find((row) => row.status === 'ACTIVE' || row.status === 'SUBMITTED');
+    setSession(resumable ? await auditApi<Session>(`/audits/sessions/${encodeURIComponent(resumable.id)}`, token) : null);
+  }
+
+  async function handleStartAudit() {
+    if (!selectedLocation || !token) return;
     setBusy(true);
     setError('');
-    const newSessionId = `audit_${Math.floor(1000 + Math.random() * 9000)}`;
-
-    const newSession: Session = {
-      id: newSessionId,
-      locationId: selectedLocation.id,
-      status: 'ACTIVE',
-      startedAt: new Date().toISOString(),
-      completedAt: null,
-      countItems: INITIAL_DEMO_ITEMS.map((item) => ({
-        ...item,
-        countedQtyBase: null,
-        recountQtyBase: null,
-        requiresRecount: false,
-        varianceBase: null,
-        variancePercent: null,
-      })),
-    };
-
-    setSession(newSession);
-    setCounts({});
-    setNotice(
-      `Stock count started at ${selectedLocation.name}. Sales and transfers are paused until you finish.`
-    );
-    setBusy(false);
+    try {
+      await auditApi<Session>(`/audits/locations/${encodeURIComponent(locationId)}/sessions`, token, { method: 'POST' });
+      await refreshLocationData();
+      setNotice(`Stock count started at ${locationName}. Sales and transfers are paused until review is complete.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not start the stock audit.');
+    } finally { setBusy(false); }
   }
 
-  // Counter inputs blind count for a line
-  function handleSaveCount(item: AuditItem) {
+  async function handleSaveCount(item: AuditItem) {
     const val = Number(counts[item.id]);
-    if (isNaN(val) || val < 0) {
-      setError('Please enter a valid count of 0 or greater.');
+    if (!Number.isInteger(val) || val < 0 || val > 2147483647) {
+      setError('Enter a whole number of base units from 0 to 2,147,483,647.');
       return;
     }
-
-    if (!session) return;
+    if (!session || !token) return;
+    setBusy(true);
     setError('');
-
-    const updatedItems = session.countItems.map((ci) => {
-      if (ci.id === item.id) {
-        return {
-          ...ci,
-          countedQtyBase: val,
-        };
-      }
-      return ci;
-    });
-
-    setSession({ ...session, countItems: updatedItems });
-    setNotice(`Saved: ${item.variant.product.name}.`);
+    try {
+      await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/items/${encodeURIComponent(item.id)}/count`, token, {
+        method: 'POST', body: JSON.stringify({ quantityBaseUnits: val }),
+      });
+      await refreshLocationData();
+      setNotice(`Saved the ${item.requiresRecount ? 'recount' : 'count'} for ${item.variant.product.name}.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not save this count.');
+    } finally { setBusy(false); }
   }
 
-  // Submit counts for manager resolution
-  function handleSubmitCounts() {
-    if (!session) return;
-
-    // Check if any counts are missing
-    const missing = session.countItems.filter((i) => i.countedQtyBase === null);
-    if (missing.length > 0) {
-      setError(`Please count ${missing.length} more product${missing.length === 1 ? '' : 's'} before finishing.`);
-      return;
-    }
-
+  async function handleSubmitCounts() {
+    if (!session || !token) return;
+    setBusy(true);
     setError('');
-    // Calculate variances and evaluate against thresholds
-    const maxPercentThreshold = Number(percent) || 2.0;
-    const maxUnitsThreshold = Number(units) || 5;
-
-    const evaluatedItems: AuditItem[] = session.countItems.map((ci) => {
-      const expected = ci.expectedQtyBase || 0;
-      const counted = ci.countedQtyBase || 0;
-      const variance = counted - expected;
-      const variancePct = expected > 0 ? (Math.abs(variance) / expected) * 100 : 0;
-      const needsRecount = Math.abs(variance) > maxUnitsThreshold || variancePct > maxPercentThreshold;
-
-      return {
-        ...ci,
-        varianceBase: variance,
-        variancePercent: variancePct.toFixed(1),
-        requiresRecount: needsRecount,
-        highCountAlert: counted >= 100,
-      };
-    });
-
-    setSession({
-      ...session,
-      status: 'SUBMITTED',
-      countItems: evaluatedItems,
-    });
-
-    setNotice(
-      'Counting finished. You can now see the expected quantities and any differences.'
-    );
+    try {
+      await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/submit`, token, { method: 'POST' });
+      await refreshLocationData();
+      setNotice('Count submitted. A manager must review and approve any stock adjustments.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not submit the audit.'); }
+    finally { setBusy(false); }
   }
 
-  // Counter or manager submits a recount value
-  function handleSaveRecount(item: AuditItem, recountVal: number) {
-    if (!session) return;
-    const expected = item.expectedQtyBase || 0;
-    const variance = recountVal - expected;
-    const variancePct = expected > 0 ? (Math.abs(variance) / expected) * 100 : 0;
-
-    const updatedItems = session.countItems.map((ci) => {
-      if (ci.id === item.id) {
-        return {
-          ...ci,
-          recountQtyBase: recountVal,
-          varianceBase: variance,
-          variancePercent: variancePct.toFixed(1),
-          requiresRecount: false, // cleared once recounted
-        };
-      }
-      return ci;
-    });
-
-    setSession({ ...session, countItems: updatedItems });
-    setNotice(`New count saved for ${item.variant.product.name}: ${recountVal}.`);
-  }
-
-  // Manager approves reconciliation and unfreezes location
   function handleApproveReconciliation(e: FormEvent) {
     e.preventDefault();
-    if (!session || !approvalReason.trim()) {
+    if (!session || !approvalReason.trim() || !token) {
       setError('Please add a short note explaining the differences before approving.');
       return;
     }
-
-    const updatedItems = session.countItems.map((ci) => ({
-      ...ci,
-      approvedQtyBase: ci.recountQtyBase !== null ? ci.recountQtyBase : ci.countedQtyBase,
-    }));
-
-    const closedSession: Session = {
-      ...session,
-      status: 'APPROVED',
-      completedAt: new Date().toISOString(),
-      resolutionReason: approvalReason.trim(),
-      approvedBy: { id: 'usr_mgr', email: 'store.manager@premiumretail.com' },
-      countItems: updatedItems,
-    };
-
-    setSession(closedSession);
-    setSessions([
-      {
-        id: session.id,
-        status: 'APPROVED',
-        startedAt: session.startedAt,
-        completedAt: new Date().toISOString(),
-        _count: { countItems: session.countItems.length },
-      },
-      ...sessions,
-    ]);
-
-    setNotice(
-      `Stock count approved. Stock levels are updated and sales have resumed at ${selectedLocation.name}.`
-    );
+    setBusy(true); setError('');
+    void (async () => {
+      try {
+        await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/approve`, token, { method: 'POST', body: JSON.stringify({ reason: approvalReason.trim() }) });
+        setApprovalReason(''); await refreshLocationData();
+        setNotice(`Stock count approved. Stock levels are updated and sales have resumed at ${selectedLocation?.name ?? 'this location'}.`);
+      } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not approve the audit.'); }
+      finally { setBusy(false); }
+    })();
   }
 
-  // Abort audit without committing adjustments
-  function handleAbortAudit() {
-    if (!session) return;
-    if (!window.confirm('Cancel this stock count? Your counts will be discarded, stock will not change, and sales will resume.')) {
+  async function handleAbortAudit() {
+    if (!session || !token || !capabilities.canManage) return;
+    const reason = window.prompt('Why is this audit being aborted?');
+    if (!reason?.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/abort`, token, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
+      await refreshLocationData();
+      setNotice(`Audit aborted. No stock adjustment was posted; sales resumed at ${selectedLocation?.name ?? 'this location'}.`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not abort the audit.'); }
+    finally { setBusy(false); }
+  }
+
+  async function handleRequestRecount(item: AuditItem) {
+    if (!session || !token || !capabilities.canManage) return;
+    const reason = window.prompt(`Why does ${item.variant.product.name} need another physical count?`);
+    if (!reason?.trim()) return;
+    setBusy(true); setError('');
+    try {
+      await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/items/${encodeURIComponent(item.id)}/recount-required`, token, {
+        method: 'POST', body: JSON.stringify({ reason: reason.trim() }),
+      });
+      await refreshLocationData();
+      setNotice(`Recount requested for ${item.variant.product.name}. The audit is open again for an authorized counter.`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not request a recount.'); }
+    finally { setBusy(false); }
+  }
+
+  async function handleSaveSchedule() {
+    if (!token || !locationId || !capabilities.canManage) return;
+    setBusy(true); setError('');
+    try {
+      const saved = await auditApi<Schedule>(`/audits/locations/${encodeURIComponent(locationId)}/schedule`, token, {
+        method: 'PATCH', body: JSON.stringify({ enabled: true, startTime: scheduleTime }),
+      });
+      setSchedule(saved);
+      setNotice('Audit start window saved. Audits are started by a manager or authorized counter during this window.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save the audit window.'); }
+    finally { setBusy(false); }
+  }
+
+  async function handleSaveAllSchedules() {
+    if (!token || !capabilities.canChangeThresholds) return;
+    if (globalStoreTime < '19:00' || globalWarehouseTime < '19:00') {
+      setError('Store and warehouse audit windows must start at or after 7:00 PM.');
       return;
     }
+    setBusy(true); setError('');
+    try {
+      const result = await auditApi<GlobalScheduleResult>('/audits/schedule/all', token, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          storeStartTime: globalStoreTime,
+          warehouseStartTime: globalWarehouseTime,
+          reason: globalScheduleReason.trim(),
+        }),
+      });
+      setGlobalScheduleReason('');
+      if (selectedLocation?.type === 'RETAIL_STORE') setScheduleTime(result.storeStartTime);
+      else setScheduleTime(result.warehouseStartTime);
+      await refreshLocationData();
+      setNotice(`Global schedule saved: ${result.storesUpdated} stores and ${result.warehousesUpdated} warehouses updated.`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save the global audit schedule.'); }
+    finally { setBusy(false); }
+  }
 
-    setSession({
-      ...session,
-      status: 'ABORTED',
-      completedAt: new Date().toISOString(),
-      resolutionReason: 'Aborted by supervisor without posting ledger adjustments.',
-    });
-
-    setNotice(`Stock count cancelled. Sales have resumed at ${selectedLocation.name}.`);
+  async function handleSaveThresholds() {
+    if (!token || !capabilities.canChangeThresholds) return;
+    const selectedPolicy = thresholds.find((threshold) => threshold.scopeKey === policyScope);
+    setBusy(true); setError('');
+    try {
+      const saved = await auditApi<Threshold>('/audits/thresholds', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          categoryId: selectedPolicy?.categoryId ?? null,
+          recountVariancePercent: Number(percent),
+          recountVarianceUnits: Number(units),
+          highCountAlertQty: highCount.trim() ? Number(highCount) : null,
+          reason: thresholdReason.trim(),
+        }),
+      });
+      setThresholds((current) => [...current.filter((item) => item.scopeKey !== saved.scopeKey), saved]);
+      setThresholdReason('');
+      setNotice('Count policy saved. New audit sessions will use these thresholds.');
+    } catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not save the count policy.'); }
+    finally { setBusy(false); }
   }
 
   // ---------- Derived view data ----------
   const items = session?.countItems ?? [];
-  const countedCount = items.filter((i) => i.countedQtyBase !== null).length;
+  const countedCount = items.filter((i) => i.countedAt || i.countedQtyBase != null).length;
   const progressPct = items.length ? Math.round((countedCount / items.length) * 100) : 0;
-  const recountCount = items.filter((i) => i.requiresRecount).length;
+  const recountCount = items.filter((i) => i.requiresRecount && !i.recountedAt && i.recountQtyBase == null).length;
   const mismatchCount = items.filter((i) => (i.varianceBase ?? 0) !== 0).length;
-  const lastAudit = sessions[0];
+  const lastAudit = sessions.find((row) => row.status === 'APPROVED' || row.status === 'CLOSED');
   const isFinished = session?.status === 'APPROVED' || session?.status === 'ABORTED';
-  const highCountLimit = Number(highCount) || 100;
+  const canSubmit = items.length > 0 && items.every((item) => Boolean(item.countedAt || item.countedQtyBase != null)
+    && (!item.requiresRecount || Boolean(item.recountedAt || item.recountQtyBase != null)));
+  const highCountLimit = highCount.trim() ? Number(highCount) : Number.POSITIVE_INFINITY;
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
   const duration = (a: string, b: string | null) => (b ? `${Math.max(1, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000))} min` : '—');
@@ -463,7 +441,7 @@ export default function AuditsPage() {
     if (!session) return {
       tone: styles.heroIdle, icon: 'clipboard', eyebrow: 'Step 1 of 3',
       title: 'Start a stock count',
-      text: `You'll count what's on the shelves at ${selectedLocation.name}. Sales and transfers pause while you count, so nothing moves.`,
+      text: `You'll count what's on the shelves at ${locationName}. Sales and transfers pause while you count, so nothing moves.`,
     };
     if (session.status === 'ACTIVE') return {
       tone: styles.heroActive, icon: 'edit', eyebrow: 'Step 2 of 3',
@@ -480,17 +458,17 @@ export default function AuditsPage() {
     if (session.status === 'ABORTED') return {
       tone: styles.heroIdle, icon: 'x', eyebrow: 'Cancelled',
       title: 'Stock count cancelled',
-      text: `Nothing was changed and sales have resumed at ${selectedLocation.name}.`,
+      text: `Nothing was changed and sales have resumed at ${locationName}.`,
     };
     return {
       tone: styles.heroDone, icon: 'check', eyebrow: 'Completed',
       title: 'All done, stock is updated',
-      text: `Sales have resumed at ${selectedLocation.name}. Approved by ${session.approvedBy?.email || 'Store Manager'}${session.completedAt ? ` at ${fmtTime(session.completedAt)}` : ''}.`,
+      text: `Sales have resumed at ${locationName}. Approved by ${session.approvedBy?.email || 'Store Manager'}${session.completedAt ? ` at ${fmtTime(session.completedAt)}` : ''}.`,
     };
   })();
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} app-page`}>
       {/* ---------- Header ---------- */}
       <header className={styles.header}>
         <div>
@@ -505,13 +483,20 @@ export default function AuditsPage() {
           disabled={isLocationFrozen}
           title={isLocationFrozen ? 'Finish or cancel the current count to switch stores' : undefined}
           options={locations.map((loc) => ({ value: loc.id, label: `${loc.name}${loc.type === 'WAREHOUSE' ? ' (Warehouse)' : ''}` }))}
-          onChange={(next) => { setLocationId(next); setSession(null); }}
+          onChange={(next) => {
+            const selected = locations.find((location) => location.id === next);
+            if (!selected) return;
+            setLocationId(next); setSession(null); setError('');
+            window.localStorage.setItem('premium-retail-location-scope', selected.name);
+            window.dispatchEvent(new CustomEvent('premium-retail-location-change', { detail: selected.name }));
+          }}
         />
       </header>
 
       {error && (
         <div className={`${styles.alert} ${styles.alertError}`} role="alert">
           <Icon name="alert" size={16} /><span>{error}</span>
+          {!token && <a href="/login?returnUrl=%2Faudits" className={styles.link}>Sign in</a>}
           <button type="button" onClick={() => setError('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
         </div>
       )}
@@ -528,7 +513,7 @@ export default function AuditsPage() {
           <span className={`${styles.tileIcon} ${styles.tileBlue}`}><Icon name="box" size={18} /></span>
           <div>
             <small>Products on the sheet</small>
-            <strong>{session ? <>{countedCount}<em> / {items.length} counted</em></> : <>{INITIAL_DEMO_ITEMS.length}<em> to count</em></>}</strong>
+            <strong>{session ? <>{countedCount}<em> / {items.length} counted</em></> : <>—<em> loaded when audit starts</em></>}</strong>
           </div>
         </div>
         <div className={styles.tile}>
@@ -543,21 +528,22 @@ export default function AuditsPage() {
           <span className={`${styles.tileIcon} ${styles.tileViolet}`}><Icon name="clipboard" size={18} /></span>
           <div>
             <small>Counts recorded</small>
-            <strong>{sessions.length}<em> completed</em></strong>
-            <span className={styles.tileSub}>{sessions.reduce((s, r) => s + r._count.countItems, 0)} products checked</span>
+            <strong>{sessions.filter((row) => row.status === 'APPROVED' || row.status === 'CLOSED').length}<em> completed</em></strong>
+            <span className={styles.tileSub}>{sessions.reduce((s, r) => s + r._count.countItems, 0)} product lines in history</span>
           </div>
         </div>
         <div className={styles.tile}>
           <span className={`${styles.tileIcon} ${isLocationFrozen ? styles.tileAmber : styles.tileBlue}`}><Icon name={isLocationFrozen ? 'lock' : 'clock'} size={18} /></span>
           <div>
-            <small>{isLocationFrozen ? 'Store status' : 'Count window opens'}</small>
-            <strong>{isLocationFrozen ? 'Sales paused' : schedule?.startTime || '19:00'}</strong>
-            <span className={styles.tileSub}>{isLocationFrozen ? 'until the count is finished' : `${schedule?.allowedDays} · ${schedule?.timezone}`}</span>
+            <small>{isLocationFrozen ? 'Location status' : 'Audit window'}</small>
+            <strong>{isLocationFrozen ? 'Movements paused' : schedule?.startTime || '19:00'}</strong>
+            <span className={styles.tileSub}>{isLocationFrozen ? 'until manager approval or abort' : `${schedule?.allowedDays ?? 'Schedule loading'} · ${schedule?.timezone ?? ''}`}</span>
           </div>
         </div>
       </section>
 
       <div className={styles.layout}>
+        {loading && <div className={styles.card} role="status">Loading authorized audit data…</div>}
         <main className={styles.main}>
           {/* ---------- "What to do now" card ---------- */}
           <section className={`${styles.hero} ${hero.tone} ${!session || isFinished ? styles.heroWithArt : ''}`}>
@@ -616,11 +602,11 @@ export default function AuditsPage() {
             <div className={styles.heroActions}>
               {(!session || isFinished) && (
                 <>
-                  <button type="button" onClick={handleStartAudit} disabled={busy} className={styles.primaryButton}>
-                    <Icon name="play" size={16} /> {isFinished ? 'Start a new count' : 'Start counting'}
+                  <button type="button" onClick={handleStartAudit} disabled={busy || loading || !capabilities.canManage || !schedule?.canStartNow} className={styles.primaryButton}>
+                    <Icon name="play" size={16} /> {isFinished ? 'Start a new count' : schedule?.canStartNow ? 'Start counting' : 'Audit window closed'}
                   </button>
                   <span className={styles.heroHint}>
-                    {lastAudit ? <>Last count: <b>{fmtDate(lastAudit.startedAt)}</b> · {plural(lastAudit._count.countItems, 'product')}</> : 'No previous counts'}
+                    {!capabilities.canManage ? 'A manager starts audits during the scheduled window.' : lastAudit ? <>Last approved count: <b>{fmtDate(lastAudit.startedAt)}</b> · {plural(lastAudit._count.countItems, 'product')}</> : 'No approved audits yet'}
                   </span>
                 </>
               )}
@@ -630,8 +616,8 @@ export default function AuditsPage() {
                     <span><b>{countedCount}</b> of {plural(items.length, 'product')} counted</span>
                     <span className={styles.track}><i style={{ width: `${progressPct}%` }} /></span>
                   </div>
-                  <button type="button" onClick={handleAbortAudit} className={styles.textButton}>Cancel count</button>
-                  <button type="button" onClick={handleSubmitCounts} className={styles.primaryButton} disabled={countedCount < items.length} title={countedCount < items.length ? 'Count every product first' : undefined}>
+                  {capabilities.canManage && <button type="button" onClick={handleAbortAudit} className={styles.textButton} disabled={busy}>Abort audit</button>}
+                  <button type="button" onClick={handleSubmitCounts} className={styles.primaryButton} disabled={busy || !canSubmit} title={!canSubmit ? 'Save every count and any required recount first' : undefined}>
                     <Icon name="check" size={16} /> Finish counting
                   </button>
                 </>
@@ -640,7 +626,7 @@ export default function AuditsPage() {
             )}
 
             {isLocationFrozen && (
-              <div className={styles.pausedNote}><Icon name="lock" size={14} /> Sales and transfers are paused at {selectedLocation.name} until this count is finished or cancelled.</div>
+              <div className={styles.pausedNote}><Icon name="lock" size={14} /> Sales and transfers are paused at {locationName} until a manager approves or aborts this audit.</div>
             )}
           </section>
 
@@ -659,7 +645,8 @@ export default function AuditsPage() {
                   const diff = item.varianceBase ?? 0;
                   const draft = counts[item.id] ?? '';
                   const unit = item.variant.product.baseUnit;
-                  const done = item.countedQtyBase !== null;
+                  const done = Boolean(item.countedAt || item.countedQtyBase != null);
+                  const canEditCount = capabilities.canCount && (!done || (item.requiresRecount && !item.recountedAt));
                   const typo = draft !== '' && Number(draft) > highCountLimit;
                   return (
                     <li key={item.id} className={`${styles.item} ${item.requiresRecount ? styles.itemWarn : ''} ${session.status === 'ACTIVE' && done ? styles.itemDone : ''}`}>
@@ -671,37 +658,54 @@ export default function AuditsPage() {
                         </div>
                       </div>
 
-                      {session.status === 'ACTIVE' && (
+                      {session.status === 'ACTIVE' && capabilities.canCount && (
                         <div className={styles.itemCount}>
                           <div className={styles.countRow}>
                           <div className={styles.counter}>
-                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String(Math.max(0, (Number(draft) || 0) - 1)) })} aria-label="One less">−</button>
-                            <input type="number" min="0" inputMode="numeric" placeholder="0" value={draft} onChange={(e) => setCounts({ ...counts, [item.id]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && draft !== '') handleSaveCount(item); }} aria-label={`How many ${item.variant.product.name}`} />
-                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String((Number(draft) || 0) + 1) })} aria-label="One more">+</button>
+                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String(Math.max(0, (Number(draft) || 0) - 1)) })} aria-label="One less" disabled={!canEditCount || busy}>−</button>
+                            <input type="number" min="0" inputMode="numeric" placeholder={item.requiresRecount ? 'Enter recount' : '0'} value={draft} disabled={!canEditCount || busy} onChange={(e) => setCounts({ ...counts, [item.id]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && draft !== '') void handleSaveCount(item); }} aria-label={`How many ${item.variant.product.name}`} />
+                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String((Number(draft) || 0) + 1) })} aria-label="One more" disabled={!canEditCount || busy}>+</button>
                           </div>
                           <span className={styles.unit}>{unit}s</span>
-                          {done && String(item.countedQtyBase) === draft ? (
+                          {done && (!item.requiresRecount || item.recountedAt) ? (
                             <span className={styles.savedTag}><Icon name="check" size={13} /> Saved</span>
                           ) : (
-                            <button type="button" onClick={() => handleSaveCount(item)} className={styles.saveButton} disabled={draft === ''}>Save</button>
+                            <button type="button" onClick={() => void handleSaveCount(item)} className={styles.saveButton} disabled={draft === '' || busy}>Save</button>
                           )}
                           </div>
+                          {item.requiresRecount && !item.recountedAt && <span className={styles.typo}><Icon name="rotateCcw" size={12} /> Threshold exceeded. Enter a second count.</span>}
                           {typo && <span className={styles.typo}><Icon name="alert" size={12} /> That&apos;s a lot. Please double-check.</span>}
                         </div>
+                      )}
+
+                      {session.status === 'ACTIVE' && !capabilities.canCount && (
+                        <div className={styles.itemResult}><span className={styles.badge}>Waiting for authorized counters</span></div>
                       )}
 
                       {session.status !== 'ACTIVE' && (
                         <div className={styles.itemResult}>
                           <div className={styles.numbers}>
-                            <div><small>Expected</small><b>{expected}</b></div>
+                            <div><small>Expected</small><b>{capabilities.canManage || session.status === 'APPROVED' ? expected : 'Hidden until manager review'}</b></div>
                             <div><small>You counted</small><b>{item.recountQtyBase ?? item.countedQtyBase ?? '—'}</b></div>
-                            <div><small>Difference</small><b className={diff < 0 ? styles.neg : diff > 0 ? styles.pos : ''}>{diff > 0 ? `+${diff}` : diff}</b></div>
+                            <div><small>Difference</small><b className={diff < 0 ? styles.neg : diff > 0 ? styles.pos : ''}>{capabilities.canManage || session.status === 'APPROVED' ? (diff > 0 ? `+${diff}` : diff) : 'Pending manager review'}</b></div>
                           </div>
-                          {session.status === 'SUBMITTED' && item.requiresRecount ? (
-                            <label className={styles.recount}>
-                              <span>Count again</span>
-                              <input type="number" min="0" placeholder={String(finalCount)} defaultValue={item.recountQtyBase ?? ''} onBlur={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v)) handleSaveRecount(item, v); }} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} aria-label={`New count for ${item.variant.product.name}`} />
-                            </label>
+                          {capabilities.canManage && <span className={styles.tileSub}>
+                            Counted {item.countedBy?.email ? `by ${item.countedBy.email}` : ''}{item.countedAt ? ` · ${fmtDate(item.countedAt)} ${fmtTime(item.countedAt)}` : ''}
+                            {item.recountedAt ? ` · Recount ${item.recountedBy?.email ? `by ${item.recountedBy.email}` : ''} ${fmtTime(item.recountedAt)}` : ''}
+                          </span>}
+                          {capabilities.canManage && item.recountRequestReason && <span className={styles.tileSub}>Recount requested: {item.recountRequestReason}</span>}
+                          {capabilities.canManage && item.highCountAlert && <span className={`${styles.badge} ${styles.badgeWarn}`}>High-count alert</span>}
+                          {!capabilities.canManage && session.status === 'SUBMITTED' ? (
+                            <span className={styles.badge}>Submitted · awaiting manager review</span>
+                          ) : item.requiresRecount && item.recountedAt ? (
+                            <span className={`${styles.badge} ${styles.badgeWarn}`}>Recount recorded</span>
+                          ) : capabilities.canManage && session.status === 'SUBMITTED' && item.requiresRecount ? (
+                            <div className={styles.finishActions}>
+                              <span className={`${styles.badge} ${styles.badgeWarn}`}>Recount required before submission</span>
+                              <button type="button" onClick={() => void handleRequestRecount(item)} className={styles.textButton} disabled={busy}>Request another recount</button>
+                            </div>
+                          ) : capabilities.canManage && session.status === 'SUBMITTED' ? (
+                            <button type="button" onClick={() => void handleRequestRecount(item)} className={styles.textButton} disabled={busy}>Request recount</button>
                           ) : (
                             <span className={`${styles.badge} ${diff === 0 ? styles.badgeGood : styles.badgeWarn}`}>{diff === 0 ? 'Matches' : diff < 0 ? `${Math.abs(diff)} missing` : `${diff} extra`}</span>
                           )}
@@ -712,15 +716,15 @@ export default function AuditsPage() {
                 })}
               </ul>
 
-              {session.status === 'SUBMITTED' && (
+              {session.status === 'SUBMITTED' && capabilities.canManage && (
                 <form onSubmit={handleApproveReconciliation} className={styles.finish}>
                   <label className={styles.field}>
                     <span>What caused the differences?</span>
                     <textarea rows={2} required placeholder="e.g. 2 packs were damaged and thrown away" value={approvalReason} onChange={(e) => setApprovalReason(e.target.value)} />
                   </label>
                   <div className={styles.finishActions}>
-                    <button type="button" onClick={handleAbortAudit} className={styles.textButton}>Cancel count</button>
-                    <button type="submit" className={styles.successButton}><Icon name="check" size={16} /> Approve &amp; update stock</button>
+                    <button type="button" onClick={handleAbortAudit} className={styles.textButton} disabled={busy}>Abort audit</button>
+                    <button type="submit" className={styles.successButton} disabled={busy}><Icon name="check" size={16} /> Approve &amp; update stock</button>
                   </div>
                 </form>
               )}
@@ -732,27 +736,16 @@ export default function AuditsPage() {
           )}
 
           {/* ---------- Preview of the count sheet (before starting) ---------- */}
-          {!session && (
+          {!session && !loading && (
             <section className={styles.card}>
               <div className={styles.cardHead}>
                 <div>
-                  <h3>On this count sheet</h3>
-                  <p className={styles.cardSub}>{plural(INITIAL_DEMO_ITEMS.length, 'product')} at {selectedLocation.name}. Expected quantities stay hidden until you finish counting.</p>
+                  <h3>Audit scope</h3>
+                  <p className={styles.cardSub}>The count sheet is created from active product variants when an authorized manager starts the audit.</p>
                 </div>
-                <span className={styles.hiddenChip}><Icon name="eyeOff" size={13} /> Quantities hidden</span>
+                <span className={styles.hiddenChip}><Icon name="eyeOff" size={13} /> Blind count</span>
               </div>
-              <ul className={styles.previewGrid}>
-                {INITIAL_DEMO_ITEMS.map((item) => (
-                  <li key={item.id}>
-                    <span className={styles.thumb}>{initials(item.variant.product.name)}</span>
-                    <div>
-                      <strong>{item.variant.product.name}</strong>
-                      <small>{item.variant.name}</small>
-                    </div>
-                    <span className={styles.skuChip}>{item.variant.sku}</span>
-                  </li>
-                ))}
-              </ul>
+              <p className={styles.cardSub}>Store audits can start daily after 7:00 PM local time. Warehouse audits can start Sundays after 7:00 PM. Starting the audit pauses stock movements for this location.</p>
             </section>
           )}
 
@@ -777,6 +770,7 @@ export default function AuditsPage() {
               <a href="/reports?tab=auditVariances" className={styles.link}>See details</a>
             </div>
             <ul className={styles.history}>
+              {sessions.length === 0 && <li className={styles.cardSub}>No audit history for this location yet.</li>}
               {sessions.map((row) => (
                 <li key={row.id}>
                   <span className={styles.historyIcon}><Icon name="check" size={13} /></span>
@@ -800,41 +794,81 @@ export default function AuditsPage() {
             </ul>
           </section>
 
-          <details className={`${styles.card} ${styles.settings}`}>
+          {capabilities.canManage && <details className={`${styles.card} ${styles.settings}`}>
             <summary>
               <span><Icon name="settings" size={16} /> Count settings</span>
               <Icon name="chevron" size={16} />
             </summary>
             <div className={styles.settingsBody}>
+              {capabilities.canChangeThresholds && <div className={styles.settingGroup}>
+                <h4>Global audit times · Super Admin</h4>
+                <p>Apply the same local start time to every active store and warehouse. Stores run daily; warehouses run Sundays.</p>
+                <div className={styles.globalScheduleGrid}>
+                  <label className={styles.field}>
+                    <span>All stores · daily</span>
+                    <input type="time" min="19:00" value={globalStoreTime} disabled={busy} onChange={(e) => setGlobalStoreTime(e.target.value)} />
+                  </label>
+                  <label className={styles.field}>
+                    <span>All warehouses · Sundays</span>
+                    <input type="time" min="19:00" value={globalWarehouseTime} disabled={busy} onChange={(e) => setGlobalWarehouseTime(e.target.value)} />
+                  </label>
+                </div>
+                <label className={styles.field}>
+                  <span>Reason for global change</span>
+                  <input value={globalScheduleReason} maxLength={500} disabled={busy} onChange={(e) => setGlobalScheduleReason(e.target.value)} placeholder="Why are all audit times changing?" />
+                  <small>Times must be 7:00 PM or later in each location&apos;s local time zone. Existing active audits are not interrupted.</small>
+                </label>
+                <button type="button" className={styles.saveButton} onClick={() => void handleSaveAllSchedules()} disabled={busy || globalStoreTime < '19:00' || globalWarehouseTime < '19:00' || globalScheduleReason.trim().length < 3}>Apply to all active locations</button>
+              </div>}
               <div className={styles.settingGroup}>
                 <h4>When counts can start</h4>
                 <p>{schedule?.allowedDays}, from {schedule?.startTime || '19:00'} ({schedule?.timezone}).</p>
                 <label className={styles.field}>
                   <span>Start time</span>
-                  <input type="time" min="19:00" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} />
-                  <small>Must be 7:00 PM or later, after the store closes.</small>
+                  <input type="time" min="19:00" value={scheduleTime} disabled={busy} onChange={(e) => setScheduleTime(e.target.value)} />
+                  <small>Must be 7:00 PM or later. This opens the window; an authorized person starts the physical count.</small>
                 </label>
+                <button type="button" className={styles.saveButton} onClick={() => void handleSaveSchedule()} disabled={busy || scheduleTime < '19:00'}>Save start window</button>
               </div>
               <div className={styles.settingGroup}>
                 <h4>When to ask for a second count</h4>
+                <label className={styles.field}>
+                  <span>Policy scope</span>
+                  <select value={policyScope} disabled={!capabilities.canChangeThresholds || busy} onChange={(event) => {
+                    const scope = event.target.value;
+                    setPolicyScope(scope);
+                    const policy = thresholds.find((threshold) => threshold.scopeKey === scope);
+                    if (policy) {
+                      setPercent(String(policy.recountVariancePercent));
+                      setUnits(String(policy.recountVarianceUnits));
+                      setHighCount(policy.highCountAlertQty === null ? '' : String(policy.highCountAlertQty));
+                    }
+                  }}>
+                    {thresholds.map((threshold) => <option key={threshold.scopeKey} value={threshold.scopeKey}>{threshold.category?.name ?? 'Global default'}</option>)}
+                  </select>
+                </label>
                 <label className={styles.inline}>
                   <span>Difference over</span>
-                  <input type="number" step="0.1" min="0" value={percent} onChange={(e) => setPercent(e.target.value)} aria-label="Percent difference" />
+                  <input type="number" step="0.1" min="0" max="100" value={percent} disabled={!capabilities.canChangeThresholds || busy} onChange={(e) => setPercent(e.target.value)} aria-label="Percent difference" />
                   <em>%</em>
                 </label>
                 <label className={styles.inline}>
                   <span>or more than</span>
-                  <input type="number" min="1" value={units} onChange={(e) => setUnits(e.target.value)} aria-label="Unit difference" />
+                  <input type="number" min="0" value={units} disabled={!capabilities.canChangeThresholds || busy} onChange={(e) => setUnits(e.target.value)} aria-label="Unit difference" />
                   <em>units</em>
                 </label>
                 <label className={styles.inline}>
                   <span>Warn if a count is over</span>
-                  <input type="number" min="1" value={highCount} onChange={(e) => setHighCount(e.target.value)} aria-label="High count warning" />
-                  <em>units</em>
+                  <input type="number" min="1" value={highCount} placeholder="Disabled" disabled={!capabilities.canChangeThresholds || busy} onChange={(e) => setHighCount(e.target.value)} aria-label="High count warning" />
+                  <em>{highCount ? 'units' : 'off'}</em>
                 </label>
+                {capabilities.canChangeThresholds && <>
+                  <label className={styles.field}><span>Reason for policy change</span><input value={thresholdReason} maxLength={500} onChange={(event) => setThresholdReason(event.target.value)} placeholder="Why is this policy changing?" /></label>
+                  <button type="button" className={styles.saveButton} onClick={() => void handleSaveThresholds()} disabled={busy || !thresholdReason.trim()}>Save count policy</button>
+                </>}
               </div>
             </div>
-          </details>
+          </details>}
         </aside>
       </div>
     </div>

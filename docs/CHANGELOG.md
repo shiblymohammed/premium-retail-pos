@@ -38,6 +38,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- **Beta readiness and handover**:
+  - Added a working API E2E Jest configuration covering health/readiness, unauthenticated access, and DTO validation.
+  - Replaced the setup-only dashboard with role-scoped live sales, stock, transfer, replenishment, and workspace setup widgets; cashier/staff get appropriate self-service links.
+  - Added blank company, location, product, opening-stock, and staff data templates plus role/operator and production launch guides.
+  - Added local custom-format PostgreSQL backup and isolated restore-verification scripts; the local backup was restored successfully into a disposable PostgreSQL container.
+  - Replaced stale demo-credential instructions with the current clean Super Admin-only beta setup and test guide.
 - **Phase 1–2 Security Hardening**:
   - Required distinct 32-character JWT signing secrets, rejected example secrets in production, restricted JWTs to HS256, and added unique refresh-token IDs to prevent same-second token reuse.
   - Increased the minimum password length for newly created users to 12 characters and restricted sample seeding to development mode.

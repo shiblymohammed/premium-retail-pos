@@ -71,7 +71,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
 
   lowStockBuffer: 5,
   negativeStockAlert: true,
-  receiptHeaderTagline: 'Downtown Flagship Store · Premium Retail Group',
+  receiptHeaderTagline: 'Premium Retail',
   receiptFooterReturnPolicy: 'Returns accepted within 14 days with original printed invoice.',
   drawerFloatLimitWarning: 50000,
   autoGenerateShiftReport: true,

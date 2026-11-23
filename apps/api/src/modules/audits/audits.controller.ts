@@ -4,7 +4,7 @@ import { Role } from '@prisma/client';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators';
 import { LocationScopeGuard, RolesGuard } from '../../common/guards';
-import { AuditApprovalDto, AuditCountDto, AuditRecountRequestDto, AuditThresholdDto, DailyAuditScheduleDto } from './dto/audit-count.dto';
+import { AuditApprovalDto, AuditCountDto, AuditRecountRequestDto, AuditThresholdDto, BulkAuditScheduleDto, DailyAuditScheduleDto } from './dto/audit-count.dto';
 import { AuditsService } from './audits.service';
 
 const MANAGERS = [Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER];
@@ -18,19 +18,22 @@ export class AuditsController {
   @UseGuards(LocationScopeGuard)
   @Roles(...MANAGERS)
   async start(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
-    return { message: 'Stock audit started; location movements are frozen until approval or abort', data: await this.audits.start(locationId, actor) };
+      return { message: 'Stock audit started; location movements are frozen until approval or abort', data: await this.audits.start(locationId, actor) };
   }
 
   @Get('locations/:locationId/sessions')
   @UseGuards(LocationScopeGuard)
-  @Roles(...MANAGERS)
-  async list(@Param('locationId') locationId: string) {
-    return { data: await this.audits.list(locationId) };
+  async list(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
+    return { data: await this.audits.list(locationId, actor) };
+  }
+
+  @Get('capabilities')
+  async capabilities(@CurrentUser() actor: RequestUser) {
+    return { data: await this.audits.capabilities(actor) };
   }
 
   @Get('locations/:locationId/schedule')
   @UseGuards(LocationScopeGuard)
-  @Roles(...MANAGERS)
   async getSchedule(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.audits.getSchedule(locationId, actor) };
   }
@@ -40,6 +43,12 @@ export class AuditsController {
   @Roles(...MANAGERS)
   async saveSchedule(@Param('locationId') locationId: string, @Body() dto: DailyAuditScheduleDto, @CurrentUser() actor: RequestUser) {
     return { message: 'Daily audit schedule saved', data: await this.audits.saveSchedule(locationId, dto, actor) };
+  }
+
+  @Patch('schedule/all')
+  @Roles(Role.SUPER_ADMIN)
+  async saveAllSchedules(@Body() dto: BulkAuditScheduleDto, @CurrentUser() actor: RequestUser) {
+    return { message: 'Audit start times saved for all active locations', data: await this.audits.saveAllSchedules(dto, actor) };
   }
 
   @Get('thresholds')
@@ -71,7 +80,6 @@ export class AuditsController {
   }
 
   @Post('sessions/:sessionId/submit')
-  @Roles(...MANAGERS)
   async submit(@Param('sessionId') sessionId: string, @CurrentUser() actor: RequestUser) {
     return { message: 'Audit submitted for manager review', data: await this.audits.submit(sessionId, actor) };
   }

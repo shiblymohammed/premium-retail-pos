@@ -9,7 +9,7 @@ import { AuditSessionStatus, LocationType, MovementType, Role, StockState, Prism
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { InventoryService } from '../inventory/inventory.service';
-import { AuditThresholdDto, DailyAuditScheduleDto } from './dto/audit-count.dto';
+import { AuditThresholdDto, BulkAuditScheduleDto, DailyAuditScheduleDto } from './dto/audit-count.dto';
 
 const TERMINAL: AuditSessionStatus[] = [AuditSessionStatus.APPROVED, AuditSessionStatus.CLOSED, AuditSessionStatus.ABORTED];
 const MANAGERS: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER];
@@ -31,30 +31,7 @@ export class AuditsService {
       if (!location.isActive) throw new ConflictException('Cannot audit an inactive location');
       this.assertAuditWindow(location.type, this.localAuditClock(new Date(), location.timezone), location.dailyAuditTime);
       if (location.isAuditLocked) throw new ConflictException('Location already has an active stock audit');
-      return this.createSessionInTransaction(tx, locationId, actor.userId, false);
-    });
-  }
-
-  async startScheduled(locationId: string, localDate: string, localTime: string, weekday: string, systemActorId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string; type: LocationType; isActive: boolean; isAuditLocked: boolean; lastRunDate: string | null }>>(Prisma.sql`
-        SELECT "id", "type", "is_active" AS "isActive", "is_audit_locked" AS "isAuditLocked",
-          "daily_audit_last_run_date" AS "lastRunDate"
-        FROM "locations" WHERE "id" = ${locationId} FOR UPDATE
-      `);
-      const location = rows[0];
-      if (!location) throw new NotFoundException('Location not found');
-      if (!location.isActive) return { started: false, reason: 'location-inactive' };
-      if (!this.isWithinAuditWindow(location.type, { time: localTime, weekday })) {
-        return { started: false, reason: 'outside-audit-window' };
-      }
-      if (location.lastRunDate === localDate) return { started: false, reason: 'already-run-today' };
-      if (location.isAuditLocked) {
-        await tx.location.update({ where: { id: locationId }, data: { dailyAuditLastRunDate: localDate } });
-        return { started: false, reason: 'location-already-locked' };
-      }
-      const session = await this.createSessionInTransaction(tx, locationId, systemActorId, true, localDate);
-      return { started: true, session };
+      return this.createSessionInTransaction(tx, locationId, actor.userId);
     });
   }
 
@@ -62,10 +39,8 @@ export class AuditsService {
     tx: Prisma.TransactionClient,
     locationId: string,
     actorId: string,
-    isScheduled: boolean,
-    scheduledLocalDate?: string,
   ) {
-      const session = await tx.auditSession.create({ data: { locationId, initiatedByUserId: actorId, isScheduled } });
+      const session = await tx.auditSession.create({ data: { locationId, initiatedByUserId: actorId, isScheduled: false } });
       await tx.auditThreshold.upsert({ where: { scopeKey: 'default' }, create: { scopeKey: 'default' }, update: {} });
       const snapshots = await tx.$queryRaw<Array<{ variantId: string; categoryId: string | null; expectedQtyBase: bigint }>>(Prisma.sql`
         SELECT v."id" AS "variantId", p."category_id" AS "categoryId", COALESCE(SUM(m."quantity_base_units"), 0)::bigint AS "expectedQtyBase"
@@ -78,6 +53,7 @@ export class AuditsService {
         GROUP BY v."id", p."category_id"
         ORDER BY v."id"
       `);
+      if (snapshots.length === 0) throw new ConflictException('No active product variants are available for a stock audit at this location');
       const policies = await tx.auditThreshold.findMany();
       const defaultPolicy = policies.find((policy) => policy.scopeKey === 'default');
       const categoryPolicies = new Map(policies.filter((policy) => policy.categoryId).map((policy) => [policy.categoryId!, policy]));
@@ -101,7 +77,7 @@ export class AuditsService {
       if (countItems.length) await tx.auditCountItem.createMany({ data: countItems });
       await tx.location.update({
         where: { id: locationId },
-        data: { isAuditLocked: true, ...(scheduledLocalDate ? { dailyAuditLastRunDate: scheduledLocalDate } : {}) },
+        data: { isAuditLocked: true },
       });
       const created = await tx.auditSession.findUnique({
         where: { id: session.id },
@@ -143,7 +119,7 @@ export class AuditsService {
     if (!location) throw new NotFoundException('Location not found');
     this.assertLocationScope(locationId, actor);
     if (!dto.enabled) throw new BadRequestException('The confirmed daily/weekly audit cadence cannot be disabled');
-    if (!dto.startTime) throw new BadRequestException('Set an automatic audit start time');
+    if (!dto.startTime) throw new BadRequestException('Set an audit window start time');
     if (dto.startTime < '19:00') {
       throw new BadRequestException('Audit schedules cannot start before 7:00 PM local time');
     }
@@ -165,11 +141,74 @@ export class AuditsService {
     };
   }
 
-  async list(locationId: string) {
+  async saveAllSchedules(dto: BulkAuditScheduleDto, actor: RequestUser) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can change audit schedules for all locations');
+    if (dto.storeStartTime < '19:00' || dto.warehouseStartTime < '19:00') {
+      throw new BadRequestException('Store and warehouse audit schedules cannot start before 7:00 PM local time');
+    }
+    if (!dto.reason.trim()) throw new BadRequestException('A reason is required for a global audit schedule change');
+
+    return this.prisma.$transaction(async (tx) => {
+      const locations = await tx.location.findMany({
+        where: { isActive: true },
+        select: { id: true, type: true, dailyAuditTime: true },
+      });
+      const stores = locations.filter((location) => location.type === LocationType.RETAIL_STORE);
+      const warehouses = locations.filter((location) => location.type !== LocationType.RETAIL_STORE);
+      const updates = await Promise.all([
+        tx.location.updateMany({
+          where: { id: { in: stores.map((location) => location.id) } },
+          data: { dailyAuditEnabled: true, dailyAuditTime: dto.storeStartTime, dailyAuditLastRunDate: null },
+        }),
+        tx.location.updateMany({
+          where: { id: { in: warehouses.map((location) => location.id) } },
+          data: { dailyAuditEnabled: true, dailyAuditTime: dto.warehouseStartTime, dailyAuditLastRunDate: null },
+        }),
+      ]);
+
+      await tx.auditEvent.create({
+        data: {
+          actorId: actor.userId,
+          action: 'AUDIT_SCHEDULE_BULK_UPDATED',
+          targetEntity: 'LocationAuditSchedule',
+          targetId: 'all-active-locations',
+          beforeValue: JSON.stringify({ locations: locations.map(({ id, type, dailyAuditTime }) => ({ id, type, startTime: dailyAuditTime })) }),
+          afterValue: JSON.stringify({ storeStartTime: dto.storeStartTime, warehouseStartTime: dto.warehouseStartTime, storesUpdated: updates[0].count, warehousesUpdated: updates[1].count }),
+          reason: dto.reason.trim(),
+        },
+      });
+
+      return {
+        storeStartTime: dto.storeStartTime,
+        warehouseStartTime: dto.warehouseStartTime,
+        storesUpdated: updates[0].count,
+        warehousesUpdated: updates[1].count,
+      };
+    });
+  }
+
+  async list(locationId: string, actor: RequestUser) {
+    this.assertLocationScope(locationId, actor);
+    if (!(await this.canManageOrCount(actor))) {
+      throw new ForbiddenException('Stock audit access requires manager access or count permission');
+    }
     return this.prisma.auditSession.findMany({
       where: { locationId }, orderBy: { startedAt: 'desc' },
       include: { _count: { select: { countItems: true } } },
     });
+  }
+
+  async capabilities(actor: RequestUser) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: actor.userId },
+      select: { isActive: true, canCountStockAudits: true },
+    });
+    const active = Boolean(user?.isActive);
+    return {
+      canCount: active && (actor.role === Role.SUPER_ADMIN || Boolean(user?.canCountStockAudits)),
+      canManage: active && MANAGERS.includes(actor.role as Role),
+      canChangeThresholds: active && actor.role === Role.SUPER_ADMIN,
+    };
   }
 
   async listThresholds() {
@@ -226,9 +265,22 @@ export class AuditsService {
     if (!session) throw new NotFoundException('Audit session not found');
     this.assertLocationScope(session.locationId, actor);
     const manager = MANAGERS.includes(actor.role as Role);
-    return session.status === AuditSessionStatus.ACTIVE || !manager
-      ? this.hideExpectedForBlindCount(session)
-      : session;
+    const canCount = await this.canManageOrCount(actor);
+    if (session.status !== AuditSessionStatus.ACTIVE) {
+      if (manager) return session;
+      const blind = this.hideExpectedForBlindCount(session);
+      return canCount ? blind : this.hideCountValues(blind);
+    }
+    // Active counts remain blind for every viewer. Counter timestamps and the
+    // recount-required flag provide workflow state without exposing quantities.
+    return {
+      ...session,
+      countItems: session.countItems.map((item) => {
+        const { expectedQtyBase: _expected, countedQtyBase: _counted, recountQtyBase: _recounted,
+          varianceBase: _variance, variancePercent: _variancePercent, highCountAlert: _alert, ...blind } = item;
+        return blind;
+      }),
+    };
   }
 
   async recordCount(sessionId: string, itemId: string, dto: { quantityBaseUnits: number; notes?: string }, actor: RequestUser) {
@@ -244,6 +296,12 @@ export class AuditsService {
       if (locked.status !== AuditSessionStatus.ACTIVE) throw new ConflictException('Counts can only be entered in an active audit');
       const item = await tx.auditCountItem.findFirst({ where: { id: itemId, auditSessionId: sessionId } });
       if (!item) throw new NotFoundException('Audit count item not found');
+      if (!item.requiresRecount && item.countedQtyBase !== null) {
+        throw new ConflictException('This product already has a saved count. Ask a manager to request a recount to change it.');
+      }
+      if (item.requiresRecount && item.recountQtyBase !== null) {
+        throw new ConflictException('A recount is already saved. Ask a manager to request another recount.');
+      }
       const variance = dto.quantityBaseUnits - item.expectedQtyBase;
       const variancePercent = item.expectedQtyBase === 0
         ? null
@@ -252,9 +310,12 @@ export class AuditsService {
         || (variancePercent !== null && variancePercent > Number(item.recountThresholdPercent));
       const highCountAlert = item.highCountAlertQty !== null && dto.quantityBaseUnits >= item.highCountAlertQty;
       const data = item.requiresRecount
-        ? { recountQtyBase: dto.quantityBaseUnits, highCountAlert, variancePercent, notes: dto.notes ?? item.notes }
+        ? { recountQtyBase: dto.quantityBaseUnits, recountedByUserId: actor.userId, recountedAt: new Date(), varianceBase: variance, highCountAlert, variancePercent, notes: dto.notes ?? item.notes }
         : {
             countedQtyBase: dto.quantityBaseUnits,
+            countedByUserId: actor.userId,
+            countedAt: new Date(),
+            varianceBase: variance,
             requiresRecount: thresholdExceeded,
             highCountAlert,
             variancePercent,
@@ -270,17 +331,23 @@ export class AuditsService {
     await this.get(sessionId, actor);
     return this.prisma.$transaction(async (tx) => {
       const locked = await this.lockSession(tx, sessionId);
-      if (locked.status !== AuditSessionStatus.ACTIVE) throw new ConflictException('Recounts can only be requested in an active audit');
+      if (locked.status !== AuditSessionStatus.ACTIVE && locked.status !== AuditSessionStatus.SUBMITTED) {
+        throw new ConflictException('Recounts can only be requested before the audit is approved or aborted');
+      }
       const item = await tx.auditCountItem.findFirst({ where: { id: itemId, auditSessionId: sessionId } });
       if (!item) throw new NotFoundException('Audit count item not found');
       if (item.countedQtyBase === null) throw new ConflictException('Enter the first count before requesting a recount');
-      const updated = await tx.auditCountItem.update({ where: { id: item.id }, data: { requiresRecount: true, recountQtyBase: null, notes: reason } });
+      const updated = await tx.auditCountItem.update({ where: { id: item.id }, data: { requiresRecount: true, recountQtyBase: null, recountedByUserId: null, recountedAt: null, recountRequestReason: reason } });
+      if (locked.status === AuditSessionStatus.SUBMITTED) {
+        await tx.auditSession.update({ where: { id: sessionId }, data: { status: AuditSessionStatus.ACTIVE, completedAt: null } });
+      }
       return this.hideBlindCountItem(updated);
     });
   }
 
   async submit(sessionId: string, actor: RequestUser) {
     await this.get(sessionId, actor);
+    if (!(await this.canManageOrCount(actor))) throw new ForbiddenException('Only an authorized counter or manager can submit an audit');
     return this.prisma.$transaction(async (tx) => {
       const locked = await this.lockSession(tx, sessionId);
       if (locked.status !== AuditSessionStatus.ACTIVE) throw new ConflictException('Only an active audit can be submitted');
@@ -366,6 +433,12 @@ export class AuditsService {
     }
   }
 
+  private async canManageOrCount(actor: RequestUser) {
+    if (MANAGERS.includes(actor.role as Role)) return true;
+    const user = await this.prisma.user.findUnique({ where: { id: actor.userId }, select: { isActive: true, canCountStockAudits: true } });
+    return Boolean(user?.isActive && user.canCountStockAudits);
+  }
+
   private localAuditClock(date: Date, timezone: string) {
     const parts = new Intl.DateTimeFormat('en-GB', {
       timeZone: timezone,
@@ -417,5 +490,17 @@ export class AuditsService {
       ...blindCountItem
     } = item;
     return blindCountItem as T;
+  }
+
+  private hideCountValues<T extends { countItems?: Array<Record<string, unknown>> }>(session: T): T {
+    if (!session.countItems) return session;
+    return {
+      ...session,
+      countItems: session.countItems.map((item) => {
+        const { countedQtyBase: _counted, recountQtyBase: _recounted, varianceBase: _variance,
+          variancePercent: _variancePercent, highCountAlert: _alert, ...redacted } = item;
+        return redacted;
+      }),
+    };
   }
 }

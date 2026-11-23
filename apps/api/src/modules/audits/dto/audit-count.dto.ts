@@ -60,3 +60,17 @@ export class DailyAuditScheduleDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'startTime must use 24-hour HH:mm format' })
   startTime?: string | null;
 }
+
+export class BulkAuditScheduleDto {
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'storeStartTime must use 24-hour HH:mm format' })
+  storeStartTime!: string;
+
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'warehouseStartTime must use 24-hour HH:mm format' })
+  warehouseStartTime!: string;
+
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
+}

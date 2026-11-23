@@ -49,74 +49,11 @@ type Employee = { id: string; name: string; employeeCode: string; role: string; 
 const TIMEZONE = 'Asia/Kolkata';
 const HISTORY_DAYS = 26 * 7; // ~6 months shown in the attendance grid
 
-const DEMO_LOCATIONS: Location[] = [
-  { id: 'loc_downtown', name: 'Downtown Store', type: 'RETAIL_STORE' },
-  { id: 'loc_north_mall', name: 'North Mall', type: 'RETAIL_STORE' },
-  { id: 'loc_west_end', name: 'West End Outlet', type: 'RETAIL_STORE' },
-  { id: 'loc_warehouse', name: 'Central Warehouse', type: 'WAREHOUSE' },
-];
-
-const EMPLOYEES: Employee[] = [
-  { id: 'emp_1', name: 'Ravi Menon', employeeCode: 'EMP-0842', role: 'Cashier', locationId: 'loc_downtown' },
-  { id: 'emp_2', name: 'Anita Sharma', employeeCode: 'EMP-0843', role: 'Cashier', locationId: 'loc_downtown' },
-  { id: 'emp_3', name: 'Rajesh Kumar', employeeCode: 'EMP-0844', role: 'Senior cashier', locationId: 'loc_downtown' },
-  { id: 'emp_4', name: 'Amit Verma', employeeCode: 'EMP-0845', role: 'Stock associate', locationId: 'loc_downtown' },
-  { id: 'emp_5', name: 'Priya Nair', employeeCode: 'EMP-0851', role: 'Cashier', locationId: 'loc_north_mall' },
-  { id: 'emp_6', name: 'Kabir Rao', employeeCode: 'EMP-0852', role: 'Stock associate', locationId: 'loc_north_mall' },
-  { id: 'emp_7', name: 'Maya Das', employeeCode: 'EMP-0861', role: 'Cashier', locationId: 'loc_west_end' },
-  { id: 'emp_8', name: 'Neel Shah', employeeCode: 'EMP-0862', role: 'Floor supervisor', locationId: 'loc_west_end' },
-];
-
-/** How reliable each demo employee is (drives the generated history). */
-const PROFILES: Record<string, { late: number; absent: number }> = {
-  emp_1: { late: 0.04, absent: 0.02 },
-  emp_2: { late: 0.28, absent: 0.04 },
-  emp_3: { late: 0.08, absent: 0.03 },
-  emp_4: { late: 0.12, absent: 0.12 },
-  emp_5: { late: 0.06, absent: 0.02 },
-  emp_6: { late: 0.2, absent: 0.08 },
-  emp_7: { late: 0.1, absent: 0.05 },
-  emp_8: { late: 0.03, absent: 0.01 },
-};
-
 const blankRow = (emp: Employee): AttendanceRow => ({
   employee: { id: emp.id, name: emp.name, employeeCode: emp.employeeCode },
   status: 'NOT_STARTED', clockInId: null, clockOutId: null, clockInAt: null, clockOutAt: null,
-  isLate: false, targetStartTime: '09:00', qrVerified: false, clockInCorrectionReason: null, clockOutCorrectionReason: null,
+  isLate: false, targetStartTime: null, qrVerified: false, clockInCorrectionReason: null, clockOutCorrectionReason: null,
 });
-
-// Today's demo punches sit at fixed shift times (store time, IST). A punch that would be
-// in the future is left out, so the register always looks like a real day so far.
-const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
-const atStoreTime = (hhmm: string) => new Date(`${istToday()}T${hhmm}:00+05:30`).toISOString();
-const demoRow = (emp: Employee, n: number, inAt: string | null, outAt: string | null, qrVerified = true): AttendanceRow => {
-  const now = Date.now();
-  const inIso = inAt ? atStoreTime(inAt) : null;
-  if (!inIso || new Date(inIso).getTime() > now) return blankRow(emp);
-  const outIso = outAt ? atStoreTime(outAt) : null;
-  const done = !!outIso && new Date(outIso).getTime() <= now;
-  return {
-    ...blankRow(emp),
-    status: done ? 'COMPLETED' : 'WORKING',
-    clockInId: `cin_${n}`,
-    clockInAt: inIso,
-    clockOutId: done ? `cout_${n}` : null,
-    clockOutAt: done ? outIso : null,
-    isLate: (inAt as string) > '09:00', // same rule as the API: clock-in after the shift start
-    qrVerified,
-  };
-};
-
-const DEMO_EMPLOYEES_TODAY: AttendanceRow[] = [
-  demoRow(EMPLOYEES[0], 1, '08:52', '18:05'),
-  demoRow(EMPLOYEES[1], 2, '09:18', '18:30'),
-  demoRow(EMPLOYEES[2], 3, '08:45', '17:10'),
-  demoRow(EMPLOYEES[3], 4, null, null),
-  demoRow(EMPLOYEES[4], 5, '08:57', '18:00'),
-  demoRow(EMPLOYEES[5], 6, '09:26', '18:40', false),
-  demoRow(EMPLOYEES[6], 7, null, null),
-  demoRow(EMPLOYEES[7], 8, '08:40', '17:30'),
-];
 
 // ---------- time helpers ----------
 const localParts = (d: Date) => {
@@ -147,38 +84,6 @@ const dayOfWeek = (iso: string) => (new Date(`${iso}T12:00:00Z`).getUTCDay() + 6
 const prettyDate = (iso: string, opts: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' }) =>
   new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-IN', { ...opts, timeZone: 'UTC' });
 const initials = (name: string) => name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-
-/** Small deterministic random generator so demo history is stable between reloads. */
-function seeded(seed: string) {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
-  return () => {
-    h += 0x6d2b79f5;
-    let t = h;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Builds past attendance for one employee (Sundays are days off). */
-function buildHistory(emp: Employee, targetMin: number, today: string): DayRecord[] {
-  const rand = seeded(emp.id);
-  const profile = PROFILES[emp.id] ?? { late: 0.1, absent: 0.05 };
-  const records: DayRecord[] = [];
-  for (let i = HISTORY_DAYS; i >= 1; i--) {
-    const date = addDays(today, -i);
-    const r = rand();
-    const jitter = rand();
-    if (dayOfWeek(date) === 6) { records.push({ date, status: 'off', inMin: null, outMin: null, workMin: 0, lateBy: 0 }); continue; }
-    if (r < profile.absent) { records.push({ date, status: 'absent', inMin: null, outMin: null, workMin: 0, lateBy: 0 }); continue; }
-    const late = r < profile.absent + profile.late;
-    const inMin = late ? targetMin + 5 + Math.round(jitter * 45) : targetMin - 15 + Math.round(jitter * 14);
-    const workMin = 7 * 60 + Math.round(rand() * 120);
-    records.push({ date, status: late ? 'late' : 'ontime', inMin, outMin: inMin + workMin, workMin, lateBy: late ? inMin - targetMin : 0 });
-  }
-  return records;
-}
 
 /** Today's record from a live attendance row. */
 function recordFromLive(row: AttendanceRow | undefined, today: string, targetMin: number | null): DayRecord {
@@ -231,15 +136,15 @@ const STATUS_LABEL: Record<DayStatus, string> = {
 
 export default function AttendanceManagerPage() {
   const today = useMemo(() => todayLocal(), []);
-  const [locations] = useState<Location[]>(DEMO_LOCATIONS);
-  const [locationId, setLocationId] = useState('loc_downtown');
+  const [locations] = useState<Location[]>([]);
+  const [locationId, setLocationId] = useState('');
   const [day, setDay] = useState<LocationDay>({
-    location: { id: 'loc_downtown', name: 'Downtown Store' },
+    location: { id: '', name: '' },
     localDate: today,
     timezone: TIMEZONE,
-    targetStartTime: '09:00',
+    targetStartTime: null,
     qrRequired: true,
-    employees: DEMO_EMPLOYEES_TODAY,
+    employees: [],
   });
 
   const [selectedDate, setSelectedDate] = useState(today);
@@ -248,8 +153,8 @@ export default function AttendanceManagerPage() {
   const [viewing, setViewing] = useState<Employee | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
-  const [targetStartTime, setTargetStartTime] = useState('09:00');
-  const [qrRequired, setQrRequired] = useState(true);
+  const [targetStartTime, setTargetStartTime] = useState('');
+  const [qrRequired, setQrRequired] = useState(false);
   const [qrImage, setQrImage] = useState('');
   const [qrExpiresAt, setQrExpiresAt] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(0);
@@ -264,7 +169,7 @@ export default function AttendanceManagerPage() {
 
   // Follow the store chosen in the top bar
   useEffect(() => {
-    const apply = (name: string | null) => { const found = DEMO_LOCATIONS.find((l) => l.name === name); if (found) setLocationId(found.id); };
+    const apply = (_name: string | null) => {};
     apply(window.localStorage.getItem('premium-retail-location-scope'));
     const sync = (event: Event) => apply((event as CustomEvent<string>).detail);
     window.addEventListener('premium-retail-location-change', sync);
@@ -311,14 +216,14 @@ export default function AttendanceManagerPage() {
 
   const targetMin = hhmmToMin(day.targetStartTime);
   const location = locations.find((l) => l.id === locationId) ?? locations[0];
-  const staff = EMPLOYEES.filter((e) => e.locationId === locationId);
+  const staff: Employee[] = [];
 
   // Full history per employee (past days generated + today from the live register)
   const histories = useMemo(() => {
     const map: Record<string, DayRecord[]> = {};
-    for (const emp of EMPLOYEES) {
+    for (const emp of staff) {
       const live = day.employees.find((r) => r.employee.id === emp.id);
-      map[emp.id] = [...buildHistory(emp, targetMin ?? 540, today), recordFromLive(live, today, targetMin)];
+      map[emp.id] = [recordFromLive(live, today, targetMin)];
     }
     return map;
   }, [day.employees, targetMin, today]);
@@ -435,7 +340,7 @@ export default function AttendanceManagerPage() {
   };
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} app-page`}>
       {/* ---------- Header ---------- */}
       <header className={styles.header}>
         <div className={styles.headerTitle}>

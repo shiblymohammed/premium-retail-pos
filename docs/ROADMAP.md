@@ -8,20 +8,20 @@
 
 | Metric | Status / Assessment |
 | :--- | :--- |
-| **Current Baseline** | Phase 8 agreed attendance scope implemented and live-checked with two demo staff accounts |
+| **Current Baseline** | Clean local beta environment; only the environment-configured Super Admin is seeded. API and web builds, database readiness, Super Admin authentication, refresh/logout, and major page routes were smoke-checked on 23 Nov 2026 |
 | **Implemented Functionality** | Phases 1–6 functionality remains implemented; Phase 7 now has location-frozen audit sessions, blind count responses, configurable category/global thresholds, recount flags, manager approval, immutable stock adjustments, and archived resolved audit records |
-| **Partial Functionality** | Phase 7 implementation and automated schedule/workflow checks pass; scheduled runtime acceptance remains. On-site physical-count UAT is deferred until requested by the client and is not a current blocker. Phase 8 automated tests, builds, and 15 live checks using two demo staff accounts passed. Final client UAT and thermal printer hardware verification remain. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
-| **Resolved Decisions** | 12 of 20 Open Decisions confirmed for the current release: `OD-01` through `OD-12` (see §5) |
-| **Remaining Blockers** | 4 unresolved in-scope decisions; OD-13 and OD-14 are deferred |
-| **Foundation Status** | API/web builds pass; local PostgreSQL, initial migration, seed data, and seeded login have been verified by the project owner |
+| **Partial Functionality** | Phase 7 physical-count acceptance is deferred until requested. Phase 10 widgets now use role-scoped report APIs. Final staging UAT, production backup scheduling/recovery, scale targets, and client launch sign-off remain. GST/tax, customer details, e-invoicing, and e-way bills are excluded from this release |
+| **Resolved Decisions** | Current-release decisions are recorded in §5; loans, GPS/geofencing, and advanced shifts remain deferred |
+| **Remaining Blockers** | Staging host/data and client UAT are required for final acceptance. OD-19 scale targets and OD-20 contractual UAT/support criteria still need client confirmation |
+| **Foundation Status** | Prisma migrations are current; schema validation, API unit tests, API/web builds, PostgreSQL readiness, and Super Admin login/refresh/logout were verified locally |
 
 ---
 
 ## 2. Current Focus
 
 > [!IMPORTANT]
-> **Next Active Phase: Phase 10 — Reports, Dashboards & Notifications**
-> Phase 8 attendance scope is implemented and live-checked: staff clock in/out, managers configure location start times and see late arrivals, optional rotating QR validation, audited punch corrections, and daily/weekly/monthly reports. GPS/geofencing and advanced shift rules remain deferred. Phase 7 scheduled runtime acceptance remains; on-site physical-count UAT is deferred until requested by the client and is not a current blocker.
+> **Current focus: Phase 12 — Deployment, Data Migration, Training & Handover**
+> The remaining work depends on the client environment: configure encrypted scheduled backups and restore recovery on the selected host, deploy staging, load approved client data, complete scoped role UAT, and obtain launch sign-off. Local backup/restore tooling and guides are in the repository; their existence is not production-host acceptance.
 
 > **Deferred: Phase 9 — Employee Loans and Advances**
 > The client does not need loan tracking in the current release. Keep the existing employee profile placeholder; do not build loan, repayment, or payroll-deduction workflows unless the client reactivates this phase.
@@ -124,7 +124,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 
 ### Phase 7: Stock Audits, Recounts & Approved Adjustments
 - [x] `P1` Implement location-level stock movement freeze during audit session (Confirmed `OD-04`: audits take place after store closing hours; system locks sales and transfers for the location during counting)
-- [x] `P1` Implement required company-timezone audit cadence: stores daily and warehouses Sundays, both after 7:00 PM, with configurable later start time
+- [x] `P1` Implement company-timezone audit windows and due notifications: stores daily and warehouses Sundays, both after 7:00 PM, with configurable later start time; a person starts the physical audit
 - [x] `P1` Implement configurable variance threshold rules (quantity variance, percentage variance, high-count alert; defaults >2% or >5 units, with high-count alerts configurable globally or per category)
 - [x] `P1` Restrict global/category audit threshold changes to Super Admin; require an audited, location-scoped user grant for stock count entry (default denied)
 - [x] `P1` Implement Recount Required queue for flagged count variances
@@ -132,7 +132,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P0` Ensure physical counts do not mutate inventory balances until manager formally approves adjustment
 - [x] `P0` Generate immutable `STOCK_ADJUSTMENT` ledger movement upon approved audit reconciliation
 - [x] `P1` Archive full audit history (expected, count, recount, approved value, variance, approver, reason); terminal records are protected from update/delete
-> On-site physical-count UAT is deferred until requested by the client; automated tests cover the audit workflow and scheduled cadence rules.
+> Audit screens now use authenticated API data, restore active sessions after navigation/sign-in, and retain count/recount user and timestamp attribution. Due notifications do not freeze stock; movements freeze only after a person starts an audit. On-site physical-count UAT is deferred until requested by the client.
 
 ### Phase 8: Staff Mobile Attendance
 - [x] `P1` Build mobile-friendly staff attendance punch interface for simple start/end of workday
@@ -154,7 +154,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [Deferred] `P1` Link planned payroll deductions to repayment records without double-reducing balances prior to payroll confirmation
 - [Deferred] `P1` Implement loan correction/reversal workflow retaining original audit history
 
-### Phase 10: Reports, Dashboards & Notifications — In Progress
+### Phase 10: Reports, Dashboards & Notifications — Implemented; client data UAT pending
 - [x] `P1` Implement location-scoped and consolidated Sales Summary & Sales Detail reports (location-scoped, paginated API and reports screen; CSV export is capped at 50,000 invoices per export)
 - [x] `P1` Implement Current Stock Report with base units and carton/packet breakdowns (API and reports screen)
 - [x] `P1` Implement Movement Ledger Audit Report with source/destination tracing
@@ -162,7 +162,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P1` Implement Transfer Discrepancy Report
 - [x] `P1` Implement Audit Variance Report and Price Change History Log
 - [x] `P1` Implement Item Deletion & Cancelled Sale Audit Report
-- [ ] `P2` Implement role-scoped executive and manager dashboard widgets
+- [x] `P2` Implement role-scoped executive and manager dashboard widgets using live sales, stock, replenishment, transfer, and setup endpoints; cashiers/staff receive only their self-service links
 - [x] `P2` Implement in-app notification center (per-user persisted alerts, read/unread state, and links to the related workflow; SMS/WhatsApp remain excluded from the current scope)
 - [x] `P2` Implement secure CSV and downloadable PDF export utilities respecting location permissions (consolidated scope restricted to Admin / Super Admin)
 
@@ -176,10 +176,11 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P0` Protect sensitive employee financial data and attendance geolocation data (employee responses exclude loan/financial details; GPS collection is out of current scope; attendance responses explicitly select non-GPS fields; legacy GPS columns remain nullable and are not exposed by the API)
 
 ### Phase 12: Deployment, Data Migration, Training & Handover
-- [ ] `P1` Build standardized CSV data import templates for products, variants, opening stock, locations, and staff
-- [ ] `P0` Set up automated database backup procedures and test restore recovery drills
+- [x] `P1` Build standardized blank CSV data preparation templates for products/variants, opening stock, locations, company, and staff (bulk import endpoint is not part of the current deliverable)
+- [x] `P0` Add local custom-format PostgreSQL backup and isolated restore-verification tooling; local recovery drill passed on 23 Nov 2026
+- [ ] `P0` Configure scheduled encrypted backups, retention, off-site storage, and restore drills on the selected production host
 - [ ] `P1` Deploy to staging environment and conduct end-to-end User Acceptance Testing (UAT)
-- [ ] `P1` Produce role-specific operator guides (Super Admin, Store Manager, Cashier, Auditor)
+- [x] `P1` Produce role-specific operator guide (Super Admin, Store Manager, Cashier, authorized stock counter)
 - [ ] `P0` Execute production launch checklist and initiate contractual 30-day bug-fixing period
 
 ---
@@ -207,7 +208,7 @@ The following 20 open decisions (`OD-01` through `OD-20`) originate from Section
 | **OD-15** | Hardware | Target hardware specifications (barcode scanners, thermal printers, cash drawers, scales). | Support standard USB/Bluetooth ESC/POS thermal printers and HID keyboard-wedge barcode scanners. | Open / Medium (Blocks POS driver testing) |
 | **OD-16** | Exports | Supported export formats, scheduling, and role-based export permissions. | **CONFIRMED current release:** CSV and downloadable PDF; consolidated data restricted to Admin / Super Admin. Scheduled exports are deferred. | **RESOLVED for current release / Future extension** |
 | **OD-17** | Notifications | Scope of notification delivery (In-app only vs. SMS / Email / WhatsApp). | **CONFIRMED:** In-app alerts only. External SMS/Email/WhatsApp delivery is excluded unless separately approved and funded. | **RESOLVED for current release / Future extension** |
-| **OD-18** | Data Migration | Scope and format of legacy data to migrate (products, stock, employees, historic sales). | Provide standard CSV import templates for master catalogue and opening stock balances only. | Open / Medium (Pre-launch readiness) |
+| **OD-18** | Data Migration | Scope and format of legacy data to migrate (products, stock, employees, historic sales). | **CONFIRMED current release:** prepare blank CSV templates for company, locations, products/variants, opening stock, and staff; historic sales migration and automated bulk import are not included. | **RESOLVED for current release** |
 | **OD-19** | Scale Targets | Concurrency targets: concurrent cashiers, active SKUs, daily transactions, data retention span. | Design for 50+ stores, 10,000+ SKUs, 50,000 daily sales, 5-year online retention. | Open / Medium (Database indexing) |
 | **OD-20** | Acceptance | Formal UAT sign-off criteria, bug severity definitions, and commercial support timeline. |   Define Sev-1 through Sev-4 response times and confirm start date for the 30-day bug-fixing period. | Open / High (Contractual milestone) |
 

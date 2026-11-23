@@ -64,32 +64,6 @@ const PRESETS = [
 ];
 const REASON_CHIPS = ['Promoted to senior cashier', 'New cashier set-up', 'Back to standard limit', 'Quarterly policy review'];
 
-const FALLBACK_LOCATIONS: LocationRecord[] = [
-  { id: 'loc-1', name: 'Downtown Flagship Store', type: 'RETAIL_STORE' },
-  { id: 'loc-2', name: 'North Mall Retail Store', type: 'RETAIL_STORE' },
-  { id: 'loc-3', name: 'West End Outlet', type: 'RETAIL_STORE' },
-  { id: 'loc-4', name: 'Main Central Warehouse', type: 'CENTRAL_WAREHOUSE' },
-];
-
-const FALLBACK_USERS: UserRecord[] = [
-  { id: 'usr-003', name: 'Asha Patel', email: 'manager@premiumretail.com', employeeCode: 'EMP-MGR-0841', role: 'STORE_MANAGER', isActive: true, discountLimitPercent: 20, lastReason: 'Downtown Store Manager authority adjustment', lastUpdated: '18-Nov-2026', locationScopes: [{ locationId: 'loc-1' }, { locationId: 'loc-2' }] },
-  { id: 'usr-006', name: 'Ravi Menon', email: 'cashier@premiumretail.com', employeeCode: 'EMP-CSH-0842', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'Initial checkout terminal provision', lastUpdated: '15-Nov-2026', locationScopes: [{ locationId: 'loc-1' }] },
-  { id: 'usr-007', name: 'Neel Shah', email: 'n.shah@premiumretail.com', employeeCode: 'EMP-CSH-0843', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'Downtown Store cashier lane 2 setup', lastUpdated: '14-Nov-2026', locationScopes: [{ locationId: 'loc-1' }] },
-  { id: 'usr-008', name: 'Maya Das', email: 'm.das@premiumretail.com', employeeCode: 'EMP-CSH-0844', role: 'CASHIER', isActive: true, discountLimitPercent: 10, lastReason: 'Promoted to senior cashier for West End lane 1', lastUpdated: '12-Nov-2026', locationScopes: [{ locationId: 'loc-3' }] },
-  { id: 'usr-010', name: 'Kabir Rao', email: 'k.rao@premiumretail.com', employeeCode: 'EMP-CSH-0845', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'North Mall retail store cashier onboarding', lastUpdated: '10-Nov-2026', locationScopes: [{ locationId: 'loc-2' }] },
-  { id: 'usr-012', name: 'Divya Nair', email: 'd.nair@premiumretail.com', employeeCode: 'EMP-CSH-0846', role: 'CASHIER', isActive: true, discountLimitPercent: 5, lastReason: 'North Mall POS terminal lane 2 provision', lastUpdated: '08-Nov-2026', locationScopes: [{ locationId: 'loc-2' }] },
-  { id: 'usr-004', name: 'Vikram Singh', email: 'warehouse@premiumretail.com', employeeCode: 'EMP-WH-0501', role: 'CENTRAL_MANAGER', isActive: true, discountLimitPercent: 0, lastReason: 'Central Hub logistics manager - zero discount allowance', lastUpdated: '01-Nov-2026', locationScopes: [{ locationId: 'loc-4' }] },
-  { id: 'usr-005', name: 'Rajesh Kumar', email: 'subwarehouse@premiumretail.com', employeeCode: 'EMP-WH-0502', role: 'SUB_WAREHOUSE_MANAGER', isActive: true, discountLimitPercent: 0, lastReason: 'Regional sub-warehouse manager - zero discount allowance', lastUpdated: '01-Nov-2026', locationScopes: [{ locationId: 'loc-4' }] },
-  { id: 'usr-009', name: 'Priya Sharma', email: 'staff@premiumretail.com', employeeCode: 'EMP-STF-0109', role: 'STAFF', isActive: true, discountLimitPercent: 0, lastReason: 'Floor staff - discount permissions restricted', lastUpdated: '25-Oct-2026', locationScopes: [{ locationId: 'loc-1' }] },
-  { id: 'usr-011', name: 'Anita Verma', email: 'a.verma@premiumretail.com', employeeCode: 'EMP-STF-0110', role: 'STAFF', isActive: true, discountLimitPercent: 0, lastReason: 'Floor assistant - discount permissions restricted', lastUpdated: '20-Oct-2026', locationScopes: [{ locationId: 'loc-3' }] },
-];
-
-const FALLBACK_HISTORY: HistoryEntry[] = [
-  { id: 'h1', when: 'Today, 17:42', userId: 'usr-008', name: 'Maya Das', from: 5, to: 10, reason: 'Promoted to senior cashier for West End outlet lane 1' },
-  { id: 'h3', when: '14-Nov-2026', userId: 'usr-006', name: 'Ravi Menon', from: 0, to: 5, reason: 'Initial checkout terminal provision' },
-  { id: 'h4', when: '10-Nov-2026', userId: 'usr-010', name: 'Kabir Rao', from: 0, to: 5, reason: 'North Mall retail store onboarding' },
-];
-
 async function errorMessage(response: Response) {
   try {
     const result = await response.json();
@@ -195,15 +169,16 @@ function LimitPicker({ value, onChange, max }: { value: string; onChange: (v: st
 }
 
 export default function DiscountLimitsAdmin() {
-  // Session & authority (demo defaults when nobody is signed in)
+  // Session & authority from the authenticated API
   const [token, setToken] = useState('');
-  const [actorEmail, setActorEmail] = useState('admin@premiumretail.com');
-  const [authority, setAuthority] = useState<Authority>({ role: 'SUPER_ADMIN', unlimited: true, discountLimitPercent: 100 });
+  const [actorEmail, setActorEmail] = useState('');
+  // Keep privileged authority hidden until the API confirms the current role.
+  const [authority, setAuthority] = useState<Authority>({ role: '', unlimited: false, discountLimitPercent: 0 });
 
   // Data
-  const [users, setUsers] = useState<UserRecord[]>(FALLBACK_USERS);
-  const [locations, setLocations] = useState<LocationRecord[]>(FALLBACK_LOCATIONS);
-  const [history, setHistory] = useState<HistoryEntry[]>(FALLBACK_HISTORY);
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [locations, setLocations] = useState<LocationRecord[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   // Filters
   const [search, setSearch] = useState('');
@@ -247,12 +222,12 @@ export default function DiscountLimitsAdmin() {
         if (authData?.data) setAuthority(authData.data);
         if (Array.isArray(usersData?.data) && usersData.data.length > 0) {
           setUsers(usersData.data.filter((u: UserRecord) => u.email.toLowerCase() !== session.user?.email.toLowerCase()));
-          setHistory([]); // demo history doesn't belong to real accounts
+          setHistory([]);
         }
         if (Array.isArray(locsData?.data) && locsData.data.length > 0) setLocations(locsData.data);
       })
       .catch(() => {
-        // API not reachable: keep the demo data
+        // Keep empty states when the API is unavailable; never present sample users as live data.
       });
   }, []);
 
@@ -305,9 +280,10 @@ export default function DiscountLimitsAdmin() {
   }, [cashiers]);
 
   // ---------- saving ----------
-  /** Saves one limit. With a signed-in session it goes to the API; in the demo it updates locally. */
+  /** Saves one limit through the API; never report a local-only change as persisted. */
   const saveLimit = async (u: UserRecord, value: number, why: string): Promise<string | null> => {
-    if (token) {
+    if (!token) return 'Sign in again before changing discount limits.';
+    {
       try {
         const res = await fetch(`${API_BASE}/users/${u.id}/discount-limit`, {
           method: 'PATCH',
@@ -446,7 +422,7 @@ export default function DiscountLimitsAdmin() {
   const recent = history.slice(0, 5);
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} app-page`}>
       <header className={styles.header}>
         <div>
           <h1>Discount Limits</h1>

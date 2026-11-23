@@ -103,7 +103,7 @@ export function getSettingGroups(role: string): SettingGroup[] {
   // Store manager and admin: store rules (both run stores, attendance and returns)
   if (isStoreManager || isAdmin) {
     groups.push({
-      id: 'store', title: 'Store rules', description: isAdmin ? 'Alerts, receipt text and attendance for your stores.' : 'Alerts, receipt text and attendance for Downtown Store.',
+      id: 'store', title: 'Store rules', description: isAdmin ? 'Alerts, receipt text and attendance for your stores.' : 'Alerts, receipt text and attendance for your assigned locations.',
       items: [
         { id: 'stock', icon: 'box', title: 'Stock & cash alerts', description: 'When to warn about low stock or a full cash drawer', summary: (p) => `Low stock at ${p.lowStockBuffer} units` },
         { id: 'receipt', icon: 'receipt', title: 'Receipt text', description: 'Tagline and return policy printed on receipts', summary: (p) => short(p.receiptHeaderTagline, 28) },
@@ -288,8 +288,8 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
               <b>Premium Retail</b>
               <div>{prefs.receiptHeaderTagline || ' '}</div>
               <hr />
-              <div className={styles.receiptLine}><span>1 × Sample item</span><span>₹499.00</span></div>
-              <div className={styles.receiptLine}><span>Total</span><span>₹499.00</span></div>
+              <div className={styles.receiptLine}><span>1 × Product name</span><span>₹0.00</span></div>
+              <div className={styles.receiptLine}><span>Total</span><span>₹0.00</span></div>
               <hr />
               <div>{prefs.receiptFooterReturnPolicy || ' '}</div>
             </div>

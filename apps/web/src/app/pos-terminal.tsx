@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
+import { clearStoredSession, decodeJwt, getStoredSession, setStoredSession } from '@/lib/auth';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -114,30 +114,6 @@ function productGlyph(product: Product) {
 
 const OFFLINE_DB_NAME = 'premium-retail-pos-offline';
 const OFFLINE_STORE_NAME = 'sales';
-
-const DEMO_PRODUCTS: Product[] = [
-  { id: 'demo-coffee', name: 'Arabica Ground Coffee', category: { id: 'demo-beverages', name: 'Beverages' }, baseUnit: 'packet', unitsPerCarton: 12, hasVariants: false, sellingPrice: '485.00', variants: [{ id: 'demo-v-coffee', sku: 'BEV-1048', barcode: '8901234567890', name: 'Medium roast · 250 g', isActive: true }] },
-  { id: 'demo-tea', name: 'Green Tea', category: { id: 'demo-beverages', name: 'Beverages' }, baseUnit: 'box', unitsPerCarton: 24, hasVariants: false, sellingPrice: '160.00', variants: [{ id: 'demo-v-tea', sku: 'BEV-1056', barcode: '8901234567906', name: 'Lemon · 25 bags', isActive: true }] },
-  { id: 'demo-shampoo', name: 'Herbal Shampoo', category: { id: 'demo-personal', name: 'Personal care' }, baseUnit: 'bottle', unitsPerCarton: 12, hasVariants: false, sellingPrice: '299.00', variants: [{ id: 'demo-v-shampoo', sku: 'PC-2031', barcode: '8901234567913', name: 'Aloe vera · 500 ml', isActive: true }] },
-  { id: 'demo-tissue', name: 'Facial Tissue Box', category: { id: 'demo-home', name: 'Home & living' }, baseUnit: 'box', unitsPerCarton: 12, hasVariants: false, sellingPrice: '120.00', variants: [{ id: 'demo-v-tissue', sku: 'HL-3108', barcode: '8901234567920', name: '2 ply · 100 sheets', isActive: true }] },
-  { id: 'demo-chips', name: 'Potato Chips', category: { id: 'demo-snacks', name: 'Snacks' }, baseUnit: 'packet', unitsPerCarton: 24, hasVariants: false, sellingPrice: '40.00', variants: [{ id: 'demo-v-chips', sku: 'SNK-4172', barcode: '8901234567937', name: 'Classic salted · 52 g', isActive: true }] },
-  { id: 'demo-honey', name: 'Organic Honey', category: { id: 'demo-pantry', name: 'Pantry' }, baseUnit: 'jar', unitsPerCarton: 6, hasVariants: false, sellingPrice: '345.00', variants: [{ id: 'demo-v-honey', sku: 'PAN-2201', barcode: '8901234567944', name: 'Pure & natural · 500 g', isActive: true }] },
-  { id: 'demo-water', name: 'Sparkling Water', category: { id: 'demo-beverages', name: 'Beverages' }, baseUnit: 'bottle', unitsPerCarton: 12, hasVariants: false, sellingPrice: '75.00', variants: [{ id: 'demo-v-water', sku: 'BEV-1082', barcode: '8901234567951', name: 'Lime · 750 ml', isActive: true }] },
-  { id: 'demo-pasta', name: 'Penne Pasta', category: { id: 'demo-pantry', name: 'Pantry' }, baseUnit: 'packet', unitsPerCarton: 20, hasVariants: false, sellingPrice: '95.00', variants: [{ id: 'demo-v-pasta', sku: 'PAN-2240', barcode: '8901234567968', name: 'Durum wheat · 500 g', isActive: true }] },
-  { id: 'demo-lotion', name: 'Daily Moisturizer', category: { id: 'demo-personal', name: 'Personal care' }, baseUnit: 'bottle', unitsPerCarton: 10, hasVariants: false, sellingPrice: '260.00', variants: [{ id: 'demo-v-lotion', sku: 'PC-2076', barcode: '8901234567975', name: 'Sensitive skin · 200 ml', isActive: true }] },
-];
-
-const DEMO_STOCK: Record<string, StockBalance> = {
-  'demo-v-coffee': { quantityBaseUnits: 27, formattedQuantity: '27 packets' },
-  'demo-v-tea': { quantityBaseUnits: 8, formattedQuantity: '8 boxes', lowStock: true },
-  'demo-v-shampoo': { quantityBaseUnits: 24, formattedQuantity: '24 bottles' },
-  'demo-v-tissue': { quantityBaseUnits: 144, formattedQuantity: '144 boxes' },
-  'demo-v-chips': { quantityBaseUnits: 9, formattedQuantity: '9 packets', lowStock: true },
-  'demo-v-honey': { quantityBaseUnits: 36, formattedQuantity: '36 jars' },
-  'demo-v-water': { quantityBaseUnits: 0, formattedQuantity: '0 bottles' },
-  'demo-v-pasta': { quantityBaseUnits: -2, formattedQuantity: '-2 packets', negativeAvailable: true },
-  'demo-v-lotion': { quantityBaseUnits: 18, formattedQuantity: '18 bottles' },
-};
 
 function openOfflineSalesDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -313,7 +289,6 @@ export default function PosTerminal() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [offlineDrawerOpen, setOfflineDrawerOpen] = useState(false);
   const [attendanceStatus, setAttendanceStatus] = useState<'WORKING' | 'NOT_STARTED' | 'COMPLETED' | 'unknown'>('unknown');
-  const [demoCatalogActive, setDemoCatalogActive] = useState(false);
   const requestSequence = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const pendingSaleRef = useRef<{ key: string; body: string } | null>(null);
@@ -326,10 +301,7 @@ export default function PosTerminal() {
   );
 
   const categories = useMemo(
-    () => [...new Set([
-      'Beverages', 'Home & living', 'Pantry', 'Personal care', 'Snacks',
-      ...results.map((product) => product.category?.name).filter((name): name is string => Boolean(name))
-    ])].sort((a, b) => a.localeCompare(b)),
+    () => [...new Set(results.map((product) => product.category?.name).filter((name): name is string => Boolean(name)))].sort((a, b) => a.localeCompare(b)),
     [results],
   );
   const visibleVariants = useMemo(() => activeVariants
@@ -340,10 +312,10 @@ export default function PosTerminal() {
       return a.product.name.localeCompare(b.product.name) || a.variant.name.localeCompare(b.variant.name);
     }), [activeVariants, catalogSort, selectedCategory]);
 
-  const stockVariantIds = useMemo(() => demoCatalogActive ? [] : [...new Set([
+  const stockVariantIds = useMemo(() => [...new Set([
     ...results.flatMap((product) => product.variants.map((variant) => variant.id)),
     ...cart.map((line) => line.variantId),
-  ])].sort(), [cart, demoCatalogActive, results]);
+  ])].sort(), [cart, results]);
 
   const saleTotals = useMemo(() => {
     const gross = cart.reduce((sum, line) => sum + line.sellingPrice * line.quantity, 0);
@@ -524,14 +496,6 @@ export default function PosTerminal() {
       setResults([]);
       return;
     }
-    if (demoCatalogActive) {
-      const cleaned = query.trim().toLowerCase();
-      setResults(DEMO_PRODUCTS.filter((product) => !cleaned || product.name.toLowerCase().includes(cleaned)
-        || product.category?.name.toLowerCase().includes(cleaned)
-        || product.variants.some((variant) => [variant.sku, variant.barcode || '', variant.name].some((value) => value.toLowerCase().includes(cleaned)))));
-      setCatalogLoading(false);
-      return;
-    }
     setCatalogLoading(true);
     const timer = window.setTimeout(() => {
       searchProducts(query, token)
@@ -539,7 +503,7 @@ export default function PosTerminal() {
         .finally(() => setCatalogLoading(false));
     }, query.trim() ? 180 : 0);
     return () => window.clearTimeout(timer);
-  }, [demoCatalogActive, query, searchProducts, terminal, token]);
+  }, [query, searchProducts, terminal, token]);
 
   useEffect(() => {
     if (!token || !terminal || stockVariantIds.length === 0) return;
@@ -653,33 +617,6 @@ export default function PosTerminal() {
     window.setTimeout(() => searchRef.current?.focus(), 0);
   }
 
-  function activateDemoCashier() {
-    setToken('demo_token');
-    setTerminal({
-      location: { id: 'loc_downtown', name: 'Retail Store Downtown', type: 'STORE', currency: 'INR' },
-      cashierUserId: 'usr_cashier',
-    });
-    setDiscountLimit(25);
-    setSalesPermissions({ canCancelSales: true, canProcessReturns: true });
-    setResults(DEMO_PRODUCTS);
-    setStockBalances(DEMO_STOCK);
-    // Only establish a new stored session if none currently exists
-    const existing = getStoredSession();
-    if (!existing) {
-      setStoredSession({
-        accessToken: 'demo_token',
-        user: {
-          id: 'usr_cashier',
-          email: 'cashier@premiumretail.com',
-          role: 'CASHIER',
-          name: 'Cashier Station 01',
-          locationIds: ['loc_downtown'],
-        },
-        expiresAt: Date.now() + 86400 * 1000,
-      });
-    }
-  }
-
   async function loadTerminalSession(accessToken: string, cashierEmail = '') {
     const contextResponse = await fetch(`${API_BASE}/pos/terminal/context`, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -711,29 +648,13 @@ export default function PosTerminal() {
   useEffect(() => {
     const existing = getStoredSession();
     if (existing?.accessToken) {
-      if (existing.accessToken === 'demo_token') {
-        setToken('demo_token');
-        setTerminal({
-          location: { id: 'loc_downtown', name: 'Retail Store Downtown', type: 'STORE', currency: 'INR' },
-          cashierUserId: existing.user?.id || 'usr_cashier',
-        });
-        setDiscountLimit(25);
-        setSalesPermissions({ canCancelSales: true, canProcessReturns: true });
-        setResults(DEMO_PRODUCTS);
-        setStockBalances(DEMO_STOCK);
-      } else {
-        void loadTerminalSession(existing.accessToken, existing.user?.email).catch(() => {
-          setToken(existing.accessToken);
-          setTerminal({
-            location: { id: 'loc_downtown', name: 'Retail Store Downtown', type: 'STORE', currency: 'INR' },
-            cashierUserId: existing.user?.id || 'usr_cashier',
-          });
-          setResults(DEMO_PRODUCTS);
-          setStockBalances(DEMO_STOCK);
-        });
-      }
+      void loadTerminalSession(existing.accessToken, existing.user?.email).catch((caught: Error) => {
+        setError(caught.message || 'Could not load the cashier terminal. Please sign in again.');
+        setTerminal(null);
+        setToken('');
+      });
     } else {
-      activateDemoCashier();
+      setTerminal(null);
     }
   }, []);
 
@@ -752,14 +673,16 @@ export default function PosTerminal() {
       const payload = await response.json();
       const accessToken: string = payload.data.accessToken;
       await loadTerminalSession(accessToken, email);
+      const identity = decodeJwt(accessToken);
+      if (!identity?.id || !identity.role || !identity.email) throw new Error('The server returned an invalid sign-in response.');
       setStoredSession({
         accessToken,
         user: {
-          id: 'usr_cashier',
-          email,
-          role: 'CASHIER',
-          name: email.split('@')[0].toUpperCase(),
-          locationIds: ['loc_downtown'],
+          id: identity.id,
+          email: identity.email,
+          role: identity.role,
+          name: identity.email.split('@')[0].toUpperCase(),
+          locationIds: identity.locationIds || [],
         },
         expiresAt: Date.now() + 86400 * 1000,
       });
@@ -793,12 +716,6 @@ export default function PosTerminal() {
   async function removeLine(variantId: string) {
     const line = cart.find((item) => item.variantId === variantId);
     if (!line || !token || removingVariantId) return;
-    if (demoCatalogActive) {
-      setCart((current) => current.filter((item) => item.variantId !== variantId));
-      setLineDiscounts((current) => { const next = { ...current }; delete next[variantId]; return next; });
-      setNotice(`${line.productName} removed from demo basket`);
-      return;
-    }
     setRemovingVariantId(variantId);
     setError('');
     try {
@@ -820,11 +737,6 @@ export default function PosTerminal() {
 
   async function clearBasket() {
     if (!token || !cart.length || busy || saleRetryPending) return;
-    if (token === 'demo_token' || demoCatalogActive) {
-      setCart([]); setLineDiscounts({}); setBillDiscount(''); setCashTendered('');
-      setNotice('Basket cleared.');
-      return;
-    }
     if (!window.confirm('Clear this basket? Each removed item will be recorded in the cart audit.')) return;
     setBusy(true);
     setError('');
@@ -862,51 +774,6 @@ export default function PosTerminal() {
     setError('');
     setNotice('');
 
-    // If demo token or sample catalog is active, complete the sale immediately with a realistic receipt
-    if (token === 'demo_token' || demoCatalogActive) {
-      const gross = saleTotals.gross;
-      const discount = saleTotals.discount;
-      const net = saleTotals.net;
-      const tendered = paymentMethod === 'CASH' ? Number(cashTendered || net) : undefined;
-      const change = tendered && tendered >= net ? (tendered - net).toFixed(2) : '0.00';
-      const receiptId = `rcpt_${Date.now()}`;
-      const invNum = `INV-2026-${Math.floor(10000 + Math.random() * 90000)}`;
-      const syntheticReceipt: SaleReceipt = {
-        id: receiptId,
-        invoiceNumber: invNum,
-        grossTotal: gross.toFixed(2),
-        discountTotal: discount.toFixed(2),
-        netTotal: net.toFixed(2),
-        payment: {
-          method: paymentMethod,
-          amount: net.toFixed(2),
-          cashTenderedAmount: tendered?.toFixed(2),
-          changeGivenAmount: change,
-        },
-        lines: cart.map((line, idx) => ({
-          id: `line_${idx}`,
-          quantityBaseUnits: line.quantity,
-          unitPriceAtSale: line.sellingPrice.toFixed(2),
-          lineTotal: (line.sellingPrice * line.quantity).toFixed(2),
-          variant: {
-            sku: line.sku,
-            name: line.variantName,
-            product: { name: line.productName, baseUnit: line.baseUnit },
-          },
-        })),
-        createdAt: new Date().toISOString(),
-      };
-      setLastReceipt(syntheticReceipt);
-      setCart([]);
-      setLineDiscounts({});
-      setBillDiscount('');
-      setCashTendered('');
-      setTransactionReference('');
-      setCheckoutOpen(false);
-      setNotice(`Sale completed · ${invNum}`);
-      setBusy(false);
-      return;
-    }
     let retainRetryKey = false;
     try {
       if (!pendingSaleRef.current) {
@@ -1140,7 +1007,6 @@ export default function PosTerminal() {
     setPassword('');
     setError('');
     setNotice('');
-    setDemoCatalogActive(false);
     setOfflineDrawerOpen(false);
     window.location.href = '/login';
   }
@@ -1162,14 +1028,6 @@ export default function PosTerminal() {
             <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Opening Terminal…' : 'Unlock POS Terminal'} <span>→</span></button>
           </form>
           <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <button
-              type="button"
-              className="primary-button full-width"
-              style={{ background: '#f1f5f9', color: '#1e293b', border: '1px solid #cbd5e1' }}
-              onClick={activateDemoCashier}
-            >
-              Launch Standalone Demo Terminal
-            </button>
             <a
               href="/login?returnUrl=/"
               style={{ textAlign: 'center', fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, padding: '6px' }}
@@ -1213,7 +1071,7 @@ export default function PosTerminal() {
           <section className="catalog-browser">
             <div className="catalog-heading">
               <div><div className="eyebrow">SALES FLOOR</div><h1>Products <span>({results.length})</span></h1></div>
-              <div className="catalog-controls"><button className={`catalog-mode-button ${demoCatalogActive ? 'demo-active' : ''}`} onClick={() => { const next = !demoCatalogActive; setDemoCatalogActive(next); setSelectedCategory('All categories'); setQuery(''); setError(''); if (next) setStockBalances(DEMO_STOCK); else setStockBalances({}); }} aria-pressed={demoCatalogActive}>{demoCatalogActive ? 'Use live catalogue' : 'Preview demo data'}</button><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
+              <div className="catalog-controls"><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
             </div>
             <div className="category-chips" aria-label="Product categories">
               <button className={selectedCategory === 'All categories' ? 'active' : ''} onClick={() => setSelectedCategory('All categories')}>All categories</button>
@@ -1324,13 +1182,12 @@ export default function PosTerminal() {
       </div>
       {checkoutOpen && <div className="checkout-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCheckoutOpen(false); }}>
         <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-          <header><div><div className="eyebrow">{demoCatalogActive ? 'DEMO · NO SALE WILL BE RECORDED' : 'PAYMENT'}</div><h2 id="checkout-title">Complete sale</h2><p>{demoCatalogActive ? 'Switch to the live catalogue to process a real customer sale.' : 'Review tender and confirm the amount received.'}</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout">×</button></header>
+          <header><div><div className="eyebrow">PAYMENT</div><h2 id="checkout-title">Complete sale</h2><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout">×</button></header>
           <div className="checkout-due"><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
           <label className="payment-select">Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
           {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{[100, 200, 500, 2000].map((amount) => <button key={amount} onClick={() => setCashTendered(String(amount))}>₹{amount}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
-          {demoCatalogActive && <div className="demo-checkout-note">Sample items and stock are for display only. Checkout is disabled in demo mode.</div>}
           {error && <div className="alert error">{error}</div>}
-          <button className="checkout-button" disabled={demoCatalogActive || busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{demoCatalogActive ? 'Demo only · checkout disabled' : busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span>→</span></button>
+          <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span>→</span></button>
         </section>
       </div>}
       {lastReceipt && <div className="receipt-overlay" role="dialog" aria-modal="true" aria-label="Sale receipt"><section className="receipt-card"><div className="eyebrow">{terminal?.location.name}</div><h2>{lastReceipt.invoiceNumber}</h2><p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>{lastReceipt.lines.map((line, index) => <div className="receipt-line" key={`${line.variant.sku}-${index}`}><span>{line.variant.product.name} · {line.variant.name}<small>{line.quantityBaseUnits} {line.variant.product.baseUnit} × {formatMoney(line.unitPriceAtSale)} · {line.variant.sku}</small></span><strong>{formatMoney(line.lineTotal)}</strong></div>)}<div className="receipt-line"><span>Subtotal</span><strong>{formatMoney(lastReceipt.grossTotal)}</strong></div><div className="receipt-line"><span>Discount</span><strong>−{formatMoney(lastReceipt.discountTotal)}</strong></div><div className="receipt-line receipt-total"><span>Total paid · {lastReceipt.payment?.method}</span><strong>{formatMoney(lastReceipt.netTotal)}</strong></div>{lastReceipt.payment?.cashTenderedAmount && <div className="receipt-line"><span>Cash tendered</span><strong>{formatMoney(lastReceipt.payment.cashTenderedAmount)}</strong></div>}{lastReceipt.payment?.changeGivenAmount && Number(lastReceipt.payment.changeGivenAmount) > 0 && <div className="receipt-line"><span>Change</span><strong>{formatMoney(lastReceipt.payment.changeGivenAmount)}</strong></div>}<div className="receipt-actions"><button className="checkout-button" onClick={() => window.print()}>Print receipt</button><button className="text-button" onClick={() => setLastReceipt(null)}>Close</button></div></section></div>}

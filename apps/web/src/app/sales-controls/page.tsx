@@ -74,138 +74,6 @@ type ReturnLineSelection = {
   inspectionNotes: string;
 };
 
-// Fallback demo mock invoices to support comprehensive testing
-const DEMO_INVOICES: Record<string, Invoice> = {
-  'INV-2026-0842': {
-    id: 'inv_0842',
-    invoiceNumber: 'INV-2026-0842',
-    status: 'FINALIZED',
-    cashierName: 'Rajesh Kumar (Cashier)',
-    location: {
-      name: 'Downtown Store',
-      company: { currency: 'INR' },
-    },
-    createdAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    cancelledAt: null,
-    cancelledByUserId: null,
-    cancellationReason: null,
-    grossTotal: '1130.00',
-    discountTotal: '0.00',
-    netTotal: '1130.00',
-    payment: { method: 'Cash' },
-    lines: [
-      {
-        id: 'line_1',
-        quantityBaseUnits: 2,
-        returnedQuantityBaseUnits: 0,
-        unitPrice: 485.00,
-        variant: {
-          sku: 'BEV-1048',
-          name: 'Medium roast - 250 g',
-          product: { name: 'Arabica Ground Coffee', baseUnit: 'pack' },
-        },
-      },
-      {
-        id: 'line_2',
-        quantityBaseUnits: 1,
-        returnedQuantityBaseUnits: 0,
-        unitPrice: 160.00,
-        variant: {
-          sku: 'BEV-1056',
-          name: 'Lemon Mint - 25 bags',
-          product: { name: 'Green Tea Bags', baseUnit: 'pack' },
-        },
-      },
-    ],
-    returns: [],
-    permissions: { canCancelSales: true, canProcessReturns: true },
-  },
-  'INV-2026-0711': {
-    id: 'inv_0711',
-    invoiceNumber: 'INV-2026-0711',
-    status: 'FINALIZED',
-    cashierName: 'Anita Sharma (Cashier)',
-    location: {
-      name: 'North Mall',
-      company: { currency: 'INR' },
-    },
-    createdAt: new Date(Date.now() - 28 * 3600 * 1000).toISOString(),
-    cancelledAt: null,
-    cancelledByUserId: null,
-    cancellationReason: null,
-    grossTotal: '680.00',
-    discountTotal: '68.00',
-    netTotal: '612.00',
-    payment: { method: 'Card' },
-    lines: [
-      {
-        id: 'line_3',
-        quantityBaseUnits: 5,
-        returnedQuantityBaseUnits: 1,
-        unitPrice: 40.00,
-        variant: {
-          sku: 'SNK-4172',
-          name: 'Classic salted - 52 g',
-          product: { name: 'Potato Chips', baseUnit: 'pack' },
-        },
-      },
-      {
-        id: 'line_4',
-        quantityBaseUnits: 2,
-        returnedQuantityBaseUnits: 0,
-        unitPrice: 240.00,
-        variant: {
-          sku: 'SNK-4180',
-          name: '72% Cacao - 100 g',
-          product: { name: 'Organic Dark Chocolate', baseUnit: 'pack' },
-        },
-      },
-    ],
-    returns: [
-      {
-        returnNumber: 'RET-2026-0041',
-        createdAt: new Date(Date.now() - 10 * 3600 * 1000).toISOString(),
-        itemsSummary: '1x Potato Chips (Classic salted)',
-        refund: { amount: '36.00', method: 'Card', reference: 'REF-TXN-9021' },
-      },
-    ],
-    permissions: { canCancelSales: true, canProcessReturns: true },
-  },
-  'INV-2026-0600': {
-    id: 'inv_0600',
-    invoiceNumber: 'INV-2026-0600',
-    status: 'CANCELLED',
-    cashierName: 'Amit Verma (Cashier)',
-    location: {
-      name: 'West End Outlet',
-      company: { currency: 'INR' },
-    },
-    createdAt: new Date(Date.now() - 72 * 3600 * 1000).toISOString(),
-    cancelledAt: new Date(Date.now() - 71 * 3600 * 1000).toISOString(),
-    cancelledByUserId: 'Vikram Mehta (Store Supervisor)',
-    cancellationReason: 'Customer billing error: Duplicate payment processed by terminal',
-    grossTotal: '598.00',
-    discountTotal: '0.00',
-    netTotal: '598.00',
-    payment: { method: 'Card' },
-    lines: [
-      {
-        id: 'line_5',
-        quantityBaseUnits: 2,
-        returnedQuantityBaseUnits: 0,
-        unitPrice: 299.00,
-        variant: {
-          sku: 'PC-2031',
-          name: 'Aloe vera - 500 ml',
-          product: { name: 'Herbal Shampoo', baseUnit: 'bottle' },
-        },
-      },
-    ],
-    returns: [],
-    permissions: { canCancelSales: true, canProcessReturns: true },
-  },
-};
-
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const icons: Record<string, React.ReactNode> = {
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
@@ -256,21 +124,17 @@ const CANCEL_REASONS = [
 
 export default function SalesControlsPage() {
   // Auth state
-  const [email, setEmail] = useState('manager.downtown@premiumretail.com');
-  const [password, setPassword] = useState('Password123!');
-  const [token, setToken] = useState<string>('demo_token');
-  const [permissions, setPermissions] = useState<SalePermissions | null>({
-    role: 'STORE_MANAGER',
-    canCancelSales: true,
-    canProcessReturns: true,
-  });
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [token, setToken] = useState<string>('');
+  const [permissions, setPermissions] = useState<SalePermissions | null>(null);
 
-  // Bills seen in this session (demo bills + any loaded from the server), newest first
-  const [knownInvoices, setKnownInvoices] = useState<Invoice[]>(Object.values(DEMO_INVOICES));
+  // Invoices looked up from the server during this session, newest first
+  const [knownInvoices, setKnownInvoices] = useState<Invoice[]>([]);
 
   // Invoice lookup state
   const [invoiceNumber, setInvoiceNumber] = useState('');
-  const [invoice, setInvoiceState] = useState<Invoice | null>(DEMO_INVOICES['INV-2026-0842']);
+  const [invoice, setInvoiceState] = useState<Invoice | null>(null);
 
   const [activeTab, setActiveTab] = useState<'return' | 'cancel'>('return');
 
@@ -308,9 +172,10 @@ export default function SalesControlsPage() {
     const session = getStoredSession();
     if (session?.accessToken) {
       setToken(session.accessToken);
-      if (session.user.role === 'SUPER_ADMIN' || session.user.role === 'STORE_MANAGER') {
-        setPermissions({ role: session.user.role, canCancelSales: true, canProcessReturns: true });
-      }
+      fetch(`${API_BASE}/users/me/sales-permissions`, { headers: { Authorization: `Bearer ${session.accessToken}` }, cache: 'no-store' })
+        .then(async (response) => { if (!response.ok) throw new Error('Your sales permissions could not be verified.'); return response.json(); })
+        .then((body) => setPermissions(body.data as SalePermissions))
+        .catch((cause) => setError(cause instanceof Error ? cause.message : 'Your sales permissions could not be verified.'));
     }
   }, []);
 
@@ -324,7 +189,7 @@ export default function SalesControlsPage() {
         selected: false,
         quantity: remaining > 0 ? 1 : 0,
         disposition: 'RESTOCKED',
-        inspectionNotes: 'Packaging intact, unopened, eligible for resale.',
+        inspectionNotes: '',
       };
     });
     setReturnLines(initialLines);
@@ -360,15 +225,7 @@ export default function SalesControlsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      if (!res.ok) {
-        if (email.toLowerCase().includes('manager') || email.toLowerCase().includes('admin')) {
-          setToken('demo_token');
-          setPermissions({ role: 'STORE_MANAGER', canCancelSales: true, canProcessReturns: true });
-          setNotice('Signed in with demo supervisor permissions.');
-          return;
-        }
-        throw new Error('Invalid credentials');
-      }
+      if (!res.ok) throw new Error('Sign-in failed. Check the credentials and API connection.');
       const data = await res.json();
       const accessToken: string = data.data.accessToken;
       const permRes = await fetch(`${API_BASE}/users/me/sales-permissions`, {
@@ -384,10 +241,8 @@ export default function SalesControlsPage() {
       setPermissions(ownPerms);
       setPassword('');
       setNotice('Signed in. Your permissions were checked by the server.');
-    } catch {
-      setToken('demo_token');
-      setPermissions({ role: 'STORE_MANAGER', canCancelSales: true, canProcessReturns: true });
-      setNotice('Server unavailable. Demo supervisor mode is on for testing.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not sign in. Check the API connection.');
     } finally {
       setBusy(false);
     }
@@ -405,25 +260,17 @@ export default function SalesControlsPage() {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       });
-      if (res.ok) {
-        const found = (await res.json()).data as Invoice;
-        setInvoice(found);
-        setInvoiceNumber('');
-        setNotice(`Opened ${found.invoiceNumber} from the server.`);
-        setBusy(false);
-        return;
-      }
-    } catch {
-      // Server unavailable: fall back to bills already on this page
-    }
-    const local = knownInvoices.find((i) => i.invoiceNumber === query) ?? DEMO_INVOICES[query];
-    if (local) {
-      setInvoice(local);
+      if (!res.ok) throw new Error(res.status === 404 ? `No bill called "${query}" was found.` : 'The server could not load this bill.');
+      const found = (await res.json()).data as Invoice;
+      setInvoice(found);
       setInvoiceNumber('');
-    } else {
-      setError(`No bill called "${query}" was found. Check the number on the receipt.`);
+      setNotice(`Opened ${found.invoiceNumber} from the server.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load that bill from the server.');
+    } finally {
+      setInvoiceNumber('');
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   const calculatedReturnRefund = useMemo(() => {
@@ -443,7 +290,7 @@ export default function SalesControlsPage() {
     setBusy(true);
     setError('');
     try {
-      if (token !== 'demo_token') {
+      {
         const res = await fetch(`${API_BASE}/sales/${invoice.id}/cancel`, {
           method: 'PATCH',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
@@ -455,19 +302,14 @@ export default function SalesControlsPage() {
           }),
         });
         if (!res.ok) {
-          const body = await res.json();
+          const body = await res.json().catch(() => ({}));
           throw new Error(body.message || 'The server could not cancel this bill');
         }
+        const refreshed = await fetch(`${API_BASE}/sales/invoice/${encodeURIComponent(invoice.invoiceNumber)}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+        if (refreshed.ok) setInvoice((await refreshed.json()).data as Invoice);
       }
-      setInvoice({
-        ...invoice,
-        status: 'CANCELLED',
-        cancelledAt: new Date().toISOString(),
-        cancelledByUserId: permissions?.role || 'STORE_SUPERVISOR',
-        cancellationReason: finalReason,
-      });
       setCancelConfirmModalOpen(false);
-      setNotice(`${invoice.invoiceNumber} is cancelled. Refund of ${currency(invoice.netTotal)} recorded and all items are back in stock.`);
+      setNotice(`${invoice.invoiceNumber} cancellation was recorded by the server.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not cancel this bill');
     } finally {
@@ -489,25 +331,23 @@ export default function SalesControlsPage() {
     setBusy(true);
     setError('');
     try {
-      const returnNumber = `RET-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-      const refundAmount = calculatedReturnRefund.toFixed(2);
-      const itemsSummaryList: string[] = [];
-      const updatedLines = invoice.lines.map((line) => {
-        const sel = returnLines[line.id];
-        if (sel && sel.selected) {
-          itemsSummaryList.push(`${sel.quantity}x ${line.variant.product.name} (${sel.disposition === 'RESTOCKED' ? 'back on shelf' : 'set aside'})`);
-          return { ...line, returnedQuantityBaseUnits: line.returnedQuantityBaseUnits + sel.quantity };
-        }
-        return line;
+      const res = await fetch(`${API_BASE}/sales/${invoice.id}/returns`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+        body: JSON.stringify({
+          reason: selectedLineEntries.map(([id, selection]) => `${id}: ${selection.inspectionNotes}`).join('; '),
+          refundMethod: returnRefundMethod,
+          ...(returnRefundRef.trim() ? { refundReference: returnRefundRef.trim() } : {}),
+          lines: selectedLineEntries.map(([saleLineId, selection]) => ({ saleLineId, quantityBaseUnits: selection.quantity, disposition: selection.disposition, inspectionNotes: selection.inspectionNotes.trim() })),
+        }),
       });
-      const newReturnRecord: SaleReturnRecord = {
-        returnNumber,
-        createdAt: new Date().toISOString(),
-        itemsSummary: itemsSummaryList.join(', '),
-        refund: { amount: refundAmount, method: returnRefundMethod, reference: returnRefundRef.trim() || undefined },
-      };
-      setInvoice({ ...invoice, lines: updatedLines, returns: [newReturnRecord, ...invoice.returns] });
-      setNotice(`Return ${returnNumber} saved. Give the customer ${currency(refundAmount)} back.`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || 'The server could not record this return.');
+      }
+      const refreshed = await fetch(`${API_BASE}/sales/invoice/${encodeURIComponent(invoice.invoiceNumber)}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+      if (refreshed.ok) setInvoice((await refreshed.json()).data as Invoice);
+      setNotice('Return recorded by the server.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not record the return');
     } finally {
@@ -533,7 +373,7 @@ export default function SalesControlsPage() {
   // ---------- Sign-in gate ----------
   if (!token) {
     return (
-      <div className={styles.page}>
+      <div className={`${styles.page} app-page`}>
         <div className={styles.gate}>
           <span className={styles.gateIcon}><Icon name="shield" size={26} /></span>
           <h1>Supervisor sign-in</h1>
@@ -543,18 +383,6 @@ export default function SalesControlsPage() {
             <label className={styles.field}><span>Email</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
             <label className={styles.field}><span>Password</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
             <button type="submit" disabled={busy} className={styles.primaryButton}>{busy ? 'Signing in…' : 'Sign in'}</button>
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={() => {
-                setToken('demo_token');
-                setPermissions({ role: 'STORE_MANAGER', canCancelSales: true, canProcessReturns: true });
-                setInvoice(DEMO_INVOICES['INV-2026-0842']);
-                setNotice('Demo supervisor mode is on.');
-              }}
-            >
-              Continue with demo store manager
-            </button>
           </form>
         </div>
       </div>
@@ -562,7 +390,7 @@ export default function SalesControlsPage() {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} app-page`}>
       {/* ---------- Header ---------- */}
       <header className={styles.header}>
         <div>
@@ -787,8 +615,8 @@ export default function SalesControlsPage() {
                                   <div className={styles.condition}>
                                     <small>Condition</small>
                                     <div className={styles.toggle} role="group" aria-label="Item condition">
-                                      <button type="button" className={sel.disposition === 'RESTOCKED' ? styles.toggleGood : ''} onClick={() => updateLine(line.id, { disposition: 'RESTOCKED', inspectionNotes: sel.inspectionNotes || 'Packaging intact, unopened, eligible for resale.' })} aria-pressed={sel.disposition === 'RESTOCKED'}>Good, back on shelf</button>
-                                      <button type="button" className={sel.disposition === 'QUARANTINED' ? styles.toggleBad : ''} onClick={() => updateLine(line.id, { disposition: 'QUARANTINED', inspectionNotes: sel.inspectionNotes === 'Packaging intact, unopened, eligible for resale.' ? '' : sel.inspectionNotes })} aria-pressed={sel.disposition === 'QUARANTINED'}>Damaged, set aside</button>
+                                      <button type="button" className={sel.disposition === 'RESTOCKED' ? styles.toggleGood : ''} onClick={() => updateLine(line.id, { disposition: 'RESTOCKED' })} aria-pressed={sel.disposition === 'RESTOCKED'}>Good, back on shelf</button>
+                                      <button type="button" className={sel.disposition === 'QUARANTINED' ? styles.toggleBad : ''} onClick={() => updateLine(line.id, { disposition: 'QUARANTINED' })} aria-pressed={sel.disposition === 'QUARANTINED'}>Damaged, set aside</button>
                                     </div>
                                   </div>
                                 </div>

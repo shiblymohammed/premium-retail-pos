@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
+import { getStoredSession } from '@/lib/auth';
 import styles from './products.module.css';
+
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
 interface ProductItem {
   id: number;
@@ -22,189 +25,6 @@ interface ProductItem {
   packaging: string;
   status: 'Healthy' | 'Low Stock' | 'Negative';
 }
-
-const initialProducts: ProductItem[] = [
-  {
-    id: 1,
-    name: 'Arabica Ground Coffee',
-    variant: 'Medium roast - 250 g',
-    sku: 'BEV-1048',
-    barcode: '8901234567890',
-    category: 'Beverages',
-    location: 'Downtown Store',
-    price: 485.00,
-    availableStock: { cartons: 2, loose: 3 },
-    totalUnits: 27,
-    unitsPerCarton: 12,
-    inTransit: 36,
-    reserved: 6,
-    quarantined: 2,
-    packaging: 'Carton (12)',
-    status: 'Healthy'
-  },
-  {
-    id: 2,
-    name: 'Green Tea Bags',
-    variant: 'Lemon Mint - 25 bags',
-    sku: 'BEV-1056',
-    barcode: '8901234567906',
-    category: 'Beverages',
-    location: 'North Mall',
-    price: 160.00,
-    availableStock: { cartons: 0, loose: 8 },
-    totalUnits: 8,
-    unitsPerCarton: 12,
-    inTransit: 24,
-    reserved: 4,
-    quarantined: 0,
-    packaging: 'Carton (12)',
-    status: 'Low Stock'
-  },
-  {
-    id: 3,
-    name: 'Herbal Shampoo',
-    variant: 'Aloe vera - 500 ml',
-    sku: 'PC-2031',
-    barcode: '8901234567913',
-    category: 'Personal care',
-    location: 'West End Outlet',
-    price: 299.00,
-    availableStock: { cartons: 0, loose: -2 },
-    totalUnits: -2,
-    unitsPerCarton: 1,
-    inTransit: 10,
-    reserved: 0,
-    quarantined: 0,
-    packaging: 'Packet-Only',
-    status: 'Negative'
-  },
-  {
-    id: 4,
-    name: 'Facial Tissue Box',
-    variant: '2 ply - 100 sheets',
-    sku: 'HL-J108',
-    barcode: '8901234567920',
-    category: 'Home & living',
-    location: 'Central Warehouse',
-    price: 120.00,
-    availableStock: { cartons: 12, loose: 0 },
-    totalUnits: 144,
-    unitsPerCarton: 12,
-    inTransit: 48,
-    reserved: 24,
-    quarantined: 6,
-    packaging: 'Carton (12)',
-    status: 'Healthy'
-  },
-  {
-    id: 5,
-    name: 'Potato Chips',
-    variant: 'Classic salted - 52 g',
-    sku: 'SNK-4172',
-    barcode: '8901234567937',
-    category: 'Snacks',
-    location: 'Downtown Store',
-    price: 40.00,
-    availableStock: { cartons: 0, loose: 9 },
-    totalUnits: 9,
-    unitsPerCarton: 24,
-    inTransit: 36,
-    reserved: 12,
-    quarantined: 1,
-    packaging: 'Carton (24)',
-    status: 'Low Stock'
-  },
-  {
-    id: 6,
-    name: 'Basmati Royal Rice',
-    variant: 'Long Grain - 5 kg',
-    sku: 'PAN-5012',
-    barcode: '8901234567944',
-    category: 'Pantry',
-    location: 'Central Warehouse',
-    price: 750.00,
-    availableStock: { cartons: 15, loose: 4 },
-    totalUnits: 64,
-    unitsPerCarton: 4,
-    inTransit: 40,
-    reserved: 8,
-    quarantined: 0,
-    packaging: 'Carton (4)',
-    status: 'Healthy'
-  },
-  {
-    id: 7,
-    name: 'Cold Brew Concentrate',
-    variant: 'Dark Mocha - 500 ml',
-    sku: 'BEV-1062',
-    barcode: '8901234567951',
-    category: 'Beverages',
-    location: 'West End Outlet',
-    price: 320.00,
-    availableStock: { cartons: 1, loose: 2 },
-    totalUnits: 14,
-    unitsPerCarton: 12,
-    inTransit: 12,
-    reserved: 2,
-    quarantined: 0,
-    packaging: 'Carton (12)',
-    status: 'Healthy'
-  },
-  {
-    id: 8,
-    name: 'Olive Oil Extra Virgin',
-    variant: 'Cold Pressed - 1 L',
-    sku: 'PAN-5020',
-    barcode: '8901234567968',
-    category: 'Pantry',
-    location: 'Downtown Store',
-    price: 890.00,
-    availableStock: { cartons: 0, loose: 4 },
-    totalUnits: 4,
-    unitsPerCarton: 8,
-    inTransit: 16,
-    reserved: 2,
-    quarantined: 0,
-    packaging: 'Carton (8)',
-    status: 'Low Stock'
-  },
-  {
-    id: 9,
-    name: 'Organic Dark Chocolate',
-    variant: '72% Cacao - 100 g',
-    sku: 'SNK-4180',
-    barcode: '8901234567975',
-    category: 'Snacks',
-    location: 'North Mall',
-    price: 180.00,
-    availableStock: { cartons: 3, loose: 6 },
-    totalUnits: 42,
-    unitsPerCarton: 12,
-    inTransit: 24,
-    reserved: 8,
-    quarantined: 0,
-    packaging: 'Carton (12)',
-    status: 'Healthy'
-  },
-  {
-    id: 10,
-    name: 'Antibacterial Hand Wash',
-    variant: 'Citrus Fresh - 250 ml',
-    sku: 'PC-2045',
-    barcode: '8901234567982',
-    category: 'Personal care',
-    location: 'Downtown Store',
-    price: 145.00,
-    availableStock: { cartons: 0, loose: -1 },
-    totalUnits: -1,
-    unitsPerCarton: 10,
-    inTransit: 20,
-    reserved: 0,
-    quarantined: 0,
-    packaging: 'Carton (10)',
-    status: 'Negative'
-  }
-];
 
 type SortKey = 'name' | 'sku' | 'price' | 'stock' | 'category' | 'status';
 
@@ -258,7 +78,10 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 }
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState<ProductItem[]>(initialProducts);
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [selectedLocation, setSelectedLocation] = useState('All retail locations');
   const [selectedCategory, setSelectedCategory] = useState('All categories');
   const [selectedHealth, setSelectedHealth] = useState('All items');
@@ -282,13 +105,11 @@ export default function ProductsPage() {
   const [addProductModalOpen, setAddProductModalOpen] = useState(false);
   const [newProdName, setNewProdName] = useState('');
   const [newProdVariant, setNewProdVariant] = useState('');
-  const [newProdCategory, setNewProdCategory] = useState('Beverages');
+  const [newProdBaseUnit, setNewProdBaseUnit] = useState('');
   const [newProdSku, setNewProdSku] = useState('');
   const [newProdBarcode, setNewProdBarcode] = useState('');
-  const [newProdPrice, setNewProdPrice] = useState(199.00);
-  const [newProdCartonRatio, setNewProdCartonRatio] = useState(12);
-  const [newProdInitialUnits, setNewProdInitialUnits] = useState(24);
-  const [newProdLocation, setNewProdLocation] = useState('Downtown Store');
+  const [newProdPrice, setNewProdPrice] = useState(0);
+  const [newProdCartonRatio, setNewProdCartonRatio] = useState(1);
 
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
 
@@ -306,6 +127,66 @@ export default function ProductsPage() {
     return () => window.removeEventListener('premium-retail-location-change', syncLocation);
   }, []);
 
+  useEffect(() => {
+    const token = getStoredSession()?.accessToken;
+    if (!token) { setLoading(false); return; }
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      fetch(`${API_BASE}/products?isActive=true`, { headers, cache: 'no-store' }),
+      fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
+    ]).then(async ([productResponse, locationResponse]) => {
+      if (!productResponse.ok || !locationResponse.ok) throw new Error('Product catalogue could not be loaded from the API.');
+      const [productPayload, locationPayload] = await Promise.all([productResponse.json(), locationResponse.json()]);
+      const availableLocations = locationPayload.data || [];
+      const names = availableLocations.map((location: { name: string }) => location.name);
+      setLocations(names);
+      const catalogue: any[] = productPayload.data || [];
+      const variantIds = catalogue.flatMap((product) => product.variants || []).map((variant) => variant.id);
+      const selectedLocations = ['All retail locations', 'All locations'].includes(selectedLocation)
+        ? availableLocations
+        : availableLocations.filter((location: { name: string }) => location.name === selectedLocation);
+      const totals = new Map<string, { available: number; transit: number; reserved: number; quarantined: number }>();
+      for (const location of selectedLocations) {
+        for (let index = 0; index < variantIds.length; index += 100) {
+          const params = new URLSearchParams({ locationId: location.id, variantIds: variantIds.slice(index, index + 100).join(',') });
+          const balanceResponse = await fetch(`${API_BASE}/inventory/balances?${params}`, { headers, cache: 'no-store' });
+          if (!balanceResponse.ok) throw new Error('Inventory balances could not be loaded from the API.');
+          const balancePayload = await balanceResponse.json();
+          for (const balance of balancePayload.data || []) {
+            const current = totals.get(balance.variantId) || { available: 0, transit: 0, reserved: 0, quarantined: 0 };
+            const qty = Number(balance.quantityBaseUnits || 0);
+            if (balance.stockState === 'AVAILABLE') current.available += qty;
+            if (balance.stockState === 'IN_TRANSIT') current.transit += qty;
+            if (balance.stockState === 'RESERVED') current.reserved += qty;
+            if (balance.stockState === 'QUARANTINED') current.quarantined += qty;
+            totals.set(balance.variantId, current);
+          }
+        }
+      }
+      const rows: ProductItem[] = catalogue.flatMap((product: any, productIndex: number) =>
+        (product.variants || []).map((variant: any, variantIndex: number) => ({
+          ...(() => {
+            const stock = totals.get(variant.id) || { available: 0, transit: 0, reserved: 0, quarantined: 0 };
+            const packSize = Number(product.unitsPerCarton || 1);
+            const status = stock.available < 0 ? 'Negative' as const : stock.available <= Number(product.reorderLevel || 0) ? 'Low Stock' as const : 'Healthy' as const;
+            return { availableStock: { cartons: packSize > 1 ? Math.trunc(stock.available / packSize) : 0, loose: packSize > 1 ? stock.available % packSize : stock.available }, totalUnits: stock.available, inTransit: stock.transit, reserved: stock.reserved, quarantined: stock.quarantined, status };
+          })(),
+          id: productIndex * 1000 + variantIndex + 1,
+          name: product.name,
+          variant: variant.name || 'Default',
+          sku: variant.sku,
+          barcode: variant.barcode || '',
+          category: product.category?.name || 'Uncategorised',
+          location: selectedLocations.length === 1 ? selectedLocations[0].name : '',
+          price: Number(product.sellingPrice || 0),
+          unitsPerCarton: Number(product.unitsPerCarton || 1),
+          packaging: product.unitsPerCarton ? `Carton (${product.unitsPerCarton})` : 'Base unit',
+        })),
+      );
+      setProducts(rows);
+    }).catch((error) => showToast(error instanceof Error ? error.message : 'Could not load product data.', 'info')).finally(() => setLoading(false));
+  }, [reloadKey, selectedLocation]);
+
   const handleLocationChange = (loc: string) => {
     setSelectedLocation(loc);
     window.localStorage.setItem('premium-retail-location-scope', loc);
@@ -319,7 +200,7 @@ export default function ProductsPage() {
       if (
         selectedLocation !== 'All retail locations' &&
         selectedLocation !== 'All locations' &&
-        prod.location !== selectedLocation
+        (prod.location && prod.location !== selectedLocation)
       ) {
         return false;
       }
@@ -481,72 +362,33 @@ export default function ProductsPage() {
   const handleReplenishSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProductForReplenish) return;
-
-    const unitsAdded = selectedProductForReplenish.packaging.includes('Carton') 
-      ? replenishCartons * selectedProductForReplenish.unitsPerCarton 
-      : replenishCartons;
-
-    setProducts((prev) =>
-      prev.map((p) => {
-        if (p.id === selectedProductForReplenish.id) {
-          return {
-            ...p,
-            inTransit: p.inTransit + unitsAdded
-          };
-        }
-        return p;
-      })
-    );
-
-    showToast(`Replenishment transfer request created: ${unitsAdded} units (${replenishCartons} packs) dispatched in-transit to ${selectedProductForReplenish.location}.`, 'success');
-    setReplenishModalOpen(false);
+    showToast('No request was created. Create a stock transfer from the Transfers page.', 'info');
   };
 
   // Add New Product Variant
-  const handleAddProductSubmit = (e: React.FormEvent) => {
+  const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProdName.trim() || !newProdSku.trim()) {
       alert('Please fill out Product Name and SKU.');
       return;
     }
 
-    const cartons = newProdCartonRatio > 1 ? Math.floor(newProdInitialUnits / newProdCartonRatio) : 0;
-    const loose = newProdCartonRatio > 1 ? newProdInitialUnits % newProdCartonRatio : newProdInitialUnits;
-
-    let status: 'Healthy' | 'Low Stock' | 'Negative' = 'Healthy';
-    if (newProdInitialUnits < 0) status = 'Negative';
-    else if (newProdInitialUnits <= 10) status = 'Low Stock';
-
-    const newProd: ProductItem = {
-      id: Date.now(),
-      name: newProdName.trim(),
-      variant: newProdVariant.trim() || 'Standard pack',
-      sku: newProdSku.trim().toUpperCase(),
-      barcode: newProdBarcode.trim() || '890999' + Math.floor(1000000 + Math.random() * 9000000),
-      category: newProdCategory,
-      location: newProdLocation,
-      price: Number(newProdPrice) || 99.00,
-      availableStock: { cartons, loose },
-      totalUnits: Number(newProdInitialUnits) || 0,
-      unitsPerCarton: newProdCartonRatio > 1 ? newProdCartonRatio : 1,
-      inTransit: 0,
-      reserved: 0,
-      quarantined: 0,
-      packaging: newProdCartonRatio > 1 ? `Carton (${newProdCartonRatio})` : 'Packet-Only',
-      status
-    };
-
-    setProducts([newProd, ...products]);
-    showToast(`New SKU ${newProd.sku} successfully registered to ${newProd.location} catalogue.`, 'success');
-    setAddProductModalOpen(false);
-    // Reset fields
-    setNewProdName('');
-    setNewProdVariant('');
-    setNewProdSku('');
-    setNewProdBarcode('');
+    const token = getStoredSession()?.accessToken;
+    if (!token) return showToast('Sign in again before creating products.', 'info');
+    try {
+      const response = await fetch(`${API_BASE}/products`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newProdName.trim(), baseUnit: newProdBaseUnit.trim() || 'unit', unitsPerCarton: newProdCartonRatio > 1 ? newProdCartonRatio : undefined, hasVariants: true, variants: [{ name: newProdVariant.trim() || 'Default', sku: newProdSku.trim().toUpperCase(), barcode: newProdBarcode.trim() || undefined }], sellingPrice: Number(newProdPrice), purchasePrice: 0, priceChangeReason: 'Initial catalogue setup' }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'The server could not create this product.');
+      setAddProductModalOpen(false); setReloadKey((value) => value + 1);
+      setNewProdName(''); setNewProdVariant(''); setNewProdBaseUnit(''); setNewProdSku(''); setNewProdBarcode(''); setNewProdPrice(0); setNewProdCartonRatio(1);
+      showToast('Product saved to the catalogue. Add opening stock separately to set quantities.', 'success');
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Product could not be saved.', 'info'); }
   };
 
-  const categories = ['All categories', 'Beverages', 'Personal care', 'Home & living', 'Snacks', 'Pantry'];
+  const categories = ['All categories', ...Array.from(new Set(products.map((product) => product.category).filter(Boolean))).sort((a, b) => a.localeCompare(b))];
 
   // ---------- Derived figures for the statistic strip ----------
   const healthyCount = filteredProducts.filter((p) => p.status === 'Healthy').length;
@@ -604,7 +446,7 @@ export default function ProductsPage() {
 
   return (
     <div className={styles.appWrapper}>
-      <div className={styles.page}>
+      <div className={`${styles.page} app-page`}>
         {notification && (
           <div className={`${styles.toastNotification} ${styles[notification.type]}`} role="status">
             <Icon name="check" size={16} />
@@ -641,7 +483,7 @@ export default function ProductsPage() {
                 <div className={styles.filterMenu} role="dialog" aria-label="Filter products">
                   <div className={styles.menuHeading}>LOCATION</div>
                   <div className={styles.optionGrid}>
-                    {['All retail locations', 'Downtown Store', 'North Mall', 'West End Outlet', 'Central Warehouse'].map((loc) => (
+                    {['All retail locations', ...locations].map((loc) => (
                       <button key={loc} type="button" className={selectedLocation === loc ? styles.optionActive : ''} onClick={() => { handleLocationChange(loc); setCurrentPage(1); }}>{loc === 'All retail locations' ? 'All locations' : loc}</button>
                     ))}
                   </div>
@@ -1019,31 +861,8 @@ export default function ProductsPage() {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label>Category</label>
-                  <select
-                    value={newProdCategory}
-                    onChange={(e) => setNewProdCategory(e.target.value)}
-                    className={styles.modalSelect}
-                  >
-                    <option>Beverages</option>
-                    <option>Personal care</option>
-                    <option>Home & living</option>
-                    <option>Snacks</option>
-                    <option>Pantry</option>
-                  </select>
-                </div>
-                <div className={styles.formGroup}>
-                  <label>Retail Store Location</label>
-                  <select
-                    value={newProdLocation}
-                    onChange={(e) => setNewProdLocation(e.target.value)}
-                    className={styles.modalSelect}
-                  >
-                    <option>Downtown Store</option>
-                    <option>North Mall</option>
-                    <option>West End Outlet</option>
-                    <option>Central Warehouse</option>
-                  </select>
+                  <label>Base unit *</label>
+                  <input type="text" required placeholder="e.g. packet, bottle, kg" value={newProdBaseUnit} onChange={(e) => setNewProdBaseUnit(e.target.value)} className={styles.modalInput} />
                 </div>
               </div>
 
@@ -1096,20 +915,7 @@ export default function ProductsPage() {
                 </div>
               </div>
 
-              <div className={styles.formGroup}>
-                <label>Initial Available Stock (Packs):</label>
-                <input
-                  type="number"
-                  value={newProdInitialUnits}
-                  onChange={(e) => setNewProdInitialUnits(parseInt(e.target.value) || 0)}
-                  className={styles.modalInput}
-                />
-                <small className={styles.fieldHint}>
-                  {newProdCartonRatio > 1
-                    ? `Auto-converted: ${Math.floor(newProdInitialUnits / newProdCartonRatio)} cartons + ${newProdInitialUnits % newProdCartonRatio} loose packs.`
-                    : 'Tracked as loose packs.'}
-                </small>
-              </div>
+              <p className={styles.fieldHint}>This creates the product catalogue record only. Import opening stock separately to record quantities at each location.</p>
 
               <div className={styles.modalFooter}>
                 <button

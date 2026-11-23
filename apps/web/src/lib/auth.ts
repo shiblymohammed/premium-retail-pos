@@ -28,95 +28,41 @@ export const SESSION_STORAGE_KEY = 'premium-retail-auth-session';
 export const AUTH_CHANGE_EVENT = 'premium-retail-auth-change';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+let refreshInFlight: Promise<AuthSession | null> | null = null;
 
-export const ROLE_PRESETS = [
-  {
-    role: 'SUPER_ADMIN',
-    label: 'Super Admin',
-    email: 'admin@premiumretail.com',
-    password: 'SuperAdmin@123',
-    name: 'System Administrator',
-    description: 'Enterprise governance, company topology, global roles, system audit',
-    homeRoute: '/dashboard',
-  },
-  {
-    role: 'ADMIN',
-    label: 'Admin',
-    email: 'sysadmin@premiumretail.com',
-    password: 'Admin@123',
-    name: 'Regional Admin Director',
-    description: 'User management, store provisioning, discount caps, sales permissions',
-    homeRoute: '/admin/users',
-  },
-  {
-    role: 'STORE_MANAGER',
-    label: 'Store Manager',
-    email: 'manager@premiumretail.com',
-    password: 'Manager@123',
-    name: 'Asha Patel',
-    description: 'Store KPIs, inventory reorders, punch approvals, return authorizations',
-    homeRoute: '/dashboard',
-  },
-  {
-    role: 'CENTRAL_MANAGER',
-    label: 'Central Warehouse',
-    email: 'warehouse@premiumretail.com',
-    password: 'Warehouse@123',
-    name: 'Vikram Singh',
-    description: 'Central hub logistics, supplier receiving, bulk stock dispatches',
-    homeRoute: '/operations',
-  },
-  {
-    role: 'SUB_WAREHOUSE_MANAGER',
-    label: 'Sub Warehouse',
-    email: 'subwarehouse@premiumretail.com',
-    password: 'SubWarehouse@123',
-    name: 'Rajesh Kumar',
-    description: 'Regional depot transfers, store replenishment, local stock counts',
-    homeRoute: '/operations',
-  },
-  {
-    role: 'CASHIER',
-    label: 'Cashier',
-    email: 'cashier@premiumretail.com',
-    password: 'Cashier@123',
-    name: 'Ravi Menon',
-    description: 'High-speed barcode checkout, cash handling, attendance clock-in',
-    homeRoute: '/',
-  },
-  {
-    role: 'STAFF',
-    label: 'Staff Employee',
-    email: 'staff@premiumretail.com',
-    password: 'Staff@123',
-    name: 'Priya Sharma',
-    description: 'Floor staff check-in, rotating QR verification, salary advances',
-    homeRoute: '/attendance',
-  },
-] as const;
-
-export function decodeJwt(token: string): Partial<AuthUser> | null {
+function decodeJwtPayload(token: string): Record<string, any> | null {
   try {
     const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const base64Url = parts[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    if (parts.length !== 3) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const jsonPayload = decodeURIComponent(
       atob(base64)
         .split('')
         .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
         .join('')
     );
-    const parsed = JSON.parse(jsonPayload);
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
+
+export function decodeJwt(token: string): Partial<AuthUser> | null {
+  const parsed = decodeJwtPayload(token);
+  if (parsed) {
     return {
       id: parsed.sub || parsed.id,
       email: parsed.email,
       role: parsed.role,
       locationIds: parsed.locationIds || [],
     };
-  } catch {
-    return null;
   }
+  return null;
+}
+
+export function getJwtExpirationMs(token: string): number | undefined {
+  const exp = decodeJwtPayload(token)?.exp;
+  return Number.isFinite(exp) ? Number(exp) * 1000 : undefined;
 }
 
 export function getStoredSession(): AuthSession | null {
@@ -126,14 +72,73 @@ export function getStoredSession(): AuthSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as AuthSession;
     if (!parsed || !parsed.accessToken) return null;
-    if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
+    // Discard malformed sessions left by older local mock-login builds.
+    if (typeof parsed.accessToken !== 'string' || parsed.accessToken.split('.').length !== 3) {
       window.localStorage.removeItem(SESSION_STORAGE_KEY);
       return null;
+    }
+    const storedExpiresAt = parsed.expiresAt;
+    // The API's JWT exp claim is authoritative. Older clients stored a shorter
+    // fallback expiry, which incorrectly discarded otherwise valid sessions.
+    const tokenExpiresAt = getJwtExpirationMs(parsed.accessToken);
+    parsed.expiresAt = tokenExpiresAt ?? parsed.expiresAt;
+    if (parsed.expiresAt && Date.now() >= parsed.expiresAt && !parsed.refreshToken) {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+    if (tokenExpiresAt && tokenExpiresAt !== storedExpiresAt) {
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(parsed));
     }
     return parsed;
   } catch {
     return null;
   }
+}
+
+/** Refresh the current session once, even if several screens request renewal together. */
+export async function refreshStoredSession(current?: AuthSession | null): Promise<AuthSession | null> {
+  if (refreshInFlight) return refreshInFlight;
+  const session = current ?? getStoredSession();
+  if (!session?.refreshToken) return null;
+
+  refreshInFlight = (async () => {
+    try {
+      const response = await fetch(`${API_BASE}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+        cache: 'no-store',
+      });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      const accessToken = payload?.data?.accessToken;
+      const refreshToken = payload?.data?.refreshToken;
+      if (typeof accessToken !== 'string' || typeof refreshToken !== 'string') return null;
+
+      const claims = decodeJwt(accessToken);
+      const expiresAt = getJwtExpirationMs(accessToken);
+      if (!claims?.id || !claims.email || !claims.role || !expiresAt) return null;
+
+      const updated: AuthSession = {
+        accessToken,
+        refreshToken,
+        expiresAt,
+        user: {
+          ...session.user,
+          id: claims.id,
+          email: claims.email,
+          role: claims.role,
+          locationIds: claims.locationIds || [],
+        },
+      };
+      setStoredSession(updated);
+      return updated;
+    } catch {
+      return null;
+    }
+  })().finally(() => { refreshInFlight = null; });
+
+  return refreshInFlight;
 }
 
 export function setStoredSession(session: AuthSession): void {
@@ -162,7 +167,7 @@ export function clearStoredSession(): Promise<void> {
 }
 
 export async function revokeSession(accessToken: string) {
-  if (!accessToken || accessToken === 'demo_token') return;
+  if (!accessToken || accessToken.split('.').length !== 3) return;
   try {
     await fetch(`${API_BASE}/auth/logout`, {
       method: 'POST',

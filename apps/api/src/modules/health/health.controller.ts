@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Controller('health')
@@ -20,11 +20,11 @@ export class HealthController {
         timestamp: new Date().toISOString(),
       };
     } catch {
-      return {
+      throw new ServiceUnavailableException({
         status: 'degraded',
         database: 'disconnected',
         timestamp: new Date().toISOString(),
-      };
+      });
     }
   }
 }

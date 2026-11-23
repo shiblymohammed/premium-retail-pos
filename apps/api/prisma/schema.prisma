@@ -172,6 +172,8 @@ model User {
   saleReturnsProcessed    SaleReturn[]           @relation("SaleReturnProcessor")
   initiatedAuditSessions  AuditSession[]         @relation("AuditInitiator")
   approvedAuditSessions   AuditSession[]         @relation("AuditApprover")
+  enteredAuditCounts      AuditCountItem[]       @relation("AuditCountEntry")
+  enteredAuditRecounts    AuditCountItem[]       @relation("AuditRecountEntry")
   notifications           InAppNotification[]
 
   @@map("users")
@@ -767,26 +769,33 @@ model AuditSession {
 /// Individual count entry within an audit session
 /// Invariant 7: Counts do not alter stock until approved
 model AuditCountItem {
-  id                      String   @id @default(uuid())
-  auditSessionId          String   @map("audit_session_id")
-  variantId               String   @map("variant_id")
-  expectedQtyBase         Int      @map("expected_qty_base")
-  countedQtyBase          Int?     @map("counted_qty_base") // First count
-  recountQtyBase          Int?     @map("recount_qty_base") // Recount if triggered
-  approvedQtyBase         Int?     @map("approved_qty_base") // Final approved value
-  varianceBase            Int?     @map("variance_base")
-  requiresRecount         Boolean  @default(false) @map("requires_recount")
-  adjustmentApproved      Boolean  @default(false) @map("adjustment_approved")
-  recountThresholdPercent Decimal  @default(2.00) @map("recount_threshold_percent") @db.Decimal(5, 2)
-  recountThresholdUnits   Int      @default(5) @map("recount_threshold_units")
-  highCountAlertQty       Int?     @map("high_count_alert_qty")
-  highCountAlert          Boolean  @default(false) @map("high_count_alert")
-  variancePercent         Decimal? @map("variance_percent") @db.Decimal(8, 3)
+  id                      String    @id @default(uuid())
+  auditSessionId          String    @map("audit_session_id")
+  variantId               String    @map("variant_id")
+  expectedQtyBase         Int       @map("expected_qty_base")
+  countedQtyBase          Int?      @map("counted_qty_base") // First count
+  recountQtyBase          Int?      @map("recount_qty_base") // Recount if triggered
+  approvedQtyBase         Int?      @map("approved_qty_base") // Final approved value
+  varianceBase            Int?      @map("variance_base")
+  requiresRecount         Boolean   @default(false) @map("requires_recount")
+  adjustmentApproved      Boolean   @default(false) @map("adjustment_approved")
+  recountThresholdPercent Decimal   @default(2.00) @map("recount_threshold_percent") @db.Decimal(5, 2)
+  recountThresholdUnits   Int       @default(5) @map("recount_threshold_units")
+  highCountAlertQty       Int?      @map("high_count_alert_qty")
+  highCountAlert          Boolean   @default(false) @map("high_count_alert")
+  variancePercent         Decimal?  @map("variance_percent") @db.Decimal(8, 3)
   notes                   String?
+  countedByUserId         String?   @map("counted_by_user_id")
+  countedAt               DateTime? @map("counted_at")
+  recountedByUserId       String?   @map("recounted_by_user_id")
+  recountedAt             DateTime? @map("recounted_at")
+  recountRequestReason    String?   @map("recount_request_reason") @db.VarChar(500)
 
   // Relations
   auditSession AuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade)
   variant      Variant      @relation(fields: [variantId], references: [id])
+  countedBy    User?        @relation("AuditCountEntry", fields: [countedByUserId], references: [id], onDelete: SetNull)
+  recountedBy  User?        @relation("AuditRecountEntry", fields: [recountedByUserId], references: [id], onDelete: SetNull)
 
   @@unique([auditSessionId, variantId])
   @@map("audit_count_items")
@@ -913,9 +922,9 @@ model InAppNotification {
   dedupeKey String    @map("dedupe_key")
   type      String
   title     String
-  message   String   @db.Text
+  message   String    @db.Text
   href      String
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
   readAt    DateTime? @map("read_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

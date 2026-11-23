@@ -1,50 +1,70 @@
 import { LocationType } from '@prisma/client';
 import { AuditScheduler } from './audit.scheduler';
-import { AuditsService } from './audits.service';
 
-describe('AuditScheduler cadence', () => {
+describe('AuditScheduler reminders', () => {
   afterEach(() => jest.useRealTimers());
 
   async function runAt(instant: string, locations: Array<{ id: string; name: string; type: LocationType; dailyAuditTime: string; company: { timezone: string } }>) {
     jest.useFakeTimers().setSystemTime(new Date(instant));
     const prisma = {
       location: { findMany: jest.fn().mockResolvedValue(locations) },
-      user: { findFirst: jest.fn().mockResolvedValue({ id: 'system-actor' }) },
+      user: { findMany: jest.fn().mockResolvedValue([{ id: 'admin-id' }]) },
+      auditSession: { findFirst: jest.fn().mockResolvedValue(null) },
+      userLocationScope: { findMany: jest.fn().mockResolvedValue([{ userId: 'manager-id' }, { userId: 'counter-id' }]) },
+      inAppNotification: { upsert: jest.fn().mockResolvedValue({}) },
     };
-    const audits = { startScheduled: jest.fn().mockResolvedValue({ started: true }) };
-    const scheduler = new AuditScheduler(prisma as any, audits as unknown as AuditsService);
+    const scheduler = new AuditScheduler(prisma as any);
     await (scheduler as any).tick();
-    return audits.startScheduled.mock.calls;
+    return prisma;
   }
 
   const store = { id: 'store-id', name: 'Store', type: LocationType.RETAIL_STORE, dailyAuditTime: '19:00', company: { timezone: 'Asia/Kolkata' } };
   const warehouse = { id: 'warehouse-id', name: 'Warehouse', type: LocationType.MAIN_WAREHOUSE, dailyAuditTime: '19:00', company: { timezone: 'Asia/Kolkata' } };
 
-  it('starts daily stores after 7 PM and excludes warehouses on weekdays', async () => {
-    const calls = await runAt('2026-11-13T14:00:00.000Z', [store, warehouse]);
+  it('notifies the store team daily after 7 PM without auto-locking the store', async () => {
+    const prisma = await runAt('2026-11-13T14:00:00.000Z', [store, warehouse]);
 
-    expect(calls).toEqual([['store-id', '2026-11-13', '19:30', 'Fri', 'system-actor']]);
-  });
-
-  it('starts stores and warehouses after 7 PM on Sundays', async () => {
-    const calls = await runAt('2026-11-15T14:00:00.000Z', [store, warehouse]);
-
-    expect(calls).toEqual([
-      ['store-id', '2026-11-15', '19:30', 'Sun', 'system-actor'],
-      ['warehouse-id', '2026-11-15', '19:30', 'Sun', 'system-actor'],
+    expect(prisma.inAppNotification.upsert).toHaveBeenCalledTimes(3);
+    expect(prisma.inAppNotification.upsert.mock.calls.map(([input]) => input.create.dedupeKey)).toEqual([
+      'audit-due:store-id:2026-11-13',
+      'audit-due:store-id:2026-11-13',
+      'audit-due:store-id:2026-11-13',
     ]);
+    expect(prisma.auditSession.findFirst).toHaveBeenCalledTimes(1);
   });
 
-  it('waits until at least 7 PM local time', async () => {
-    const calls = await runAt('2026-11-15T13:29:00.000Z', [store, warehouse]);
+  it('notifies warehouse and store teams on Sunday after 7 PM', async () => {
+    const prisma = await runAt('2026-11-15T14:00:00.000Z', [store, warehouse]);
+    const keys = prisma.inAppNotification.upsert.mock.calls.map(([input]) => input.create.dedupeKey);
 
-    expect(calls).toHaveLength(0);
+    expect(keys).toContain('audit-due:store-id:2026-11-15');
+    expect(keys).toContain('audit-due:warehouse-id:2026-11-15');
   });
 
-  it('respects a configured later local start time', async () => {
+  it('does not notify before 7 PM, on warehouse weekdays, or before later configured times', async () => {
+    const beforeSeven = await runAt('2026-11-15T13:29:00.000Z', [store, warehouse]);
+    expect(beforeSeven.inAppNotification.upsert).not.toHaveBeenCalled();
+
+    const weekday = await runAt('2026-11-13T14:00:00.000Z', [warehouse]);
+    expect(weekday.inAppNotification.upsert).not.toHaveBeenCalled();
+
     const laterStore = { ...store, dailyAuditTime: '20:00' };
-    const calls = await runAt('2026-11-13T14:00:00.000Z', [laterStore]);
+    const beforeCustomTime = await runAt('2026-11-13T14:00:00.000Z', [laterStore]);
+    expect(beforeCustomTime.inAppNotification.upsert).not.toHaveBeenCalled();
+  });
 
-    expect(calls).toHaveLength(0);
+  it('does not create another due notification while an audit is already open', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-13T14:00:00.000Z'));
+    const prisma = {
+      location: { findMany: jest.fn().mockResolvedValue([store]) },
+      user: { findMany: jest.fn().mockResolvedValue([]) },
+      auditSession: { findFirst: jest.fn().mockResolvedValue({ id: 'active-audit' }) },
+      userLocationScope: { findMany: jest.fn() },
+      inAppNotification: { upsert: jest.fn() },
+    };
+    const scheduler = new AuditScheduler(prisma as any);
+    await (scheduler as any).tick();
+
+    expect(prisma.inAppNotification.upsert).not.toHaveBeenCalled();
   });
 });

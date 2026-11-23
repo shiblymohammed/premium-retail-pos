@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { NavGroup } from './nav-data';
 
 export interface SidebarProps {
@@ -12,28 +13,28 @@ export interface SidebarProps {
   handleSignOut: () => void;
 }
 
-/** Outline icons in the style of the reference sidebar. Keys match `NavLink.icon`. */
+/** Simple, bold retail/workspace symbols; each key maps to a navigation task. */
 const ICON_PATHS: Record<string, React.ReactNode> = {
-  pos: <><rect x="3.5" y="4" width="17" height="11" rx="2" /><path d="M8 20h8M12 15v5M7 8h5" /></>,
-  dashboard: <><rect x="3.5" y="3.5" width="7" height="7" rx="2" /><rect x="13.5" y="3.5" width="7" height="7" rx="2" /><rect x="3.5" y="13.5" width="7" height="7" rx="2" /><rect x="13.5" y="13.5" width="7" height="7" rx="2" /></>,
-  reports: <><path d="M5 20V12M10 20V6M15 20v-9M20 20V9" /></>,
-  products: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" /><path d="m4.5 7.7 7.5 4.2 7.5-4.2M12 12v9" /></>,
-  audits: <><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1M9 11l2 2 4-4M9 17h6" /></>,
-  transfers: <><path d="M4 8h15M15 4l4 4-4 4M20 16H5m4-4-4 4 4 4" /></>,
-  returns: <><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>,
-  oversight: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6" /></>,
-  attendance: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  pos: <><rect x="4" y="4" width="16" height="13" rx="2" /><path d="M8 21h8M12 17v4M8 9h8" /></>,
+  dashboard: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
+  reports: <><path d="M4 20h16M7 16v-4M12 16V6M17 16V9" /></>,
+  products: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" /><path d="m4 7.5 8 4.5 8-4.5M12 12v9" /></>,
+  audits: <><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1M8.5 13l2.3 2.3 4.7-5" /></>,
+  transfers: <><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4" /></>,
+  returns: <><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12h-2" /></>,
+  oversight: <><circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M17 15a5 5 0 0 1 4 5" /></>,
+  attendance: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></>,
   loans: <><rect x="3" y="6" width="18" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6.5 9.5v5M17.5 9.5v5" /></>,
-  settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></>,
-  users: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
-  company: <><path d="M3 21h18M5 21V8l7-4 7 4v13M9 21v-5h6v5M9 11h.01M15 11h.01" /></>,
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" /></>,
+  users: <><circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0M16 6a3 3 0 0 1 0 5M17 15a5 5 0 0 1 4 5" /></>,
+  company: <><path d="M4 20V8l8-4 8 4v12M2 20h20M9 20v-5h6v5M8 10h.01M16 10h.01" /></>,
   discount: <><path d="M19 5 5 19" /><circle cx="7" cy="7" r="2.5" /><circle cx="17" cy="17" r="2.5" /></>,
-  permissions: <><rect x="4.5" y="10.5" width="15" height="10" rx="2" /><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5M12 14.5v2" /></>,
+  permissions: <><path d="M12 3 20 6v5c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z" /><path d="m9 12 2 2 4-4" /></>,
   logout: <><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l4-4-4-4M14 12H3" /></>,
-  brand: <><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11Z" /><path d="M9 9.5h6M9 12.5h4" /></>,
+  brand: <><path d="M3 10h18l-2-6H5zM5 10v10h14V10M9 20v-6h6v6" /><path d="M3 10a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 2 0" /></>,
 };
 
-export function NavIcon({ name, size = 18 }: { name: string; size?: number }) {
+export function NavIcon({ name, size = 20 }: { name: string; size?: number }) {
   return (
     <svg
       width={size}
@@ -41,7 +42,7 @@ export function NavIcon({ name, size = 18 }: { name: string; size?: number }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="2.25"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -58,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   pathname,
   handleSignOut,
 }) => {
+  const router = useRouter();
   const activeHref = visibleGroups
     .flatMap((group) => group.links)
     .filter((link) => pathname === link.href || (link.href !== '/' && pathname.startsWith(`${link.href}/`)))
@@ -81,6 +83,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Link
                   key={link.href}
                   href={link.href}
+                  // Warm only the destination the user is about to open instead
+                  // of fetching every route just because all sidebar links are visible.
+                  prefetch={false}
+                  onMouseEnter={() => router.prefetch(link.href)}
+                  onFocus={() => router.prefetch(link.href)}
                   className={`drive-nav-item${active ? ' active' : ''}`}
                   title={link.label}
                   aria-current={active ? 'page' : undefined}
@@ -95,15 +102,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ))}
 
-        <div className="drive-nav-group" role="group" aria-label="Session">
-          <button type="button" className="drive-nav-item" onClick={handleSignOut} title="Sign out">
-            <span className="drive-nav-icon">
-              <NavIcon name="logout" />
-            </span>
-            {!collapsed && <span className="drive-nav-label">Sign out</span>}
-          </button>
-        </div>
       </nav>
+
+      <div className="drive-sidebar-footer" role="group" aria-label="Session">
+        <button type="button" className="drive-nav-item" onClick={handleSignOut} title="Sign out">
+          <span className="drive-nav-icon">
+            <NavIcon name="logout" />
+          </span>
+          {!collapsed && <span className="drive-nav-label">Sign out</span>}
+        </button>
+      </div>
 
     </aside>
   );

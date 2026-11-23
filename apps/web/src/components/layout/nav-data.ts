@@ -47,7 +47,9 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Stock Audits',
         href: '/audits',
         icon: 'audits',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
+        // Cashier and staff visibility is additionally gated by the server's
+        // canCountStockAudits capability in AppFrameLayout.
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
       },
     ],
   },
@@ -64,7 +66,9 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Returns & Cancellations',
         href: '/sales-controls',
         icon: 'returns',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER'],
+        // Visibility is gated by the signed-in user's cancellation/return
+        // permissions in AppFrameLayout; Super Admin is allowed implicitly.
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
       },
     ],
   },
@@ -81,12 +85,6 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Staff Attendance',
         href: '/attendance',
         icon: 'attendance',
-        roles: ['CASHIER', 'STAFF'],
-      },
-      {
-        label: 'Loans & Advances',
-        href: '/attendance/loans',
-        icon: 'loans',
         roles: ['CASHIER', 'STAFF'],
       },
     ],
@@ -110,13 +108,15 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Company & Locations',
         href: '/admin/company',
         icon: 'company',
-        roles: ['SUPER_ADMIN', 'ADMIN'],
+        // This screen includes company-wide profile and organizational controls.
+        // Scoped Admins manage users and operational permissions, not platform setup.
+        roles: ['SUPER_ADMIN'],
       },
       {
         label: 'Discount Limits',
         href: '/admin/discount-limits',
         icon: 'discount',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER'],
+        roles: ['SUPER_ADMIN', 'ADMIN'],
       },
       {
         label: 'Sale Permissions',
@@ -128,12 +128,6 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-export const LOCATIONS = [
-  'All retail locations',
-  'Downtown Store',
-  'North Mall',
-  'West End Outlet',
-  'Central Warehouse',
-];
+export const LOCATIONS: string[] = [];
 
 export const LOCATION_KEY = 'premium-retail-location-scope';

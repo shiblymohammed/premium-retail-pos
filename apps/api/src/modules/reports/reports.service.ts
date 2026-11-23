@@ -167,14 +167,19 @@ export class ReportsService {
       ? (await this.prisma.location.findMany({ where: { isActive: true }, select: { id: true } })).map((location) => location.id)
       : actor.locationIds;
     if (locations.length === 0) return { generatedAt: new Date().toISOString(), total: 0, items: [] };
-    const [replenishments, recounts, transfers] = await Promise.all([
+    const [replenishments, recounts, highCounts, transfers] = await Promise.all([
       this.prisma.replenishmentRequest.findMany({
         where: { status: 'DRAFT', sourceLocationId: { in: locations } },
         select: { id: true, requestNumber: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true } }, createdAt: true },
         orderBy: { createdAt: 'desc' }, take: 100,
       }),
       this.prisma.auditCountItem.findMany({
-        where: { requiresRecount: true, auditSession: { locationId: { in: locations }, status: { in: ['ACTIVE', 'SUBMITTED'] } } },
+        where: { requiresRecount: true, recountQtyBase: null, auditSession: { locationId: { in: locations }, status: { in: ['ACTIVE', 'SUBMITTED'] } } },
+        select: { id: true, variant: { select: { sku: true, name: true, product: { select: { name: true } } } }, auditSession: { select: { id: true, location: { select: { id: true, name: true } } } } },
+        take: 200,
+      }),
+      this.prisma.auditCountItem.findMany({
+        where: { highCountAlert: true, auditSession: { locationId: { in: locations }, status: { in: ['ACTIVE', 'SUBMITTED'] } } },
         select: { id: true, variant: { select: { sku: true, name: true, product: { select: { name: true } } } }, auditSession: { select: { id: true, location: { select: { id: true, name: true } } } } },
         take: 200,
       }),
@@ -187,6 +192,7 @@ export class ReportsService {
     const items = [
       ...replenishments.map((row) => ({ id: `replenishment:${row.id}`, type: 'REPLENISHMENT_APPROVAL', severity: 'info', title: `Approval needed · ${row.requestNumber}`, message: `${row.sourceLocation.name} → ${row.destLocation.name}`, createdAt: row.createdAt, href: '/operations' })),
       ...recounts.map((row) => ({ id: `recount:${row.id}`, type: 'AUDIT_RECOUNT', severity: 'warning', title: `Recount required · ${row.variant.product.name}`, message: `${row.variant.name} (${row.variant.sku}) · ${row.auditSession.location.name}`, createdAt: null, href: `/audits?locationId=${encodeURIComponent(row.auditSession.location.id)}&sessionId=${encodeURIComponent(row.auditSession.id)}` })),
+      ...highCounts.map((row) => ({ id: `audit-high-count:${row.id}`, type: 'AUDIT_HIGH_COUNT', severity: 'warning', title: `High count alert · ${row.variant.product.name}`, message: `${row.variant.name} (${row.variant.sku}) · ${row.auditSession.location.name}`, createdAt: null, href: `/audits?locationId=${encodeURIComponent(row.auditSession.location.id)}&sessionId=${encodeURIComponent(row.auditSession.id)}` })),
       ...transfers.map((row) => {
         const short = row.lines.reduce((sum, line) => sum + line.shortQtyBase, 0);
         const damaged = row.lines.reduce((sum, line) => sum + line.damagedQtyBase, 0);
@@ -199,7 +205,13 @@ export class ReportsService {
       create: { userId: actor.userId, dedupeKey: item.id, type: item.type, title: item.title, message: item.message, href: item.href },
       update: { title: item.title, message: item.message, href: item.href },
     })));
-    return { generatedAt: new Date().toISOString(), unread: notifications.filter((item) => !item.readAt).length, total: notifications.length, items: notifications };
+    const auditDue = await this.prisma.inAppNotification.findMany({
+      where: { userId: actor.userId, type: 'AUDIT_DUE' },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    const combined = [...notifications, ...auditDue].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return { generatedAt: new Date().toISOString(), unread: combined.filter((item) => !item.readAt).length, total: combined.length, items: combined };
   }
 
   async markNotificationRead(id: string, userId: string) {
