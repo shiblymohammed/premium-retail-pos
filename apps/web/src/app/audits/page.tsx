@@ -1,5 +1,29 @@
 'use client';
 
+import {
+  Check,
+  ChevronDown,
+  Circle,
+  ClipboardList,
+  Clock,
+  Eye,
+  EyeOff,
+  FileText,
+  Lock,
+  LockOpen,
+  MapPin,
+  Minus,
+  Package,
+  Pencil,
+  Play,
+  Plus,
+  RotateCcw,
+  Settings,
+  ShieldCheck,
+  TriangleAlert,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { AUTH_CHANGE_EVENT, getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
@@ -100,33 +124,30 @@ async function auditApi<T>(path: string, token: string, init?: RequestInit): Pro
   return payload.data as T;
 }
 
-function Icon({ name, size = 18 }: { name: string; size?: number }) {
-  const icons: Record<string, React.ReactNode> = {
-    lock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
-    unlock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></>,
-    eye: <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
-    eyeOff: <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61M2 2l20 20" /></>,
-    check: <path d="m5 12 4 4L19 6" />,
-    alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></>,
-    clock: <><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></>,
-    mapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
-    rotateCcw: <><path d="M3 2v6h6M3 13a9 9 0 1 0 3-7.7L3 8" /></>,
-    shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="m9 12 2 2 4-4" /></>,
-    fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8M16 17H8M10 9H8" /></>,
-    x: <path d="M18 6 6 18M6 6l12 12" />,
-    clipboard: <><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4V3h6v1M9 11h6M9 15h4" /></>,
-    edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></>,
-    play: <path d="M7 5v14l11-7z" />,
-    box: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" /><path d="m4.5 7.7 7.5 4.2 7.5-4.2M12 12v9" /></>,
-    settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></>,
-    chevron: <path d="m6 9 6 6 6-6" />
-  };
+const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
+  lock: Lock,
+  unlock: LockOpen,
+  eye: Eye,
+  eyeOff: EyeOff,
+  check: Check,
+  alert: TriangleAlert,
+  clock: Clock,
+  mapPin: MapPin,
+  rotateCcw: RotateCcw,
+  shield: ShieldCheck,
+  fileText: FileText,
+  x: X,
+  clipboard: ClipboardList,
+  edit: Pencil,
+  play: Play,
+  box: Package,
+  settings: Settings,
+  chevron: ChevronDown,
+};
 
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {icons[name] || <circle cx="12" cy="12" r="10" />}
-    </svg>
-  );
+function Icon({ name, size = 18 }: { name: string; size?: number }) {
+  const Glyph = ICON_COMPONENTS[name] ?? Circle;
+  return <Glyph size={size} strokeWidth={2} aria-hidden="true" />;
 }
 
 export default function AuditsPage() {
@@ -662,9 +683,9 @@ export default function AuditsPage() {
                         <div className={styles.itemCount}>
                           <div className={styles.countRow}>
                           <div className={styles.counter}>
-                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String(Math.max(0, (Number(draft) || 0) - 1)) })} aria-label="One less" disabled={!canEditCount || busy}>−</button>
+                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String(Math.max(0, (Number(draft) || 0) - 1)) })} aria-label="One less" disabled={!canEditCount || busy}><Minus size="1em" className="inline-icon" aria-hidden="true" /></button>
                             <input type="number" min="0" inputMode="numeric" placeholder={item.requiresRecount ? 'Enter recount' : '0'} value={draft} disabled={!canEditCount || busy} onChange={(e) => setCounts({ ...counts, [item.id]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && draft !== '') void handleSaveCount(item); }} aria-label={`How many ${item.variant.product.name}`} />
-                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String((Number(draft) || 0) + 1) })} aria-label="One more" disabled={!canEditCount || busy}>+</button>
+                            <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String((Number(draft) || 0) + 1) })} aria-label="One more" disabled={!canEditCount || busy}><Plus size="1em" className="inline-icon" aria-hidden="true" /></button>
                           </div>
                           <span className={styles.unit}>{unit}s</span>
                           {done && (!item.requiresRecount || item.recountedAt) ? (

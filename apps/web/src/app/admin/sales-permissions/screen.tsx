@@ -1,5 +1,28 @@
 'use client';
 
+import {
+  Ban,
+  Check,
+  ChevronDown,
+  Clipboard,
+  ClipboardCheck,
+  CreditCard,
+  Ellipsis,
+  FileText,
+  Info,
+  KeyRound,
+  Link2,
+  MapPin,
+  Package,
+  Pencil,
+  ShieldCheck,
+  Store,
+  TriangleAlert,
+  UserRound,
+  UsersRound,
+  X,
+  Zap,
+} from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 import { QuickAccessCard, AdminModal } from '@/components/admin';
@@ -406,13 +429,14 @@ export default function SalesPermissionsAdmin() {
             boxShadow: '0 2px 8px rgba(16, 185, 129, 0.1)',
           }}
         >
-          <span style={{ fontWeight: 600 }}>✓ {notice}</span>
+          <span style={{ fontWeight: 600 }}><Check size="1em" className="inline-icon" aria-hidden="true" /> {notice}</span>
           <button
             type="button"
+            aria-label="Dismiss notice"
             onClick={() => setNotice('')}
             style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
           >
-            ✕
+            <X size="1em" className="inline-icon" aria-hidden="true" />
           </button>
         </div>
       )}
@@ -433,13 +457,14 @@ export default function SalesPermissionsAdmin() {
             boxShadow: '0 2px 8px rgba(239, 68, 68, 0.1)',
           }}
         >
-          <span style={{ fontWeight: 600 }}>⚠ {error}</span>
+          <span style={{ fontWeight: 600 }}><TriangleAlert size="1em" className="inline-icon" aria-hidden="true" /> {error}</span>
           <button
             type="button"
+            aria-label="Dismiss error"
             onClick={() => setError('')}
             style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
           >
-            ✕
+            <X size="1em" className="inline-icon" aria-hidden="true" />
           </button>
         </div>
       )}
@@ -468,7 +493,7 @@ export default function SalesPermissionsAdmin() {
               }}
               title="OD-08 Security Invariant"
             >
-              🔑
+              <KeyRound size="1em" className="inline-icon" aria-hidden="true" />
             </span>
           </h1>
         </div>
@@ -532,7 +557,7 @@ export default function SalesPermissionsAdmin() {
             }}
             title="View Invariant OD-08 Audit Architecture"
           >
-            ⓘ
+            <Info size="1em" className="inline-icon" aria-hidden="true" />
           </button>
 
           {/* Primary Action Button */}
@@ -556,7 +581,7 @@ export default function SalesPermissionsAdmin() {
               boxShadow: '0 2px 10px rgba(26, 98, 234, 0.28)',
             }}
           >
-            <span style={{ fontSize: '15px' }}>⚡</span> Bulk Permissions Preset
+            <span style={{ fontSize: '15px' }}><Zap size="1em" className="inline-icon" aria-hidden="true" /></span> Bulk Permissions Preset
           </button>
         </div>
       </div>
@@ -617,7 +642,7 @@ export default function SalesPermissionsAdmin() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: '#1a62ea' }}>🗎</span>
+                <span style={{ fontSize: '18px', color: '#1a62ea' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>OD-08 Invariant</strong>
               </div>
               <div
@@ -696,9 +721,9 @@ export default function SalesPermissionsAdmin() {
                     boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                   }}
                 >
-                  <span>👤</span>
+                  <span><UserRound size="1em" className="inline-icon" aria-hidden="true" /></span>
                   <span>{roleLabels[roleFilter] || 'All Roles'}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
                 </button>
 
                 {openDropdown === 'ROLE' && (
@@ -752,7 +777,7 @@ export default function SalesPermissionsAdmin() {
                           }}
                         >
                           <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -781,9 +806,9 @@ export default function SalesPermissionsAdmin() {
                     boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                   }}
                 >
-                  <span>⌖</span>
+                  <span><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                   <span>{locationFilter === 'ALL' ? 'All Locations' : locationMap.get(locationFilter) || locationFilter}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
                 </button>
 
                 {openDropdown === 'LOCATION' && (
@@ -827,7 +852,7 @@ export default function SalesPermissionsAdmin() {
                       }}
                     >
                       <span>All Locations</span>
-                      {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                      {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                     </button>
                     {locations.map((loc) => (
                       <button
@@ -854,7 +879,7 @@ export default function SalesPermissionsAdmin() {
                         }}
                       >
                         <span>{loc.name}</span>
-                        {locationFilter === loc.id && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                        {locationFilter === loc.id && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     ))}
                   </div>
@@ -882,9 +907,9 @@ export default function SalesPermissionsAdmin() {
                     boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                   }}
                 >
-                  <span>⚡</span>
+                  <span><Zap size="1em" className="inline-icon" aria-hidden="true" /></span>
                   <span>{CAPABILITY_OPTIONS.find((c) => c.value === capabilityFilter)?.label || 'All Capabilities'}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
                 </button>
 
                 {openDropdown === 'CAPABILITY' && (
@@ -932,7 +957,7 @@ export default function SalesPermissionsAdmin() {
                           }}
                         >
                           <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -997,7 +1022,7 @@ export default function SalesPermissionsAdmin() {
                   {filteredUsers.length === 0 ? (
                     <tr>
                       <td colSpan={7} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
-                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔑</div>
+                        <div style={{ fontSize: '32px', marginBottom: '8px' }}><KeyRound size="1em" className="inline-icon" aria-hidden="true" /></div>
                         <strong>No staff accounts match your active filter</strong>
                         <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new user override.</p>
                       </td>
@@ -1115,7 +1140,7 @@ export default function SalesPermissionsAdmin() {
                                 }`,
                               }}
                             >
-                              <span>{user.role === 'STORE_MANAGER' ? '♛' : user.role === 'CASHIER' ? '♙' : '♟'}</span>
+                              <span>{user.role === 'STORE_MANAGER' ? <UsersRound size="1em" className="inline-icon" aria-hidden="true" /> : user.role === 'CASHIER' ? <CreditCard size="1em" className="inline-icon" aria-hidden="true" /> : <UserRound size="1em" className="inline-icon" aria-hidden="true" />}</span>
                               <span>{roleLabels[user.role] || user.role}</span>
                             </span>
                           </td>
@@ -1123,7 +1148,7 @@ export default function SalesPermissionsAdmin() {
                           {/* Col 3: Assigned Store */}
                           <td style={{ padding: '13px 16px' }}>
                             <div style={{ fontSize: '12.5px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
-                              <span style={{ color: '#1a62ea', fontSize: '13px' }}>🏪</span>
+                              <span style={{ color: '#1a62ea', fontSize: '13px' }}><Store size="1em" className="inline-icon" aria-hidden="true" /></span>
                               <span>{scopes.length ? scopes[0] : 'All Branches'}</span>
                               {scopes.length > 1 && (
                                 <span style={{ fontSize: '10.5px', padding: '1px 5px', borderRadius: '4px', background: '#e2e8f0', color: '#475569', fontWeight: 750 }}>
@@ -1149,7 +1174,7 @@ export default function SalesPermissionsAdmin() {
                                 border: `1px solid ${user.canCancelSales ? '#a7f3d0' : '#e2e8f0'}`,
                               }}
                             >
-                              <span>{user.canCancelSales ? '✓ Authorized' : '✕ Blocked'}</span>
+                              <span>{user.canCancelSales ? <><Check size="1em" className="inline-icon" aria-hidden="true" /> Authorized</> : <><X size="1em" className="inline-icon" aria-hidden="true" /> Blocked</>}</span>
                             </span>
                           </td>
 
@@ -1169,7 +1194,7 @@ export default function SalesPermissionsAdmin() {
                                 border: `1px solid ${user.canProcessReturns ? '#a7f3d0' : '#e2e8f0'}`,
                               }}
                             >
-                              <span>{user.canProcessReturns ? '✓ Authorized' : '✕ Blocked'}</span>
+                              <span>{user.canProcessReturns ? <><Check size="1em" className="inline-icon" aria-hidden="true" /> Authorized</> : <><X size="1em" className="inline-icon" aria-hidden="true" /> Blocked</>}</span>
                             </span>
                           </td>
 
@@ -1189,7 +1214,7 @@ export default function SalesPermissionsAdmin() {
                                 border: `1px solid ${user.canCountStockAudits ? '#bfdbfe' : '#e2e8f0'}`,
                               }}
                             >
-                              <span>{user.canCountStockAudits ? '✓ Counter' : '✕ None'}</span>
+                              <span>{user.canCountStockAudits ? <><Check size="1em" className="inline-icon" aria-hidden="true" /> Counter</> : <><X size="1em" className="inline-icon" aria-hidden="true" /> None</>}</span>
                             </span>
                           </td>
 
@@ -1234,7 +1259,7 @@ export default function SalesPermissionsAdmin() {
                                 }}
                                 title="Copy policy snapshot"
                               >
-                                🔗
+                                <Link2 size="1em" className="inline-icon" aria-hidden="true" />
                               </button>
 
                               {/* Context Menu Trigger */}
@@ -1257,7 +1282,7 @@ export default function SalesPermissionsAdmin() {
                                   }}
                                   title="More options"
                                 >
-                                  ···
+                                  <Ellipsis size="1em" className="inline-icon" aria-hidden="true" />
                                 </button>
 
                                 {activeActionMenuId === user.id && (
@@ -1280,31 +1305,31 @@ export default function SalesPermissionsAdmin() {
                                       onClick={() => openEditModal(user)}
                                       style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 650, color: '#1a62ea', cursor: 'pointer', borderRadius: '6px' }}
                                     >
-                                      ✎ Configure Permissions...
+                                      <Pencil size="1em" className="inline-icon" aria-hidden="true" /> Configure Permissions...
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, true, true, false, 'Full POS Access')}
                                       style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#059669', cursor: 'pointer', borderRadius: '6px' }}
                                     >
-                                      ⚡ Grant Voids & Returns
+                                      <Zap size="1em" className="inline-icon" aria-hidden="true" /> Grant Voids & Returns
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, false, true, false, 'Returns Only')}
                                       style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#334155', cursor: 'pointer', borderRadius: '6px' }}
                                     >
-                                      ⚡ Grant Returns Desk Only
+                                      <Zap size="1em" className="inline-icon" aria-hidden="true" /> Grant Returns Desk Only
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, false, false, true, 'Stock Auditor')}
                                       style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#4f46e5', cursor: 'pointer', borderRadius: '6px' }}
                                     >
-                                      📦 Grant Stock Audit Count
+                                      <Package size="1em" className="inline-icon" aria-hidden="true" /> Grant Stock Audit Count
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, false, false, false, 'Standard Sales (Revoked)')}
                                       style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#dc2626', cursor: 'pointer', borderRadius: '6px' }}
                                     >
-                                      ⛔ Revoke All Overrides
+                                      <Ban size="1em" className="inline-icon" aria-hidden="true" /> Revoke All Overrides
                                     </div>
                                     <div
                                       onClick={() => {
@@ -1314,7 +1339,7 @@ export default function SalesPermissionsAdmin() {
                                       }}
                                       style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#64748b', cursor: 'pointer', borderRadius: '6px', borderTop: '1px solid #f1f5f9' }}
                                     >
-                                      📋 Copy Email Address
+                                      <Clipboard size="1em" className="inline-icon" aria-hidden="true" /> Copy Email Address
                                     </div>
                                   </div>
                                 )}
@@ -1374,7 +1399,7 @@ export default function SalesPermissionsAdmin() {
                 Store supervisors have full operational authority to void mistake sales, authorize returns with refund voucher generation, and conduct stock audits.
               </p>
               <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
-                <strong>Authorized:</strong> Sales Cancellation ✓ · Customer Returns ✓ · Stock Audits ✓
+                <strong>Authorized:</strong> Sales Cancellation <Check size="1em" className="inline-icon" aria-hidden="true" /> · Customer Returns <Check size="1em" className="inline-icon" aria-hidden="true" /> · Stock Audits <Check size="1em" className="inline-icon" aria-hidden="true" />
               </div>
             </div>
 
@@ -1408,7 +1433,7 @@ export default function SalesPermissionsAdmin() {
                 Warehouse and depot managers hold physical inventory counting authority. They cannot execute POS sales cancellations or register refunds.
               </p>
               <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
-                <strong>Authorized:</strong> Stock Audit Count ✓ · Sales POS (Restricted ✕)
+                <strong>Authorized:</strong> Stock Audit Count <Check size="1em" className="inline-icon" aria-hidden="true" /> · Sales POS (Restricted <X size="1em" className="inline-icon" aria-hidden="true" />)
               </div>
             </div>
           </div>
@@ -1424,7 +1449,7 @@ export default function SalesPermissionsAdmin() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-              <span style={{ fontSize: '22px' }}>🛡️</span>
+              <span style={{ fontSize: '22px' }}><ShieldCheck size="1em" className="inline-icon" aria-hidden="true" /></span>
               <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
                 OD-08 Security Invariant Architecture
               </h2>
@@ -1484,10 +1509,11 @@ export default function SalesPermissionsAdmin() {
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setEditingUser(null)}
                 style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '14px', color: '#64748b' }}
               >
-                ✕
+                <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 
@@ -1629,7 +1655,7 @@ export default function SalesPermissionsAdmin() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '22px' }}>▤</span>
+                <span style={{ fontSize: '22px' }}><ClipboardCheck size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <div>
                   <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
                     Sales Permission Audit Trail (OD-08)
@@ -1641,10 +1667,11 @@ export default function SalesPermissionsAdmin() {
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setIsAuditModalOpen(false)}
                 style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '15px', fontWeight: 800, color: '#64748b' }}
               >
-                ✕
+                <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 
@@ -1741,10 +1768,11 @@ export default function SalesPermissionsAdmin() {
               </h2>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setIsBulkModalOpen(false)}
                 style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '28px', height: '28px', cursor: 'pointer', fontSize: '14px', color: '#64748b' }}
               >
-                ✕
+                <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 

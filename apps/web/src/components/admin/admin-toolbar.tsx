@@ -1,5 +1,6 @@
 'use client';
 
+import { Check, ChevronDown, Search } from 'lucide-react';
 import React from 'react';
 
 export interface FilterOption {
@@ -63,7 +64,7 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
               color: '#94a3b8',
             }}
           >
-            🔍
+            <Search size="1em" className="inline-icon" aria-hidden="true" />
           </span>
           <input
             type="text"
@@ -116,7 +117,7 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
                 }}
               >
                 <span>{buttonLabel}</span>
-                <span style={{ fontSize: '8px', color: isFiltered ? '#1a62ea' : '#94a3b8' }}>▼</span>
+                <span style={{ fontSize: '8px', color: isFiltered ? '#1a62ea' : '#94a3b8' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {isOpen && (
@@ -168,7 +169,7 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
                         }}
                       >
                         <span>{opt.label}</span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}

@@ -1,5 +1,6 @@
 'use client';
 
+import { Lock } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -350,7 +351,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
                 boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
               }}
             >
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🔒</div>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}><Lock size="1em" className="inline-icon" aria-hidden="true" /></div>
               <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>
                 Restricted Operational Zone
               </h2>

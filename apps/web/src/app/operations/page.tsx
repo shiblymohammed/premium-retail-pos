@@ -1,5 +1,31 @@
 'use client';
 
+import {
+  ArrowDownUp,
+  ArrowLeftRight,
+  ArrowRight,
+  Barcode,
+  Check,
+  ChevronDown,
+  Circle,
+  Clock,
+  Copy,
+  Download,
+  Ellipsis,
+  Eye,
+  Inbox,
+  Minus,
+  Package,
+  Plus,
+  Search,
+  Send,
+  Store,
+  TriangleAlert,
+  Truck,
+  Warehouse,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
@@ -108,36 +134,34 @@ const isWarehouse = (loc: string) => /warehouse/i.test(loc);
 const isPending = (status: TransferStatus) => ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(status);
 const isInTransit = (status: TransferStatus) => ['PARTIALLY_DISPATCHED', 'DISPATCHED', 'PARTIALLY_RECEIVED'].includes(status);
 
+const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
+  search: Search,
+  plus: Plus,
+  minus: Minus,
+  truck: Truck,
+  box: Package,
+  check: Check,
+  clock: Clock,
+  alert: TriangleAlert,
+  chevron: ChevronDown,
+  arrow: ArrowRight,
+  warehouse: Warehouse,
+  store: Store,
+  x: X,
+  download: Download,
+  copy: Copy,
+  code: Barcode,
+  send: Send,
+  sort: ArrowDownUp,
+  swap: ArrowLeftRight,
+  more: Ellipsis,
+  eye: Eye,
+  inbox: Inbox,
+};
+
 function Icon({ name, size = 16 }: { name: string; size?: number }) {
-  const icons: Record<string, React.ReactNode> = {
-    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-    plus: <path d="M12 5v14M5 12h14" />,
-    minus: <path d="M5 12h14" />,
-    truck: <><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7" /><circle cx="7" cy="17.5" r="1.8" /><circle cx="17" cy="17.5" r="1.8" /></>,
-    box: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" /><path d="m4.5 7.7 7.5 4.2 7.5-4.2M12 12v9" /></>,
-    check: <path d="m5 12 4 4L19 6" />,
-    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-    alert: <><path d="M12 3 2.5 20h19z" /><path d="M12 10v4M12 17h.01" /></>,
-    chevron: <path d="m6 9 6 6 6-6" />,
-    arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
-    warehouse: <><path d="M3 21V9l9-6 9 6v12" /><path d="M7 21v-8h10v8M7 17h10" /></>,
-    store: <><path d="M4 10v10h16V10" /><path d="M3 10 5 4h14l2 6c0 1.4-1.1 2.5-2.5 2.5S16 11.4 16 10c0 1.4-1.1 2.5-2.5 2.5h-3C9.1 12.5 8 11.4 8 10c0 1.4-1.1 2.5-2.5 2.5S3 11.4 3 10Z" /></>,
-    x: <path d="M18 6 6 18M6 6l12 12" />,
-    download: <><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></>,
-    copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></>,
-    code: <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />,
-    send: <path d="M4 12 20 4l-6 16-3-7z" />,
-    sort: <path d="M7 4v16M3 8l4-4 4 4M17 20V4M13 16l4 4 4-4" />,
-    swap: <path d="M4 8h15M15 4l4 4-4 4M20 16H5m4-4-4 4 4 4" />,
-    more: <><circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" /></>,
-    eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
-    inbox: <><path d="M22 12h-6l-2 3h-4l-2-3H2" /><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z" /></>,
-  };
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {icons[name] || <circle cx="12" cy="12" r="9" />}
-    </svg>
-  );
+  const Glyph = ICON_COMPONENTS[name] ?? Circle;
+  return <Glyph size={size} strokeWidth={1.9} aria-hidden="true" />;
 }
 
 type DraftQty = { cartons: number; loose: number };
@@ -667,7 +691,7 @@ export default function OperationsPage() {
         <div className={styles.tableTop}><div><h2 id="replenishment-heading">Replenishment requests</h2><p>Server generated suggestions require approval by a different manager.</p></div></div>
         {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p></div> : (
           <ul className={styles.rows}>{replenishments.map((request) => <li className={styles.row} key={request.id}>
-            <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} → {request.destLocation.name}</small></span>
+            <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
             <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
             <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
             {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => approveReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Approve</button><button type="button" className={styles.ghostButton} onClick={() => rejectReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Reject</button></span> : <span />}
@@ -871,7 +895,7 @@ export default function OperationsPage() {
               <span className={`${styles.modalIcon} ${styles.icon_transit}`}><Icon name="inbox" size={18} /></span>
               <div>
                 <h2 id="receive-title">Receive {receivingTransfer.transferCode}</h2>
-                <p>{receivingTransfer.sourceLocation} → {receivingTransfer.destLocation}</p>
+                <p>{receivingTransfer.sourceLocation} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {receivingTransfer.destLocation}</p>
               </div>
               <button type="button" className={styles.modalClose} onClick={() => setReceivingTransfer(null)} aria-label="Close"><Icon name="x" size={16} /></button>
             </div>
@@ -984,7 +1008,7 @@ export default function OperationsPage() {
                 {createError && <p className={styles.formError}><Icon name="alert" size={14} /> {createError}</p>}
               </div>
               <div className={styles.modalFoot}>
-                <span className={styles.footSummary}>{draftTotal} units · {locationName(newOrigin)} → {locationName(newDest)}</span>
+                <span className={styles.footSummary}>{draftTotal} units · {locationName(newOrigin)} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {locationName(newDest)}</span>
                 <button type="button" className={styles.ghostButton} onClick={() => setCreateModalOpen(false)}>Cancel</button>
                 <button type="submit" disabled={isCreatingBusy} className={styles.primaryButton}><Icon name={dispatchNow ? 'send' : 'check'} size={15} /> {isCreatingBusy ? 'Saving…' : dispatchNow ? 'Create & submit' : 'Save draft'}</button>
               </div>

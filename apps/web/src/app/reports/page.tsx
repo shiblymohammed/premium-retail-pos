@@ -1,5 +1,6 @@
 'use client';
 
+import { ArrowRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
@@ -428,7 +429,7 @@ export default function ReportsPage() {
                   <div className={styles.alertTop}><strong>{item.title}</strong><small>{new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></div>
                   <p>{item.message}</p>
                   <div className={styles.alertFoot}>
-                    <a href={item.href}>View details →</a>
+                    <a href={item.href}>View details <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></a>
                     {!item.readAt && <button type="button" onClick={() => markRead(item.id)}>Dismiss</button>}
                   </div>
                 </div>

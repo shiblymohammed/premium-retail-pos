@@ -1,5 +1,37 @@
 'use client';
 
+import {
+  ArrowDown,
+  ArrowDownUp,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Circle,
+  Copy,
+  Download,
+  Ellipsis,
+  EllipsisVertical,
+  FileText,
+  IndianRupee,
+  LayoutGrid,
+  List,
+  ListFilter,
+  MapPin,
+  Package,
+  Plus,
+  Search,
+  ShoppingCart,
+  Tag,
+  TrendingUp,
+  TriangleAlert,
+  Truck,
+  Upload,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import { getStoredSession } from '@/lib/auth';
@@ -40,41 +72,38 @@ const CATEGORY_TONE: Record<string, string> = {
   Pantry: 'toneRose',
 };
 
-function Icon({ name, size = 18 }: { name: string; size?: number }) {
-  const icons: Record<string, React.ReactNode> = {
-    box: <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z M4.5 7.7 12 11.9l7.5-4.2M12 12v9" />,
-    list: <path d="M3 6h18M3 12h18M3 18h18" />,
-    grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
-    search: <><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></>,
-    mapPin: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>,
-    tag: <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2ZM7 7h.01" />,
-    chevronDown: <path d="m6 9 6 6 6-6" />,
-    chevronLeft: <path d="m15 18-6-6 6-6" />,
-    chevronRight: <path d="m9 18 6-6-6-6" />,
-    chevronUp: <path d="m18 15-6-6-6 6" />,
-    filter: <path d="M4 5h16l-6.3 7.2v5.3l-3.4 1.7v-7z" />,
-    copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></>,
-    more: <><circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" /></>,
-    upload: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />,
-    plus: <path d="M12 5v14M5 12h14" />,
-    shoppingCart: <><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" /></>,
-    moreVertical: <><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></>,
-    check: <path d="m5 12 4 4L19 6" />,
-    trending: <path d="m22 7-8.5 8.5-5-5L1 18" />,
-    alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4M12 17h.01" /></>,
-    package: <><path d="m7.5 4.27 9 5.15M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5M12 22V12" /></>,
-    dollarSign: <><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>,
-    truck: <><path d="M1 3h15v13H1z" /><path d="M16 8h4l3 3v5h-7V8z" /><circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" /></>,
-    x: <path d="M18 6 6 18M6 6l12 12" />,
-    fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8M16 17H8M10 9H8" /></>,
-    download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>
-  };
+const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
+  box: Package,
+  list: List,
+  grid: LayoutGrid,
+  search: Search,
+  mapPin: MapPin,
+  tag: Tag,
+  chevronDown: ChevronDown,
+  chevronLeft: ChevronLeft,
+  chevronRight: ChevronRight,
+  chevronUp: ChevronUp,
+  filter: ListFilter,
+  copy: Copy,
+  more: Ellipsis,
+  upload: Upload,
+  plus: Plus,
+  shoppingCart: ShoppingCart,
+  moreVertical: EllipsisVertical,
+  check: Check,
+  trending: TrendingUp,
+  alert: TriangleAlert,
+  package: Package,
+  dollarSign: IndianRupee,
+  truck: Truck,
+  x: X,
+  fileText: FileText,
+  download: Download,
+};
 
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {icons[name] || <circle cx="12" cy="12" r="10" />}
-    </svg>
-  );
+function Icon({ name, size = 18 }: { name: string; size?: number }) {
+  const Glyph = ICON_COMPONENTS[name] ?? Circle;
+  return <Glyph size={size} strokeWidth={2} aria-hidden="true" />;
 }
 
 export default function ProductsPage() {
@@ -418,7 +447,7 @@ export default function ProductsPage() {
   const SortHead = ({ label, k, className = '' }: { label: string; k: SortKey; className?: string }) => (
     <button type="button" className={`${styles.sortHead} ${sortKey === k ? styles.sortActive : ''} ${className}`} onClick={() => toggleSort(k)} aria-label={`Sort by ${label}`}>
       {label}
-      <span className={styles.sortIcon} aria-hidden="true">{sortKey === k ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+      <span className={styles.sortIcon} aria-hidden="true">{sortKey === k ? (sortDir === 'asc' ? <ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> : <ArrowDown size="1em" className="inline-icon" aria-hidden="true" />) : <ArrowDownUp size="1em" className="inline-icon" aria-hidden="true" />}</span>
     </button>
   );
 
@@ -763,7 +792,7 @@ export default function ProductsPage() {
                     onClick={() => setReplenishCartons(c => c + 1)}
                     className={styles.stepBtn}
                   >
-                    +
+                    <Plus size="1em" className="inline-icon" aria-hidden="true" />
                   </button>
                 </div>
                 <small className={styles.fieldHint}>

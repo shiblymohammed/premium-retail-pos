@@ -1,12 +1,13 @@
 'use client';
 
+import { X, Zap } from 'lucide-react';
 import React, { useEffect } from 'react';
 
 export interface AdminModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
-  badgeIcon?: string;
+  badgeIcon?: React.ReactNode;
   subtitle?: string;
   maxWidth?: string;
   children: React.ReactNode;
@@ -17,7 +18,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
   onClose,
   title,
-  badgeIcon = '⚡',
+  badgeIcon = <Zap size={22} aria-hidden="true" />,
   subtitle,
   maxWidth = '560px',
   children,
@@ -101,6 +102,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
           <button
             type="button"
+            aria-label="Close"
             onClick={onClose}
             style={{
               width: '32px',
@@ -115,7 +117,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               placeItems: 'center',
             }}
           >
-            ✕
+            <X size="1em" className="inline-icon" aria-hidden="true" />
           </button>
         </div>
 

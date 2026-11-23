@@ -1,5 +1,21 @@
 'use client';
 
+import {
+  Building2,
+  Check,
+  ChevronDown,
+  Ellipsis,
+  Landmark,
+  Link2,
+  Lock,
+  MapPin,
+  Pencil,
+  Plus,
+  Settings,
+  Store,
+  Warehouse,
+  X,
+} from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { QuickAccessCard } from '@/components/admin';
@@ -258,7 +274,7 @@ export default function CompanySettingsPage() {
     switch (type) {
       case 'CENTRAL_WAREHOUSE':
         return {
-          icon: '🏢',
+          icon: <Building2 size={13} aria-hidden="true" />,
           label: 'Central Hub',
           bg: '#eff6ff',
           color: '#1d4ed8',
@@ -266,7 +282,7 @@ export default function CompanySettingsPage() {
         };
       case 'SUB_WAREHOUSE':
         return {
-          icon: '🏬',
+          icon: <Warehouse size={13} aria-hidden="true" />,
           label: 'Regional Depot',
           bg: '#f3e8fd',
           color: '#7e22ce',
@@ -275,7 +291,7 @@ export default function CompanySettingsPage() {
       case 'RETAIL_STORE':
       default:
         return {
-          icon: '🏪',
+          icon: <Store size={13} aria-hidden="true" />,
           label: 'Retail Store',
           bg: '#ecfdf5',
           color: '#047857',
@@ -303,13 +319,14 @@ export default function CompanySettingsPage() {
             boxShadow: '0 2px 8px rgba(16, 185, 129, 0.1)',
           }}
         >
-          <span style={{ fontWeight: 600 }}>✓ {notice}</span>
+          <span style={{ fontWeight: 600 }}><Check size="1em" className="inline-icon" aria-hidden="true" /> {notice}</span>
           <button
             type="button"
+            aria-label="Dismiss notice"
             onClick={() => setNotice('')}
             style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
           >
-            ✕
+            <X size="1em" className="inline-icon" aria-hidden="true" />
           </button>
         </div>
       )}
@@ -333,7 +350,7 @@ export default function CompanySettingsPage() {
               }}
               title="Enterprise Topology"
             >
-              🏛
+              <Landmark size="1em" className="inline-icon" aria-hidden="true" />
             </span>
           </h1>
         </div>
@@ -360,7 +377,7 @@ export default function CompanySettingsPage() {
                 gap: '6px',
               }}
             >
-              <span>🏢</span> Physical Topology
+              <span><Building2 size="1em" className="inline-icon" aria-hidden="true" /></span> Physical Topology
             </button>
             <button
               type="button"
@@ -380,7 +397,7 @@ export default function CompanySettingsPage() {
                 gap: '6px',
               }}
             >
-              <span>⚙️</span> Billing & Tax
+              <span><Settings size="1em" className="inline-icon" aria-hidden="true" /></span> Billing & Tax
             </button>
           </div>
 
@@ -402,7 +419,7 @@ export default function CompanySettingsPage() {
               boxShadow: '0 2px 10px rgba(26, 98, 234, 0.28)',
             }}
           >
-            <span style={{ fontSize: '15px' }}>+</span> Add Location Node
+            <span style={{ fontSize: '15px' }}><Plus size="1em" className="inline-icon" aria-hidden="true" /></span> Add Location Node
           </button>
         </div>
       </div>
@@ -472,7 +489,7 @@ export default function CompanySettingsPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: '#1a62ea' }}>🏛</span>
+                <span style={{ fontSize: '18px', color: '#1a62ea' }}><Landmark size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>Corporate Profile</strong>
               </div>
               <div
@@ -551,9 +568,9 @@ export default function CompanySettingsPage() {
                     boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                   }}
                 >
-                  <span>🏢</span>
+                  <span><Building2 size="1em" className="inline-icon" aria-hidden="true" /></span>
                   <span>{typeLabels[typeFilter] || 'All Facility Types'}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
                 </button>
 
                 {openDropdown === 'TYPE' && (
@@ -607,7 +624,7 @@ export default function CompanySettingsPage() {
                           }}
                         >
                           <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -638,7 +655,7 @@ export default function CompanySettingsPage() {
                 >
                   <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : '#64748b' }}></span>
                   <span>{statusFilter === 'ALL' ? 'All Statuses' : statusFilter === 'ACTIVE' ? 'Active Only' : 'Inactive Only'}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
                 </button>
 
                 {openDropdown === 'STATUS' && (
@@ -699,7 +716,7 @@ export default function CompanySettingsPage() {
                             <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: st.dot }}></span>
                             {st.label}
                           </span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -765,7 +782,7 @@ export default function CompanySettingsPage() {
                   {filteredNodes.length === 0 ? (
                     <tr>
                       <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
-                        <div style={{ fontSize: '32px', marginBottom: '8px' }}>🏢</div>
+                        <div style={{ fontSize: '32px', marginBottom: '8px' }}><Building2 size="1em" className="inline-icon" aria-hidden="true" /></div>
                         <strong>No location nodes matching your active filter</strong>
                         <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new facility.</p>
                       </td>
@@ -931,7 +948,7 @@ export default function CompanySettingsPage() {
                                 }}
                                 title={`GPS: ${n.latitude}, ${n.longitude} (Radius: ${n.geofenceRadiusMeters}m)`}
                               >
-                                📍 {n.geofenceRadiusMeters}m Geofence
+                                <MapPin size="1em" className="inline-icon" aria-hidden="true" /> {n.geofenceRadiusMeters}m Geofence
                               </span>
                             </div>
                           </td>
@@ -959,7 +976,7 @@ export default function CompanySettingsPage() {
                                 }}
                                 title="Copy Coordinates & Details"
                               >
-                                🔗
+                                <Link2 size="1em" className="inline-icon" aria-hidden="true" />
                               </button>
 
                               <button
@@ -1006,7 +1023,7 @@ export default function CompanySettingsPage() {
                                   }}
                                   title="More Actions"
                                 >
-                                  ···
+                                  <Ellipsis size="1em" className="inline-icon" aria-hidden="true" />
                                 </button>
 
                                 {activeActionMenuId === n.id && (
@@ -1048,7 +1065,7 @@ export default function CompanySettingsPage() {
                                         gap: '8px',
                                       }}
                                     >
-                                      <span>✎</span> Edit Facility
+                                      <span><Pencil size="1em" className="inline-icon" aria-hidden="true" /></span> Edit Facility
                                     </button>
                                     <button
                                       type="button"
@@ -1071,7 +1088,7 @@ export default function CompanySettingsPage() {
                                         gap: '8px',
                                       }}
                                     >
-                                      <span>{n.isActive ? '✕' : '✓'}</span> {n.isActive ? 'Deactivate Node' : 'Reactivate Node'}
+                                      <span>{n.isActive ? <X size="1em" className="inline-icon" aria-hidden="true" /> : <Check size="1em" className="inline-icon" aria-hidden="true" />}</span> {n.isActive ? 'Deactivate Node' : 'Reactivate Node'}
                                     </button>
                                   </div>
                                 )}
@@ -1103,7 +1120,7 @@ export default function CompanySettingsPage() {
               gap: '10px',
             }}
           >
-            <span style={{ fontSize: '16px' }}>🔒</span>
+            <span style={{ fontSize: '16px' }}><Lock size="1em" className="inline-icon" aria-hidden="true" /></span>
             <span>
               <strong>Dual-Axis Invariant 8 Enforced:</strong> Physical location nodes with historical transactions, in-transit transfers, or stock counts can never be purged. Inactive facilities are permanently archived for auditing continuity.
             </span>
@@ -1123,7 +1140,7 @@ export default function CompanySettingsPage() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '22px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
-            <span style={{ fontSize: '24px' }}>🏛</span>
+            <span style={{ fontSize: '24px' }}><Landmark size="1em" className="inline-icon" aria-hidden="true" /></span>
             <div>
               <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
                 Corporate Profile & Enterprise Billing
@@ -1295,10 +1312,11 @@ export default function CompanySettingsPage() {
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setIsEditModalOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
               >
-                ✕
+                <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 
@@ -1382,7 +1400,7 @@ export default function CompanySettingsPage() {
               {/* GPS Geofence */}
               <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
-                  📍 GPS Geofence & Mobile Check-in (OD-12)
+                  <MapPin size="1em" className="inline-icon" aria-hidden="true" /> GPS Geofence & Mobile Check-in (OD-12)
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                   <div>
@@ -1510,10 +1528,11 @@ export default function CompanySettingsPage() {
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setIsAddModalOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
               >
-                ✕
+                <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 

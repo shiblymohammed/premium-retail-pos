@@ -1,5 +1,30 @@
 'use client';
 
+import {
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  Clock,
+  Download,
+  Eye,
+  LogIn,
+  LogOut,
+  Pencil,
+  QrCode,
+  RefreshCw,
+  Search,
+  Settings,
+  ShieldCheck,
+  Store,
+  Timer,
+  TriangleAlert,
+  UserRoundX,
+  UsersRound,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
@@ -96,35 +121,33 @@ function recordFromLive(row: AttendanceRow | undefined, today: string, targetMin
   return { date: today, status: row.isLate ? 'late' : 'ontime', inMin, outMin, workMin, lateBy, corrected: !!(row.clockInCorrectionReason || row.clockOutCorrectionReason) };
 }
 
+const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
+  search: Search,
+  chevL: ChevronLeft,
+  chevR: ChevronRight,
+  check: Check,
+  clock: Clock,
+  alert: TriangleAlert,
+  userX: UserRoundX,
+  users: UsersRound,
+  hours: Timer,
+  download: Download,
+  qr: QrCode,
+  settings: Settings,
+  x: X,
+  edit: Pencil,
+  eye: Eye,
+  store: Store,
+  shield: ShieldCheck,
+  calendar: CalendarDays,
+  refresh: RefreshCw,
+  arrowIn: LogIn,
+  arrowOut: LogOut,
+};
+
 function Icon({ name, size = 16 }: { name: string; size?: number }) {
-  const icons: Record<string, React.ReactNode> = {
-    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-    chevL: <path d="m15 18-6-6 6-6" />,
-    chevR: <path d="m9 18 6-6-6-6" />,
-    check: <path d="m5 12 4 4L19 6" />,
-    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-    alert: <><path d="M12 3 2.5 20h19z" /><path d="M12 10v4M12 17h.01" /></>,
-    userX: <><circle cx="10" cy="8" r="4" /><path d="M2 21a8 8 0 0 1 13-6.2M17 15l4 4M21 15l-4 4" /></>,
-    users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6" /></>,
-    hours: <><path d="M5 3h14M5 21h14M7 3c0 5 10 5 10 9s-10 4-10 9M17 3c0 5-10 5-10 9" /></>,
-    download: <><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></>,
-    qr: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3" /></>,
-    settings: <><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></>,
-    x: <path d="M18 6 6 18M6 6l12 12" />,
-    edit: <><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></>,
-    eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
-    store: <><path d="M4 10v10h16V10" /><path d="M3 10 5 4h14l2 6c0 1.4-1.1 2.5-2.5 2.5S16 11.4 16 10c0 1.4-1.1 2.5-2.5 2.5h-3C9.1 12.5 8 11.4 8 10c0 1.4-1.1 2.5-2.5 2.5S3 11.4 3 10Z" /></>,
-    shield: <><path d="M12 3 19 6v5c0 4.8-3 8.1-7 10-4-1.9-7-5.2-7-10V6z" /><path d="m9 12 2 2 4-4" /></>,
-    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
-    refresh: <><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></>,
-    arrowIn: <path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H3" />,
-    arrowOut: <path d="M9 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h4M16 16l4-4-4-4M20 12H9" />,
-  };
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {icons[name] || <circle cx="12" cy="12" r="9" />}
-    </svg>
-  );
+  const Glyph = ICON_COMPONENTS[name] ?? Circle;
+  return <Glyph size={size} strokeWidth={1.9} aria-hidden="true" />;
 }
 
 type Filter = 'all' | 'ontime' | 'late' | 'missing';

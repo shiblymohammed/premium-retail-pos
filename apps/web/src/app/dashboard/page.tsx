@@ -1,5 +1,6 @@
 'use client';
 
+import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AuthSession, getStoredSession } from '@/lib/auth';
@@ -137,7 +138,7 @@ export default function DashboardPage() {
   return <main className={styles.page}>
     <header className={styles.heading}>
       <div><span className={styles.eyebrow}>RETAIL OPERATIONS</span><h1>Operations overview</h1><p>Live sales, stock health, and transfer activity for your authorized locations.</p></div>
-      <Link href="/reports" className={styles.secondaryLink}>Open reports <span aria-hidden="true">→</span></Link>
+      <Link href="/reports" className={styles.secondaryLink}>Open reports <span aria-hidden="true"><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></Link>
     </header>
 
     {error && <div className={styles.error} role="alert"><span>{error}</span><button type="button" onClick={() => window.location.reload()}>Retry</button></div>}
@@ -150,7 +151,7 @@ export default function DashboardPage() {
 
     <section className={styles.contentGrid}>
       <article className={styles.panel}>
-        <div className={styles.panelHead}><div><span className={styles.eyebrow}>SALES</span><h2>Daily sales</h2><p>Last seven days · finalized invoices</p></div><Link href="/reports">View details →</Link></div>
+        <div className={styles.panelHead}><div><span className={styles.eyebrow}>SALES</span><h2>Daily sales</h2><p>Last seven days · finalized invoices</p></div><Link href="/reports">View details <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></Link></div>
         {loading ? <div className={styles.panelMessage}>Loading sales activity…</div> : daily.length ? <div className={styles.chart}>
           {daily.map((day) => <div className={styles.chartColumn} key={day.date} title={`${day.date}: ${CURRENCY.format(asNumber(day.netSales))}`}>
             <span className={styles.barValue}>{CURRENCY.format(asNumber(day.netSales))}</span><div className={styles.barTrack}><i style={{ height: `${Math.max(5, (asNumber(day.netSales) / peak) * 100)}%` }} /></div>
@@ -160,7 +161,7 @@ export default function DashboardPage() {
       </article>
 
       <article className={styles.panel}>
-        <div className={styles.panelHead}><div><span className={styles.eyebrow}>INVENTORY</span><h2>Stock by state</h2><p>{data?.stock.totals.variants ?? 0} variants in scope</p></div><Link href="/products">Open inventory →</Link></div>
+        <div className={styles.panelHead}><div><span className={styles.eyebrow}>INVENTORY</span><h2>Stock by state</h2><p>{data?.stock.totals.variants ?? 0} variants in scope</p></div><Link href="/products">Open inventory <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></Link></div>
         <div className={styles.stockRows}>
           {([
             ['Available', states.available, 'available'],
@@ -175,7 +176,7 @@ export default function DashboardPage() {
       </article>
 
       <article className={styles.panel}>
-        <div className={styles.panelHead}><div><span className={styles.eyebrow}>LOGISTICS</span><h2>Transfers & replenishment</h2><p>Current requests within your access scope</p></div><Link href="/operations">Open operations →</Link></div>
+        <div className={styles.panelHead}><div><span className={styles.eyebrow}>LOGISTICS</span><h2>Transfers & replenishment</h2><p>Current requests within your access scope</p></div><Link href="/operations">Open operations <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></Link></div>
         <div className={styles.activityGrid}>
           <div><span>Pending approval</span><strong>{loading ? '…' : pendingTransfers}</strong></div>
           <div><span>In transit</span><strong>{loading ? '…' : inTransitTransfers}</strong></div>

@@ -1,5 +1,6 @@
 'use client';
 
+import { Check, ChevronDown } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import styles from './pill-dropdown.module.css';
 
@@ -75,7 +76,7 @@ export function PillDropdown<T extends string>({
       >
         {icon && <span className={styles.icon}>{icon}</span>}
         <span>{buttonLabel ?? current?.label ?? ''}</span>
-        <span className={styles.caret}>▼</span>
+        <span className={styles.caret}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
       </button>
       {open && !disabled && (
         <div className={`${styles.menu} ${align === 'left' ? styles.menuLeft : ''}`} role="listbox" aria-label={ariaLabel}>
@@ -95,7 +96,7 @@ export function PillDropdown<T extends string>({
                 }}
               >
                 <span>{option.label}</span>
-                {selected && <span className={styles.check}>✓</span>}
+                {selected && <span className={styles.check}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
               </button>
             );
           })}

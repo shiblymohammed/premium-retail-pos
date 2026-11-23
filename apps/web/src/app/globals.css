@@ -7,6 +7,7 @@ body { margin: 0; background: var(--canvas); color: var(--ink); font-family: var
 button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+.inline-icon { flex-shrink: 0; vertical-align: middle; }
 
 .login-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(ellipse at 15% 10%, #e3f1e6 0, transparent 36%), radial-gradient(ellipse at 90% 85%, #ecebdc 0, transparent 33%), var(--canvas); }
 .login-card { width: min(100%, 420px); padding: 42px; border: 1px solid #e1e9e2; border-radius: 20px; background: rgba(255,255,255,.94); box-shadow: 0 22px 70px #244c3712; }
@@ -49,7 +50,7 @@ button:disabled { cursor: not-allowed; }
 .page-heading p { font-size: 13px; }
 .open-badge { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; padding: 8px 11px; border: 1px solid #d7eadc; border-radius: 20px; background: #f3faf4; color: #3c7351; font-size: 13px; font-weight: 700; white-space: nowrap; }
 .search-wrap { height: 56px; display: flex; align-items: center; gap: 13px; padding: 0 14px; border: 1px solid #dce5de; border-radius: 12px; background: white; box-shadow: 0 4px 16px #244c3708; transition: border .15s, box-shadow .15s; }
-.search-icon { color: #6c9c7e; font-size: 29px; line-height: 1; transform: rotate(-20deg); }
+.search-icon { color: #6c9c7e; flex-shrink: 0; }
 .search-wrap input { width: 100%; height: 100%; border: 0; outline: 0; color: var(--ink); font-size: 14px; }
 .search-wrap input::placeholder { color: #9aa79f; }
 .search-wrap kbd { padding: 4px 6px; border: 1px solid #e6ebe7; border-radius: 5px; color: #89958d; font: 600 11.5px var(--font); }
@@ -514,7 +515,7 @@ button:disabled { cursor: not-allowed; }
 .catalog-search-area { flex: 0 0 auto; }
 .pos-shell .search-wrap { height: 44px; gap: 10px; padding: 0 11px; border-color: #cbd8ed; border-radius: 8px; box-shadow: none; }
 .pos-shell .search-wrap:focus-within { border-color: #155eef; box-shadow: 0 0 0 3px #155eef17; }
-.pos-shell .search-icon { color: #536782; font-size: 24px; }
+.pos-shell .search-icon { color: #536782; }
 .pos-shell .search-wrap input { font-size: 12px; }
 .pos-shell .search-wrap input::placeholder { color: #8290a4; }
 .pos-shell .search-wrap kbd { border-color: #dbe3ed; border-radius: 5px; color: #52647c; }

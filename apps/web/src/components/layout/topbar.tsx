@@ -1,5 +1,19 @@
 'use client';
 
+import {
+  ArrowLeftRight,
+  Bell,
+  Check,
+  ChevronDown,
+  CircleHelp,
+  Lock,
+  LogOut,
+  MapPin,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  Settings,
+} from 'lucide-react';
 import React from 'react';
 import { AuthSession } from '@/lib/auth';
 
@@ -45,10 +59,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       {/* Search (left, like the reference layout) */}
       {showSearch && (
       <div className="drive-search-pill" role="search">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-          <circle cx="10.8" cy="10.8" r="6.3" />
-          <path d="m16 16 4.5 4.5" />
-        </svg>
+        <Search size={18} aria-hidden="true" />
         <input
           type="text"
           placeholder="Search..."
@@ -91,11 +102,11 @@ export const TopBar: React.FC<TopBarProps> = ({
             title={isLocationLocked ? 'Store location fixed to assigned terminal' : 'Switch viewing location scope'}
           >
             <span style={{ color: isLocationLocked ? '#64748b' : '#3e64a0', fontSize: '13px' }}>
-              {isLocationLocked ? '🔒' : '⌖'}
+              {isLocationLocked ? <Lock size="1em" className="inline-icon" aria-hidden="true" /> : <MapPin size="1em" className="inline-icon" aria-hidden="true" />}
             </span>
             <span className="drive-location-name">{location || 'Location unavailable'}</span>
             {!isLocationLocked && (
-              <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+              <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
             )}
           </button>
 
@@ -151,10 +162,10 @@ export const TopBar: React.FC<TopBarProps> = ({
                     }}
                   >
                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ color: isSelected ? '#3e64a0' : '#94a3b8', fontSize: '13px' }}>⌖</span>
+                      <span style={{ color: isSelected ? '#3e64a0' : '#94a3b8', fontSize: '13px' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                       {item}
                     </span>
-                    {isSelected && <span style={{ color: '#3e64a0', fontSize: '13px', fontWeight: 800 }}>✓</span>}
+                    {isSelected && <span style={{ color: '#3e64a0', fontSize: '13px', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                   </button>
                 );
               })}
@@ -166,9 +177,9 @@ export const TopBar: React.FC<TopBarProps> = ({
       {/* Workspace controls and account actions stay in distinct, aligned groups. */}
       <div className="drive-topbar-right">
         <div className="drive-header-tools" aria-label="Workspace tools">
-          <button type="button" className="drive-icon-button" title="Notifications" aria-label="Notifications" onClick={() => alert('No new enterprise notifications.')}>🔔</button>
-          <button type="button" className="drive-icon-button" title="Help & Documentation" aria-label="Help" onClick={() => window.open('/operations', '_blank')}>?</button>
-          <a href="/settings" className="drive-icon-button" title="System Settings" aria-label="Settings" style={{ textDecoration: 'none' }}>⚙️</a>
+          <button type="button" className="drive-icon-button" title="Notifications" aria-label="Notifications" onClick={() => alert('No new enterprise notifications.')}><Bell size="1em" className="inline-icon" aria-hidden="true" /></button>
+          <button type="button" className="drive-icon-button" title="Help & Documentation" aria-label="Help" onClick={() => window.open('/operations', '_blank')}><CircleHelp size={18} aria-hidden="true" /></button>
+          <a href="/settings" className="drive-icon-button" title="System Settings" aria-label="Settings" style={{ textDecoration: 'none' }}><Settings size="1em" className="inline-icon" aria-hidden="true" /></a>
         </div>
         <span className="drive-header-divider" aria-hidden="true" />
 
@@ -198,7 +209,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             <div className="drive-profile-avatar">
               {userInitials.slice(0, 1)}
             </div>
-            <span style={{ fontSize: '9px', color: '#94a3b8' }}>▼</span>
+            <span style={{ fontSize: '9px', color: '#94a3b8' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
           </button>
 
           {isProfileOpen && (
@@ -276,7 +287,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <span>⚙️</span> Account Settings
+                  <span><Settings size="1em" className="inline-icon" aria-hidden="true" /></span> Account Settings
                 </a>
                 <a
                   href="/login"
@@ -295,7 +306,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <span>⇄</span> Switch Role / Account
+                  <span><ArrowLeftRight size="1em" className="inline-icon" aria-hidden="true" /></span> Switch Role / Account
                 </a>
                 <button
                   type="button"
@@ -319,7 +330,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   onMouseEnter={(e) => (e.currentTarget.style.background = '#fef2f2')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <span>⏻</span> Sign Out
+                  <span><LogOut size="1em" className="inline-icon" aria-hidden="true" /></span> Sign Out
                 </button>
               </div>
             </div>
@@ -335,7 +346,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           aria-label="Toggle Sidebar"
           onClick={toggleSidebar}
         >
-          {collapsed ? '›' : '⊶'}
+          {collapsed ? <PanelLeftOpen size={16} aria-hidden="true" /> : <PanelLeftClose size={16} aria-hidden="true" />}
         </button>
       </div>
     </header>

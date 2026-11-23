@@ -1,5 +1,30 @@
 'use client';
 
+import {
+  Ban,
+  Banknote,
+  Check,
+  Circle,
+  Clock,
+  CreditCard,
+  Ellipsis,
+  IndianRupee,
+  Info,
+  LogOut,
+  Minus,
+  Package,
+  Plus,
+  ReceiptText,
+  Search,
+  ShieldCheck,
+  Smartphone,
+  Store,
+  TriangleAlert,
+  Undo2,
+  UserRound,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import styles from './sales-controls.module.css';
@@ -74,35 +99,33 @@ type ReturnLineSelection = {
   inspectionNotes: string;
 };
 
+const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
+  search: Search,
+  shield: ShieldCheck,
+  alert: TriangleAlert,
+  check: Check,
+  x: X,
+  return: Undo2,
+  ban: Ban,
+  receipt: ReceiptText,
+  rupee: IndianRupee,
+  user: UserRound,
+  store: Store,
+  clock: Clock,
+  card: CreditCard,
+  cash: Banknote,
+  phone: Smartphone,
+  dots: Ellipsis,
+  box: Package,
+  minus: Minus,
+  plus: Plus,
+  logout: LogOut,
+  info: Info,
+};
+
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
-  const icons: Record<string, React.ReactNode> = {
-    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-    shield: <><path d="M12 3 19 6v5c0 4.8-3 8.1-7 10-4-1.9-7-5.2-7-10V6z" /><path d="m9 12 2 2 4-4" /></>,
-    alert: <><path d="M12 3 2.5 20h19z" /><path d="M12 10v4M12 17h.01" /></>,
-    check: <path d="m5 12 4 4L19 6" />,
-    x: <path d="M18 6 6 18M6 6l12 12" />,
-    return: <><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></>,
-    ban: <><circle cx="12" cy="12" r="9" /><path d="m5.7 5.7 12.6 12.6" /></>,
-    receipt: <><path d="M6 3.5h12v17l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6M9 16h3" /></>,
-    rupee: <path d="M7 5h10M7 9.5h10M10 5c5 0 5 9 0 9H7l7 6" />,
-    user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
-    store: <><path d="M4 10v10h16V10" /><path d="M3 10 5 4h14l2 6c0 1.4-1.1 2.5-2.5 2.5S16 11.4 16 10c0 1.4-1.1 2.5-2.5 2.5h-3C9.1 12.5 8 11.4 8 10c0 1.4-1.1 2.5-2.5 2.5S3 11.4 3 10Z" /></>,
-    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-    card: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h3" /></>,
-    cash: <><rect x="3" y="6" width="18" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></>,
-    phone: <><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M11 17h2" /></>,
-    dots: <><circle cx="6" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="18" cy="12" r="1.3" /></>,
-    box: <><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z" /><path d="m4.5 7.7 7.5 4.2 7.5-4.2M12 12v9" /></>,
-    minus: <path d="M5 12h14" />,
-    plus: <path d="M12 5v14M5 12h14" />,
-    logout: <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l4-4-4-4M14 12H3" />,
-    info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
-  };
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {icons[name] || <circle cx="12" cy="12" r="9" />}
-    </svg>
-  );
+  const Glyph = ICON_COMPONENTS[name] ?? Circle;
+  return <Glyph size={size} strokeWidth={1.9} aria-hidden="true" />;
 }
 
 type RefundMethod = 'CASH' | 'CARD' | 'ONLINE' | 'OTHER';

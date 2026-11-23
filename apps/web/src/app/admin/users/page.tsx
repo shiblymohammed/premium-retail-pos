@@ -1,5 +1,25 @@
 'use client';
 
+import {
+  ChartNoAxesColumn,
+  Check,
+  ChevronDown,
+  CreditCard,
+  Ellipsis,
+  FileText,
+  Folder,
+  FolderOpen,
+  Info,
+  LayoutGrid,
+  Link2,
+  List,
+  MapPin,
+  Package,
+  Pencil,
+  Plus,
+  UserRound,
+  X,
+} from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { QuickAccessCard } from '@/components/admin';
@@ -314,21 +334,21 @@ export default function UserManagementPage() {
       case 'SUPER_ADMIN':
       case 'ADMIN':
         return {
-          icon: '📄',
+          icon: <FileText size={13} aria-hidden="true" />,
           bg: '#e8f0fe',
           color: '#1a62ea',
           border: '#d2e3fc',
         };
       case 'STORE_MANAGER':
         return {
-          icon: '📊',
+          icon: <ChartNoAxesColumn size={13} aria-hidden="true" />,
           bg: '#e6f4ea',
           color: '#137333',
           border: '#ceead6',
         };
       case 'CASHIER':
         return {
-          icon: '💳',
+          icon: <CreditCard size={13} aria-hidden="true" />,
           bg: '#fef7e0',
           color: '#b06000',
           border: '#feefc3',
@@ -336,7 +356,7 @@ export default function UserManagementPage() {
       case 'CENTRAL_MANAGER':
       case 'SUB_WAREHOUSE_MANAGER':
         return {
-          icon: '📦',
+          icon: <Package size={13} aria-hidden="true" />,
           bg: '#f3e8fd',
           color: '#8430ce',
           border: '#e9d2fd',
@@ -344,7 +364,7 @@ export default function UserManagementPage() {
       case 'STAFF':
       default:
         return {
-          icon: '👤',
+          icon: <UserRound size={13} aria-hidden="true" />,
           bg: '#f1f3f4',
           color: '#5f6368',
           border: '#dadce0',
@@ -370,13 +390,14 @@ export default function UserManagementPage() {
             boxShadow: '0 2px 8px rgba(16, 185, 129, 0.1)',
           }}
         >
-          <span style={{ fontWeight: 600 }}>✓ {notice}</span>
+          <span style={{ fontWeight: 600 }}><Check size="1em" className="inline-icon" aria-hidden="true" /> {notice}</span>
           <button
             type="button"
+            aria-label="Dismiss notice"
             onClick={() => setNotice('')}
             style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
           >
-            ✕
+            <X size="1em" className="inline-icon" aria-hidden="true" />
           </button>
         </div>
       )}
@@ -400,7 +421,7 @@ export default function UserManagementPage() {
               }}
               title="Dual-Axis Directory"
             >
-              📁
+              <Folder size="1em" className="inline-icon" aria-hidden="true" />
             </span>
           </h1>
         </div>
@@ -424,7 +445,7 @@ export default function UserManagementPage() {
               }}
               title="List View"
             >
-              ☰
+              <List size="1em" className="inline-icon" aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -442,7 +463,7 @@ export default function UserManagementPage() {
               }}
               title="Grid View"
             >
-              ⊞
+              <LayoutGrid size="1em" className="inline-icon" aria-hidden="true" />
             </button>
           </div>
 
@@ -463,7 +484,7 @@ export default function UserManagementPage() {
             }}
             title="Directory Info"
           >
-            ⓘ
+            <Info size="1em" className="inline-icon" aria-hidden="true" />
           </button>
 
           <button
@@ -484,7 +505,7 @@ export default function UserManagementPage() {
               boxShadow: '0 2px 10px rgba(26, 98, 234, 0.28)',
             }}
           >
-            <span style={{ fontSize: '15px' }}>+</span> Provision New User
+            <span style={{ fontSize: '15px' }}><Plus size="1em" className="inline-icon" aria-hidden="true" /></span> Provision New User
           </button>
         </div>
       </div>
@@ -546,7 +567,7 @@ export default function UserManagementPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: '#1a62ea' }}>🗎</span>
+                <span style={{ fontSize: '18px', color: '#1a62ea' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>Executive Admins</strong>
               </div>
               <div
@@ -623,9 +644,9 @@ export default function UserManagementPage() {
                   boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                 }}
               >
-                <span>👤</span>
+                <span><UserRound size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <span>{roleLabels[roleFilter] || 'All Roles'}</span>
-                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {openDropdown === 'ROLE' && (
@@ -679,7 +700,7 @@ export default function UserManagementPage() {
                         }}
                       >
                         <span>{opt.label}</span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -708,9 +729,9 @@ export default function UserManagementPage() {
                   boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                 }}
               >
-                <span>⌖</span>
+                <span><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <span>{locationFilter === 'ALL' ? 'All Locations' : locationFilter}</span>
-                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {openDropdown === 'LOCATION' && (
@@ -760,7 +781,7 @@ export default function UserManagementPage() {
                     }}
                   >
                     <span>All Store Locations</span>
-                    {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                    {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                   </button>
                   {availableLocations.map((location) => {
                     const loc = location.name;
@@ -796,10 +817,10 @@ export default function UserManagementPage() {
                         }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ color: '#1a62ea' }}>⌖</span>
+                          <span style={{ color: '#1a62ea' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                           {loc}
                         </span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -830,7 +851,7 @@ export default function UserManagementPage() {
               >
                 <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : '#64748b' }}></span>
                 <span>{statusFilter === 'ALL' ? 'All Statuses' : statusFilter === 'ACTIVE' ? 'Active Only' : 'Inactive Only'}</span>
-                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}>▼</span>
+                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {openDropdown === 'STATUS' && (
@@ -891,7 +912,7 @@ export default function UserManagementPage() {
                           <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: st.dot }}></span>
                           {st.label}
                         </span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}>✓</span>}
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -958,7 +979,7 @@ export default function UserManagementPage() {
                 {filteredUsers.length === 0 ? (
                   <tr>
                     <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
-                      <div style={{ fontSize: '32px', marginBottom: '8px' }}>📂</div>
+                      <div style={{ fontSize: '32px', marginBottom: '8px' }}><FolderOpen size="1em" className="inline-icon" aria-hidden="true" /></div>
                       <strong>No accounts matching the active filters</strong>
                       <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new user.</p>
                     </td>
@@ -1115,7 +1136,7 @@ export default function UserManagementPage() {
                           </div>
                         </td>
 
-                        {/* Column 5: Action Icons (🔗 Link copy + ··· More actions popup) */}
+                        {/* Column 5: Copy details and more actions */}
                         <td style={{ padding: '13px 20px', textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
                             <button
@@ -1138,7 +1159,7 @@ export default function UserManagementPage() {
                               }}
                               title="Copy User Access Details"
                             >
-                              🔗
+                              <Link2 size="1em" className="inline-icon" aria-hidden="true" />
                             </button>
 
                             <div className="user-action-menu-wrap" style={{ position: 'relative' }}>
@@ -1163,7 +1184,7 @@ export default function UserManagementPage() {
                                 }}
                                 title="More Actions"
                               >
-                                ···
+                                <Ellipsis size="1em" className="inline-icon" aria-hidden="true" />
                               </button>
 
                               {/* Action Menu Popover */}
@@ -1205,7 +1226,7 @@ export default function UserManagementPage() {
                                       gap: '8px',
                                     }}
                                   >
-                                    <span>✎</span> Edit Account
+                                    <span><Pencil size="1em" className="inline-icon" aria-hidden="true" /></span> Edit Account
                                   </button>
                                   <button
                                     type="button"
@@ -1228,7 +1249,7 @@ export default function UserManagementPage() {
                                       gap: '8px',
                                     }}
                                   >
-                                    <span>{u.isActive ? '✕' : '✓'}</span> {u.isActive ? 'Deactivate' : 'Reactivate'}
+                                    <span>{u.isActive ? <X size="1em" className="inline-icon" aria-hidden="true" /> : <Check size="1em" className="inline-icon" aria-hidden="true" />}</span> {u.isActive ? 'Deactivate' : 'Reactivate'}
                                   </button>
                                 </div>
                               )}
@@ -1282,10 +1303,11 @@ export default function UserManagementPage() {
               </div>
               <button
                 type="button"
+                aria-label="Close"
                 onClick={() => setIsModalOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
               >
-                ✕
+                <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 

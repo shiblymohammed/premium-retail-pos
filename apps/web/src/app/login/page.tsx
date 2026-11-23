@@ -1,5 +1,21 @@
 'use client';
 
+import {
+  ArrowRight,
+  ArrowUp,
+  ChartNoAxesColumn,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  House,
+  LockKeyhole,
+  Mail,
+  Package,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Tag,
+} from 'lucide-react';
 import { FormEvent, Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -192,7 +208,7 @@ function LoginForm() {
               <div className={styles.formGroup}>
                 <label htmlFor="login-email">Email address</label>
                 <div className={`${styles.inputWrap} ${errors.email ? styles.inputInvalid : ''}`}>
-                  <span className={styles.fieldIcon} aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><rect x="2.8" y="4.2" width="14.4" height="11.6" rx="2" stroke="currentColor" strokeWidth="1.6"/><path d="m4 5.8 6 4.6 6-4.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
+                  <span className={styles.fieldIcon} aria-hidden="true"><Mail size={18} strokeWidth={1.8} aria-hidden="true" /></span>
                   <input id="login-email" name="email" type="email" required maxLength={254} value={email} onChange={(event) => { setEmail(event.target.value); setError(''); setErrors((current) => ({ ...current, email: undefined })); }} onBlur={handleEmailBlur} placeholder="you@company.com" autoComplete="username" autoCapitalize="none" spellCheck={false} aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? 'login-email-error' : undefined} />
                 </div>
                 {errors.email && <p className={styles.fieldError} id="login-email-error">{errors.email}</p>}
@@ -201,10 +217,10 @@ function LoginForm() {
               <div className={styles.formGroup}>
                 <label htmlFor="login-password">Password</label>
                 <div className={`${styles.inputWrap} ${errors.password ? styles.inputInvalid : ''}`}>
-                  <span className={styles.fieldIcon} aria-hidden="true"><svg viewBox="0 0 20 20" fill="none"><rect x="3.5" y="8.5" width="13" height="9" rx="1.8" stroke="currentColor" strokeWidth="1.6"/><path d="M6.5 8.5V6a3.5 3.5 0 0 1 7 0v2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M10 12v2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg></span>
+                  <span className={styles.fieldIcon} aria-hidden="true"><LockKeyhole size={18} strokeWidth={1.8} aria-hidden="true" /></span>
                   <input id="login-password" name="password" type={showPassword ? 'text' : 'password'} required minLength={8} maxLength={72} value={password} onChange={(event) => { setPassword(event.target.value); setError(''); setErrors((current) => ({ ...current, password: undefined })); }} onBlur={handlePasswordBlur} placeholder="Enter your password" autoComplete="current-password" aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? 'login-password-error' : undefined} />
                   <button className={styles.passwordToggle} type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}>
-                    {showPassword ? <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M3 3l14 14M8.6 8.7a2 2 0 0 0 2.7 2.7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/><path d="M6.3 5.2A9.4 9.4 0 0 1 10 4.5c4.1 0 7.2 3.3 8.2 5.5a9.7 9.7 0 0 1-2.4 3.2M4.4 6.5A10.6 10.6 0 0 0 1.8 10c1 2.2 4.1 5.5 8.2 5.5 1 0 1.9-.2 2.7-.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg> : <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M1.8 10S4.7 4.5 10 4.5 18.2 10 18.2 10 15.3 15.5 10 15.5 1.8 10 1.8 10Z" stroke="currentColor" strokeWidth="1.5"/><circle cx="10" cy="10" r="2.3" stroke="currentColor" strokeWidth="1.5"/></svg>}
+                    {showPassword ? <EyeOff size={18} strokeWidth={1.8} aria-hidden="true" /> : <Eye size={18} strokeWidth={1.8} aria-hidden="true" />}
                   </button>
                 </div>
                 {errors.password && <p className={styles.fieldError} id="login-password-error">{errors.password}</p>}
@@ -212,7 +228,7 @@ function LoginForm() {
 
               <button type="submit" disabled={busy} className={styles.submitBtn}>
                 <span>{busy ? 'Signing in…' : 'Sign in'}</span>
-                {!busy && <span className={styles.submitArrow} aria-hidden="true">→</span>}
+                {!busy && <span className={styles.submitArrow} aria-hidden="true"><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span>}
               </button>
             </form>
 
@@ -228,7 +244,7 @@ function LoginForm() {
 
         <section className={styles.visualPanel} aria-label="Premium Retail workspace preview">
           <div className={styles.visualCopy}>
-            <div className={styles.platformPill}><span>✦</span> Retail Management Platform</div>
+            <div className={styles.platformPill}><span><Sparkles size="1em" className="inline-icon" aria-hidden="true" /></span> Retail Management Platform</div>
             <h2>Every part of your store,<br /><span>in one clear view.</span></h2>
             <p>Track sales. Manage inventory. Grow your business<br className={styles.desktopBreak} /> with more clarity and less effort.</p>
           </div>
@@ -237,20 +253,20 @@ function LoginForm() {
             <div className={styles.previewHeader}>
               <span className={styles.previewBrand}>P</span>
               <strong>Operations overview</strong>
-              <span className={styles.previewChevron}>⌄</span>
+              <span className={styles.previewChevron}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               <span className={styles.previewLive}><i /> Workspace preview</span>
             </div>
             <div className={styles.previewContent}>
               <nav className={styles.previewNav}>
-                <span className={styles.navActive}><i>⌂</i></span><span><i>▥</i></span><span><i>⬡</i></span><span><i>◇</i></span><span><i>⚙</i></span>
+                <span className={styles.navActive}><i><House size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><ChartNoAxesColumn size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><Package size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><Tag size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><Settings size="1em" className="inline-icon" aria-hidden="true" /></i></span>
               </nav>
               <div className={styles.previewMain}>
-                <div className={styles.previewMainHeading}><strong>Retail store performance</strong><span>Today⌄</span></div>
+                <div className={styles.previewMainHeading}><strong>Retail store performance</strong><span>Today<ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span></div>
                 <div className={styles.metricGrid}>
-                  <div className={styles.metricCard}><span>Net sales</span><strong>₹2,48,500</strong><small>↑ 12.5%</small><i className={styles.sparkOne}/></div>
-                  <div className={styles.metricCard}><span>Orders</span><strong>1,204</strong><small>↑ 8.1%</small><i className={styles.sparkTwo}/></div>
-                  <div className={styles.metricCard}><span>Active stores</span><strong>25</strong><small>↑ 0.0%</small><i className={styles.sparkThree}/></div>
-                  <div className={styles.metricCard}><span>Avg. order value</span><strong>₹2,062</strong><small>↑ 6.4%</small><i className={styles.sparkFour}/></div>
+                  <div className={styles.metricCard}><span>Net sales</span><strong>₹2,48,500</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 12.5%</small><i className={styles.sparkOne}/></div>
+                  <div className={styles.metricCard}><span>Orders</span><strong>1,204</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 8.1%</small><i className={styles.sparkTwo}/></div>
+                  <div className={styles.metricCard}><span>Active stores</span><strong>25</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 0.0%</small><i className={styles.sparkThree}/></div>
+                  <div className={styles.metricCard}><span>Avg. order value</span><strong>₹2,062</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 6.4%</small><i className={styles.sparkFour}/></div>
                 </div>
                 <div className={styles.analyticsGrid}>
                   <div className={styles.salesChart}>
@@ -278,7 +294,7 @@ function LoginForm() {
               </div>
             </div>
           </div>
-          <div className={styles.secureFoot}><span aria-hidden="true">♙</span> Your data is secure with us</div>
+          <div className={styles.secureFoot}><span aria-hidden="true"><ShieldCheck size="1em" className="inline-icon" aria-hidden="true" /></span> Your data is secure with us</div>
         </section>
       </div>
     </main>

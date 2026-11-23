@@ -1,5 +1,6 @@
 'use client';
 
+import { TriangleAlert } from 'lucide-react';
 import { useEffect } from 'react';
 
 export default function GlobalError({
@@ -40,7 +41,7 @@ export default function GlobalError({
           margin: '0 auto 16px',
         }}
       >
-        ⚠️
+        <TriangleAlert size="1em" className="inline-icon" aria-hidden="true" />
       </div>
 
       <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>

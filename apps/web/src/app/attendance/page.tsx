@@ -1,5 +1,6 @@
 'use client';
 
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronRight, Clock, Info, MapPin, Power, QrCode, Timer } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import styles from './attendance.module.css';
@@ -288,17 +289,17 @@ export default function AttendancePage() {
   return (
     <main className={`${styles.page} app-page`}>
       <div className={styles.content}>
-        <div className={styles.breadcrumb}><span>Workforce</span><b>›</b><strong>My attendance</strong></div>
+        <div className={styles.breadcrumb}><span>Workforce</span><b><ChevronRight size="1em" className="inline-icon" aria-hidden="true" /></b><strong>My attendance</strong></div>
         <header className={styles.pageHeading}>
           <div><p className={styles.eyebrow}>STAFF WORKSPACE · {today.employee.employeeCode}</p><h1>My attendance</h1><p className={styles.subtitle}>Record today’s shift and review your recent attendance.</p></div>
-          <div className={styles.headingMeta}><span className={styles.locationPin}>⌖</span><span><strong>{today.location.name}</strong><small>{longDate}</small></span></div>
+          <div className={styles.headingMeta}><span className={styles.locationPin}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span><span><strong>{today.location.name}</strong><small>{longDate}</small></span></div>
         </header>
 
         <section className={styles.summaryGrid} aria-label="Attendance summary">
-          <article className={styles.summaryCard}><span className={styles.summaryIcon}>◷</span><div><small>SHIFT STATUS</small><strong className={statusClass}>{statusLabel}</strong></div><i className={today.status === 'WORKING' ? styles.statusIndicatorLive : ''} /></article>
-          <article className={styles.summaryCard}><span className={styles.summaryIcon}>↗</span><div><small>TARGET START</small><strong>{today.targetStartTime || 'Not set'}</strong><em>{clockIn?.isLate ? 'Late arrival recorded' : 'Store schedule'}</em></div></article>
-          <article className={styles.summaryCard}><span className={styles.summaryIcon}>⏱</span><div><small>TIME ON SHIFT</small><strong className={styles.duration}>{today.status === 'WORKING' ? elapsed : today.status === 'COMPLETED' ? elapsed : '—'}</strong><em>{today.status === 'WORKING' ? 'Live · hours : minutes' : today.status === 'COMPLETED' ? 'Today’s total' : 'Starts after clock-in'}</em></div></article>
-          <article className={styles.summaryCard}><span className={styles.summaryIcon}>✓</span><div><small>LAST 6 MONTHS</small><strong>{historySummary.shifts} shifts</strong><em>{historySummary.late} late arrivals</em></div></article>
+          <article className={styles.summaryCard}><span className={styles.summaryIcon}><Clock size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>SHIFT STATUS</small><strong className={statusClass}>{statusLabel}</strong></div><i className={today.status === 'WORKING' ? styles.statusIndicatorLive : ''} /></article>
+          <article className={styles.summaryCard}><span className={styles.summaryIcon}><ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>TARGET START</small><strong>{today.targetStartTime || 'Not set'}</strong><em>{clockIn?.isLate ? 'Late arrival recorded' : 'Store schedule'}</em></div></article>
+          <article className={styles.summaryCard}><span className={styles.summaryIcon}><Timer size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>TIME ON SHIFT</small><strong className={styles.duration}>{today.status === 'WORKING' ? elapsed : today.status === 'COMPLETED' ? elapsed : '—'}</strong><em>{today.status === 'WORKING' ? 'Live · hours : minutes' : today.status === 'COMPLETED' ? 'Today’s total' : 'Starts after clock-in'}</em></div></article>
+          <article className={styles.summaryCard}><span className={styles.summaryIcon}><Check size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>LAST 6 MONTHS</small><strong>{historySummary.shifts} shifts</strong><em>{historySummary.late} late arrivals</em></div></article>
         </section>
 
         {(error || notice) && <div className={`${styles.feedback} ${profileMissing ? styles.feedbackPreview : error ? styles.feedbackError : styles.feedbackSuccess}`} role={error ? 'alert' : 'status'}>{error || notice}</div>}
@@ -307,13 +308,13 @@ export default function AttendancePage() {
           <article className={styles.actionPanel}>
             <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><h2>Shift check-in</h2><p>Clock in when you’re ready to begin, then clock out at the end of your shift.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
 
-            {!profileMissing && today.qrRequired && today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}><span className={styles.qrIcon}>{qrToken ? '✓' : '⌗'}</span><div><strong>{qrToken ? 'Store verification ready' : 'Store QR check required'}</strong><small>{qrToken ? 'The current counter code will be checked by the server.' : 'Open this page from the current attendance QR displayed at your store.'}</small></div></div>}
+            {!profileMissing && today.qrRequired && today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}><span className={styles.qrIcon}>{qrToken ? <Check size="1em" className="inline-icon" aria-hidden="true" /> : <QrCode size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{qrToken ? 'Store verification ready' : 'Store QR check required'}</strong><small>{qrToken ? 'The current counter code will be checked by the server.' : 'Open this page from the current attendance QR displayed at your store.'}</small></div></div>}
 
             <div className={styles.shiftControls}>
               {today.status === 'NOT_STARTED' && <>
                 <div className={styles.localClock}><span>LOCAL TIME</span><strong>{clockValue}</strong><small>{today.targetStartTime ? `Scheduled start · ${today.targetStartTime}` : 'Ready when you are'}</small></div>
                 <button className={styles.attendanceOrb} type="button" disabled={busy || Boolean(apiToken && today.qrRequired && !qrToken)} onClick={handlePunch} aria-label="Clock in and start your shift">
-                  <span className={styles.orbIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v9m-6.4-6.4a9 9 0 1 0 12.8 0" /></svg></span>
+                  <span className={styles.orbIcon} aria-hidden="true"><Power size={22} strokeWidth={1.8} aria-hidden="true" /></span>
                   <strong>{busy ? 'Saving…' : 'Clock in'}</strong><small>Start shift</small>
                 </button>
                 {profileMissing && <div className={styles.profileNotice}><span>i</span><div><strong>Attendance unavailable</strong><small>No employee profile is linked to this account. Ask an administrator to create or link your employee record before clocking in.</small></div></div>}
@@ -321,17 +322,17 @@ export default function AttendancePage() {
 
               {today.status === 'WORKING' && <div className={styles.activeShift}>
                 <div className={styles.timerCircle}><span className={styles.timerLive}><i /> SHIFT IN PROGRESS</span><strong>{elapsed}</strong><small>HOURS : MINUTES</small><em>Clocked in at {clockIn ? formatTime(clockIn.punchTimestamp) : '—'}</em></div>
-                <button className={styles.clockOutAction} type="button" disabled={busy} onClick={handlePunch}><span aria-hidden="true">↙</span><strong>{busy ? 'Saving…' : 'Clock out'}</strong><small>Finish today’s shift</small></button>
+                <button className={styles.clockOutAction} type="button" disabled={busy} onClick={handlePunch}><span aria-hidden="true"><ArrowDownLeft size="1em" className="inline-icon" aria-hidden="true" /></span><strong>{busy ? 'Saving…' : 'Clock out'}</strong><small>Finish today’s shift</small></button>
               </div>}
 
-              {today.status === 'COMPLETED' && <div className={styles.completedShift}><span className={styles.completedIcon}>✓</span><small>SHIFT COMPLETE</small><strong>{elapsed}</strong><p>{clockIn ? `Clocked in ${formatTime(clockIn.punchTimestamp)}` : 'Clock-in recorded'} · {clockOut ? `Clocked out ${formatTime(clockOut.punchTimestamp)}` : 'Clock-out recorded'}</p></div>}
+              {today.status === 'COMPLETED' && <div className={styles.completedShift}><span className={styles.completedIcon}><Check size="1em" className="inline-icon" aria-hidden="true" /></span><small>SHIFT COMPLETE</small><strong>{elapsed}</strong><p>{clockIn ? `Clocked in ${formatTime(clockIn.punchTimestamp)}` : 'Clock-in recorded'} · {clockOut ? `Clocked out ${formatTime(clockOut.punchTimestamp)}` : 'Clock-out recorded'}</p></div>}
             </div>
 
-            {!profileMissing && <div className={styles.policyNote}><span>i</span><p>{today.targetStartTime ? `Scheduled start is ${today.targetStartTime}. A later clock-in is recorded as late.` : 'Your manager has not set a shift start time yet.'} All times use the store’s local time.</p></div>}
+            {!profileMissing && <div className={styles.policyNote}><span><Info size="1em" className="inline-icon" aria-hidden="true" /></span><p>{today.targetStartTime ? `Scheduled start is ${today.targetStartTime}. A later clock-in is recorded as late.` : 'Your manager has not set a shift start time yet.'} All times use the store’s local time.</p></div>}
 
             <div className={styles.todayTimeline}>
               <div className={styles.subheading}><div><span className={styles.sectionLabel}>PUNCH RECORD</span><h3>Today’s activity</h3></div><span>{today.punches.length} {today.punches.length === 1 ? 'entry' : 'entries'}</span></div>
-              {today.punches.length ? today.punches.slice().reverse().map((punch) => <div className={styles.punchRow} key={punch.id}><span className={`${styles.punchMarker} ${punch.punchType === 'OUT' ? styles.punchMarkerOut : ''}`}>{punch.punchType === 'IN' ? '↗' : '↙'}</span><div><strong>{punch.punchType === 'IN' ? 'Clocked in' : 'Clocked out'}{punch.isLate && <em className={styles.lateBadge}>Late</em>}</strong><small>{punch.isLate ? `After scheduled start at ${punch.targetStartTime}` : punch.qrVerified ? 'Store verification recorded' : 'Time recorded on this device'}{punch.correctionReason ? ` · Corrected: ${punch.correctionReason}` : ''}</small></div><time>{formatTime(punch.punchTimestamp)}</time></div>) : <div className={styles.noPunches}><span>◷</span><p>No punches yet today. Your clock-in and clock-out will appear here.</p></div>}
+              {today.punches.length ? today.punches.slice().reverse().map((punch) => <div className={styles.punchRow} key={punch.id}><span className={`${styles.punchMarker} ${punch.punchType === 'OUT' ? styles.punchMarkerOut : ''}`}>{punch.punchType === 'IN' ? <ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /> : <ArrowDownLeft size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{punch.punchType === 'IN' ? 'Clocked in' : 'Clocked out'}{punch.isLate && <em className={styles.lateBadge}>Late</em>}</strong><small>{punch.isLate ? `After scheduled start at ${punch.targetStartTime}` : punch.qrVerified ? 'Store verification recorded' : 'Time recorded on this device'}{punch.correctionReason ? ` · Corrected: ${punch.correctionReason}` : ''}</small></div><time>{formatTime(punch.punchTimestamp)}</time></div>) : <div className={styles.noPunches}><span><Clock size="1em" className="inline-icon" aria-hidden="true" /></span><p>No punches yet today. Your clock-in and clock-out will appear here.</p></div>}
             </div>
           </article>
 
@@ -355,7 +356,7 @@ export default function AttendancePage() {
 
             <article className={styles.recentPanel}>
               <div className={styles.subheading}><div><span className={styles.sectionLabel}>RECENT RECORDS</span><h3>Previous workdays</h3></div><span>Latest 7</span></div>
-              <div className={styles.recentList}>{recentHistory.length ? recentHistory.map((day) => <div className={styles.recentRow} key={day.date}><span className={`${styles.recentMark} ${styles[`recent_${day.status}`]}`}>{day.status === 'late' ? '↗' : '✓'}</span><div className={styles.recentDate}><strong>{new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${day.date}T12:00:00`))}</strong><small>{HISTORY_LABEL[day.status]}</small></div><div className={styles.recentTimes}><strong>{day.clockIn} <span>→</span> {day.clockOut}</strong><small>{day.hours}</small></div></div>) : <p className={styles.emptyRecent}>No previous clock-ins found for this period.</p>}</div>
+              <div className={styles.recentList}>{recentHistory.length ? recentHistory.map((day) => <div className={styles.recentRow} key={day.date}><span className={`${styles.recentMark} ${styles[`recent_${day.status}`]}`}>{day.status === 'late' ? <ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /> : <Check size="1em" className="inline-icon" aria-hidden="true" />}</span><div className={styles.recentDate}><strong>{new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${day.date}T12:00:00`))}</strong><small>{HISTORY_LABEL[day.status]}</small></div><div className={styles.recentTimes}><strong>{day.clockIn} <span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span> {day.clockOut}</strong><small>{day.hours}</small></div></div>) : <p className={styles.emptyRecent}>No previous clock-ins found for this period.</p>}</div>
               <div className={styles.recentFooter}><span className={styles.legendDot} /> On time <span className={`${styles.legendDot} ${styles.legendLate}`} /> Late</div>
             </article>
           </div>

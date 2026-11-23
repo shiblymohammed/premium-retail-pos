@@ -1,5 +1,25 @@
 'use client';
 
+import {
+  ArrowRight,
+  Coffee,
+  Cookie,
+  CookingPot,
+  CupSoda,
+  Ellipsis,
+  Minus,
+  Plus,
+  Sandwich,
+  Scroll,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  SoapDispenserDroplet,
+  SprayCan,
+  TriangleAlert,
+  Wheat,
+  X,
+} from 'lucide-react';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearStoredSession, decodeJwt, getStoredSession, setStoredSession } from '@/lib/auth';
 
@@ -97,19 +117,18 @@ type QueuedSale = {
 
 type OfflineQuote = { body: Record<string, any>; netTotal: string };
 
-function productGlyph(product: Product) {
+function getProductIcon(product: Product) {
   const name = product.name.toLowerCase();
-  if (/water|juice|milk|drink/.test(name)) return '🥤';
-  if (/coffee/.test(name)) return '☕';
-  if (/tea/.test(name)) return '🍵';
-  if (/shampoo|lotion|detergent|clean/.test(name)) return '🧴';
-  if (/tissue|paper|napkin/.test(name)) return '🧻';
-  if (/chip|snack|biscuit|cookie/.test(name)) return '🍪';
-  if (/honey|sauce|jam/.test(name)) return '🍯';
-  if (/soap/.test(name)) return '🧼';
-  if (/bread|loaf|bakery/.test(name)) return '🍞';
-  if (/rice|grain|pasta|flour/.test(name)) return '🌾';
-  return product.category?.name.toLowerCase().includes('personal') ? '🧴' : '🛍️';
+  if (/water|juice|milk|drink/.test(name)) return CupSoda;
+  if (/coffee|tea/.test(name)) return Coffee;
+  if (/shampoo|lotion|detergent|clean/.test(name)) return SprayCan;
+  if (/tissue|paper|napkin/.test(name)) return Scroll;
+  if (/chip|snack|biscuit|cookie/.test(name)) return Cookie;
+  if (/honey|sauce|jam/.test(name)) return CookingPot;
+  if (/soap/.test(name)) return SoapDispenserDroplet;
+  if (/bread|loaf|bakery/.test(name)) return Sandwich;
+  if (/rice|grain|pasta|flour/.test(name)) return Wheat;
+  return product.category?.name.toLowerCase().includes('personal') ? SprayCan : ShoppingBag;
 }
 
 const OFFLINE_DB_NAME = 'premium-retail-pos-offline';
@@ -1025,14 +1044,14 @@ export default function PosTerminal() {
             <label htmlFor="password">Password</label>
             <input id="password" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••••••" required />
             {error && <div className="alert error">{error}</div>}
-            <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Opening Terminal…' : 'Unlock POS Terminal'} <span>→</span></button>
+            <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Opening Terminal…' : 'Unlock POS Terminal'} <span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
           </form>
           <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <a
               href="/login?returnUrl=/"
               style={{ textAlign: 'center', fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, padding: '6px' }}
             >
-              Open Unified Login Gateway →
+              Open Unified Login Gateway <ArrowRight size="1em" className="inline-icon" aria-hidden="true" />
             </a>
           </div>
           <div className="secure-note"><span className="status-dot" /> Verified offline cache and store ledger check</div>
@@ -1047,7 +1066,7 @@ export default function PosTerminal() {
         <section className="catalog-panel">
           <div className="catalog-search-area">
             <div className="search-wrap">
-              <span className="search-icon" aria-hidden="true">⌕</span>
+              <Search size={18} className="search-icon" aria-hidden="true" />
               <input
                 ref={searchRef}
                 aria-label="Scan barcode or search products"
@@ -1057,7 +1076,7 @@ export default function PosTerminal() {
                 onChange={(event) => { setQuery(event.target.value); setNotice(''); setError(''); }}
                 onKeyDown={handleSearchKeyDown}
               />
-              {query && <button className="clear-search" type="button" aria-label="Clear search" onClick={() => setQuery('')}>×</button>}
+              {query && <button className="clear-search" type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={16} className="inline-icon" aria-hidden="true" /></button>}
               <kbd>ENTER</kbd>
             </div>
             <div className="scanner-status"><span className="status-dot" /> Ready to scan · Enter a barcode or search</div>
@@ -1080,27 +1099,28 @@ export default function PosTerminal() {
             {catalogLoading && !results.length ? <div className="catalog-loading">Loading products for {terminal.location.name}…</div> : visibleVariants.length ? (
               <div className="product-tiles">
                 {visibleVariants.map(({ product, variant }) => {
+                  const ProductIcon = getProductIcon(product);
                   const stock = stockBalances[variant.id];
                   const qty = stock ? Number(stock.quantityBaseUnits) : null;
                   const isNegative = stock && (stock.negativeAvailable || (qty !== null && qty <= 0));
                   const isLow = stock && !isNegative && (stock.lowStock || (qty !== null && qty <= 10));
                   return (
                     <article className="product-tile" key={variant.id}>
-                      <div className="product-tile-art" aria-hidden="true"><span>{productGlyph(product)}</span></div>
+                      <div className="product-tile-art" aria-hidden="true"><span><ProductIcon size="1em" aria-hidden="true" /></span></div>
                       <div className="product-tile-info">
                         {product.category?.name && <span className="product-category">{product.category.name}</span>}
                         <strong title={product.name}>{product.name}</strong>
                         <span className="product-variant-name">{variant.name}</span>
                         <span className="product-sku">{variant.sku}</span>
                         <strong className="product-price">{formatMoney(product.sellingPrice)} <small>/ {product.baseUnit}</small></strong>
-                        <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-label="Stock alert">!</b>}{isNegative ? `${stock.formattedQuantity} in stock · Backorder sale` : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
+                        <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-hidden="true"><TriangleAlert size={10} aria-hidden="true" /></b>}{isNegative ? `${stock.formattedQuantity} in stock · Backorder sale` : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
                       </div>
-                      <button className="tile-add-button" aria-label={`Add ${product.name} to basket`} disabled={busy || saleRetryPending} onClick={() => addToCart(product, variant)}><span>+</span><span className="tile-add-label">Add</span></button>
+                      <button className="tile-add-button" aria-label={`Add ${product.name} to basket`} disabled={busy || saleRetryPending} onClick={() => addToCart(product, variant)}><span><Plus size="1em" className="inline-icon" aria-hidden="true" /></span><span className="tile-add-label">Add</span></button>
                     </article>
                   );
                 })}
               </div>
-            ) : catalogLoading ? <div className="catalog-loading">Updating catalogue…</div> : <div className="empty-state"><div className="empty-icon">⌕</div><strong>{query ? 'No matching products' : 'No active products found'}</strong><span>{query ? 'Try another product name, SKU, or barcode.' : 'Products available to sell will appear here.'}</span></div>}
+            ) : catalogLoading ? <div className="catalog-loading">Updating catalogue…</div> : <div className="empty-state"><div className="empty-icon"><Search size="1em" className="inline-icon" aria-hidden="true" /></div><strong>{query ? 'No matching products' : 'No active products found'}</strong><span>{query ? 'Try another product name, SKU, or barcode.' : 'Products available to sell will appear here.'}</span></div>}
           </section>
         </section>
 
@@ -1110,17 +1130,17 @@ export default function PosTerminal() {
             <div className="basket-lines">
               {cart.map((line) => (
                 <div className="basket-line" key={line.variantId}>
-                  <div className="basket-line-main"><div className="basket-item-icon">{line.productName.slice(0, 1).toUpperCase()}</div><div className="basket-item-copy"><strong>{line.productName}</strong><span>{line.variantName} · {line.sku}</span><small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small><small className="basket-line-total">Line total · {formatMoney(line.sellingPrice * line.quantity)}</small><small className={stockBalances[line.variantId]?.negativeAvailable ? 'stock-warning-text' : 'basket-stock'}>{stockBalances[line.variantId] ? <>{stockBalances[line.variantId].negativeAvailable ? '⚠ Negative stock: ' : 'Available: '}{stockBalances[line.variantId].quantityBaseUnits} {line.baseUnit}s</> : 'Checking store stock…'}</small></div><button className="remove-button" disabled={removingVariantId === line.variantId || saleRetryPending} aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>{removingVariantId === line.variantId ? '…' : '×'}</button></div>
-                  <div className="quantity-control"><button aria-label="Decrease quantity" disabled={line.quantity <= 1 || saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity - 1))}>−</button><input aria-label={`Quantity for ${line.productName}`} inputMode="numeric" value={line.quantity} disabled={saleRetryPending} onChange={(event) => setQuantity(line.variantId, event.target.value)} /><button aria-label="Increase quantity" disabled={saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity + 1))}>+</button></div>
+                  <div className="basket-line-main"><div className="basket-item-icon">{line.productName.slice(0, 1).toUpperCase()}</div><div className="basket-item-copy"><strong>{line.productName}</strong><span>{line.variantName} · {line.sku}</span><small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small><small className="basket-line-total">Line total · {formatMoney(line.sellingPrice * line.quantity)}</small><small className={stockBalances[line.variantId]?.negativeAvailable ? 'stock-warning-text' : 'basket-stock'}>{stockBalances[line.variantId] ? <>{stockBalances[line.variantId].negativeAvailable ? <><TriangleAlert size="1em" className="inline-icon" aria-hidden="true" /> Negative stock: </> : 'Available: '}{stockBalances[line.variantId].quantityBaseUnits} {line.baseUnit}s</> : 'Checking store stock…'}</small></div><button className="remove-button" disabled={removingVariantId === line.variantId || saleRetryPending} aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>{removingVariantId === line.variantId ? <Ellipsis size={16} className="inline-icon" aria-hidden="true" /> : <X size={16} className="inline-icon" aria-hidden="true" />}</button></div>
+                  <div className="quantity-control"><button aria-label="Decrease quantity" disabled={line.quantity <= 1 || saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity - 1))}><Minus size="1em" className="inline-icon" aria-hidden="true" /></button><input aria-label={`Quantity for ${line.productName}`} inputMode="numeric" value={line.quantity} disabled={saleRetryPending} onChange={(event) => setQuantity(line.variantId, event.target.value)} /><button aria-label="Increase quantity" disabled={saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity + 1))}><Plus size="1em" className="inline-icon" aria-hidden="true" /></button></div>
                   <label className="discount-input">Line discount (%)<input type="number" min="0" max="100" step="0.01" value={lineDiscounts[line.variantId] || ''} disabled={saleRetryPending || Number(billDiscount || 0) > 0} onChange={(event) => setLineDiscounts((current) => ({ ...current, [line.variantId]: event.target.value }))} /></label>
                 </div>
               ))}
             </div>
-          ) : <div className="basket-empty"><div className="basket-empty-icon" aria-hidden="true">🛒</div><strong>Your basket is empty</strong><span>Scan an item or choose a product to get started.</span></div>}
+          ) : <div className="basket-empty"><div className="basket-empty-icon" aria-hidden="true"><ShoppingCart size="1em" className="inline-icon" aria-hidden="true" /></div><strong>Your basket is empty</strong><span>Scan an item or choose a product to get started.</span></div>}
           <div className="basket-footer">
             <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
             <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
-            <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 →</span></button>
+            <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
             <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
             {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
             <p>Prices, discounts, payment, and stock are verified by the server before invoice finalization.</p>
@@ -1182,12 +1202,12 @@ export default function PosTerminal() {
       </div>
       {checkoutOpen && <div className="checkout-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCheckoutOpen(false); }}>
         <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-          <header><div><div className="eyebrow">PAYMENT</div><h2 id="checkout-title">Complete sale</h2><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout">×</button></header>
+          <header><div><div className="eyebrow">PAYMENT</div><h2 id="checkout-title">Complete sale</h2><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout"><X size={16} className="inline-icon" aria-hidden="true" /></button></header>
           <div className="checkout-due"><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
           <label className="payment-select">Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
           {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{[100, 200, 500, 2000].map((amount) => <button key={amount} onClick={() => setCashTendered(String(amount))}>₹{amount}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
           {error && <div className="alert error">{error}</div>}
-          <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span>→</span></button>
+          <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
         </section>
       </div>}
       {lastReceipt && <div className="receipt-overlay" role="dialog" aria-modal="true" aria-label="Sale receipt"><section className="receipt-card"><div className="eyebrow">{terminal?.location.name}</div><h2>{lastReceipt.invoiceNumber}</h2><p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>{lastReceipt.lines.map((line, index) => <div className="receipt-line" key={`${line.variant.sku}-${index}`}><span>{line.variant.product.name} · {line.variant.name}<small>{line.quantityBaseUnits} {line.variant.product.baseUnit} × {formatMoney(line.unitPriceAtSale)} · {line.variant.sku}</small></span><strong>{formatMoney(line.lineTotal)}</strong></div>)}<div className="receipt-line"><span>Subtotal</span><strong>{formatMoney(lastReceipt.grossTotal)}</strong></div><div className="receipt-line"><span>Discount</span><strong>−{formatMoney(lastReceipt.discountTotal)}</strong></div><div className="receipt-line receipt-total"><span>Total paid · {lastReceipt.payment?.method}</span><strong>{formatMoney(lastReceipt.netTotal)}</strong></div>{lastReceipt.payment?.cashTenderedAmount && <div className="receipt-line"><span>Cash tendered</span><strong>{formatMoney(lastReceipt.payment.cashTenderedAmount)}</strong></div>}{lastReceipt.payment?.changeGivenAmount && Number(lastReceipt.payment.changeGivenAmount) > 0 && <div className="receipt-line"><span>Change</span><strong>{formatMoney(lastReceipt.payment.changeGivenAmount)}</strong></div>}<div className="receipt-actions"><button className="checkout-button" onClick={() => window.print()}>Print receipt</button><button className="text-button" onClick={() => setLastReceipt(null)}>Close</button></div></section></div>}

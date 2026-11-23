@@ -1,5 +1,32 @@
 'use client';
 
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  Copy,
+  Ellipsis,
+  History,
+  Info,
+  Layers,
+  LayoutGrid,
+  List,
+  Lock,
+  Pencil,
+  ReceiptText,
+  Search,
+  ShieldCheck,
+  ShoppingCart,
+  Split,
+  Store,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
+  UserRound,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
@@ -85,37 +112,35 @@ const rupeesOff = (limit: number) => `₹${Math.round(limit * 10).toLocaleString
 const todayLabel = () => new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
 
 // ---------- icons ----------
-const PATHS: Record<string, React.ReactNode> = {
-  cashier: <><rect x="3" y="10" width="18" height="10" rx="2" /><path d="M7 10V6h10v4M7 15h2M11 15h2M15 15h2" /></>,
-  target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></>,
-  up: <><path d="m6 15 6-6 6 6" /><path d="M12 9v11" /></>,
-  down: <><path d="m6 9 6 6 6-6" /><path d="M12 15V4" /></>,
-  shield: <><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z" /><path d="m9 12 2 2 4-4" /></>,
-  history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
-  layers: <><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /></>,
-  search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-  store: <><path d="M3 9 5 4h14l2 5M4 9v11h16V9" /><path d="M3 9h18a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0" /></>,
-  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
-  more: <><circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" /></>,
-  close: <path d="M6 6l12 12M18 6 6 18" />,
-  check: <path d="m5 12 5 5 9-10" />,
-  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></>,
-  alert: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></>,
-  lock: <><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
-  copy: <><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></>,
-  split: <><path d="M4 6h16M4 12h7M4 18h16" /><path d="m15 10 4 2-4 2" /></>,
-  receipt: <><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2V3Z" /><path d="M9 8h6M9 12h6" /></>,
-  edit: <><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></>,
-  chevron: <path d="m6 9 6 6 6-6" />,
-  grid: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
-  list: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
+  cashier: ShoppingCart,
+  target: Target,
+  up: TrendingUp,
+  down: TrendingDown,
+  shield: ShieldCheck,
+  history: History,
+  layers: Layers,
+  search: Search,
+  store: Store,
+  user: UserRound,
+  more: Ellipsis,
+  close: X,
+  check: Check,
+  info: Info,
+  alert: TriangleAlert,
+  lock: Lock,
+  copy: Copy,
+  split: Split,
+  receipt: ReceiptText,
+  edit: Pencil,
+  chevron: ChevronDown,
+  grid: LayoutGrid,
+  list: List,
 };
+
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {PATHS[name]}
-    </svg>
-  );
+  const Glyph = ICON_COMPONENTS[name];
+  return Glyph ? <Glyph size={size} strokeWidth={1.8} aria-hidden="true" /> : null;
 }
 
 // ---------- right-side panel ----------
@@ -596,7 +621,7 @@ export default function DiscountLimitsAdmin() {
                     <li key={h.id}>
                       <span className={`${styles.changeIcon} ${up ? styles.changeUp : styles.changeDown}`}><Icon name={up ? 'up' : 'down'} size={15} /></span>
                       <div style={{ minWidth: 0 }}>
-                        <div className={styles.changeTop}><strong>{h.name}</strong><b>{pct(h.from)} → {pct(h.to)}</b></div>
+                        <div className={styles.changeTop}><strong>{h.name}</strong><b>{pct(h.from)} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {pct(h.to)}</b></div>
                         <span title={h.reason}>{h.reason}</span>
                         <small>{h.when}</small>
                       </div>
@@ -659,7 +684,7 @@ export default function DiscountLimitsAdmin() {
                 <LimitPicker value={newLimit} onChange={(v) => { setNewLimit(v); setFormError(''); }} max={maximumAuthority} />
                 {changed && (
                   <div className={styles.change}>
-                    <b>{pct(current)}</b><span className={styles.arrow}>→</span><b className={next > current ? styles.up : styles.down}>{pct(next)}</b>
+                    <b>{pct(current)}</b><span className={styles.arrow}><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span><b className={next > current ? styles.up : styles.down}>{pct(next)}</b>
                     <small>{next > 0 ? `Up to ${rupeesOff(next)} off a ₹1,000 bill` : 'No discounts at checkout'}</small>
                   </div>
                 )}
@@ -695,7 +720,7 @@ export default function DiscountLimitsAdmin() {
                     <li key={h.id}>
                       <span className={styles.historyIcon}><Icon name="history" size={15} /></span>
                       <div style={{ minWidth: 0 }}><strong>{h.reason}</strong><span>{h.when}{h.by ? ` · by ${h.by}` : ''}</span></div>
-                      <div className={styles.delta}><b>{pct(h.from)} → {pct(h.to)}</b></div>
+                      <div className={styles.delta}><b>{pct(h.from)} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {pct(h.to)}</b></div>
                     </li>
                   ))}
                 </ul>
@@ -745,7 +770,7 @@ export default function DiscountLimitsAdmin() {
                     return (
                       <div key={u.id}>
                         <span>{displayName(u)} <small>· {storesOf(u)[0] || 'No store'}</small></span>
-                        <small>{same ? `Already ${pct(from)}` : `${pct(from)} → ${bulkPercent === '' ? '…' : pct(bulkValue)}`}</small>
+                        <small>{same ? `Already ${pct(from)}` : <>{pct(from)} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {bulkPercent === '' ? '…' : pct(bulkValue)}</>}</small>
                       </div>
                     );
                   })}
@@ -774,7 +799,7 @@ export default function DiscountLimitsAdmin() {
                 <li key={h.id}>
                   <span className={`${styles.avatar} ${styles.avCashier}`}>{initials(h.name)}</span>
                   <div style={{ minWidth: 0 }}><strong>{h.name}</strong><span title={h.reason}>{h.reason}</span></div>
-                  <div className={styles.delta}><b>{pct(h.from)} → {pct(h.to)}</b><em>{h.when}</em></div>
+                  <div className={styles.delta}><b>{pct(h.from)} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {pct(h.to)}</b><em>{h.when}</em></div>
                 </li>
               ))}
             </ul>
