@@ -45,6 +45,10 @@ export class CreateProductDto {
   @Max(1000000)
   unitsPerCarton?: number;
 
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  sellByCarton?: boolean;
+
   /** Replenishment threshold in canonical base units. */
   @IsOptional()
   @Type(() => Number)

@@ -1,3 +1,4 @@
+import { can } from '../../common/decorators/permission.decorator';
 import {
   BadRequestException,
   ConflictException,
@@ -69,6 +70,7 @@ export class AuditsService {
           auditSessionId: session.id,
           variantId: snapshot.variantId,
           expectedQtyBase,
+          recountMeasure: policy?.recountMeasure ?? 'either',
           recountThresholdPercent: policy?.recountVariancePercent ?? 2,
           recountThresholdUnits: policy?.recountVarianceUnits ?? 5,
           highCountAlertQty: policy?.highCountAlertQty ?? null,
@@ -206,7 +208,7 @@ export class AuditsService {
     const active = Boolean(user?.isActive);
     return {
       canCount: active && (actor.role === Role.SUPER_ADMIN || Boolean(user?.canCountStockAudits)),
-      canManage: active && MANAGERS.includes(actor.role as Role),
+      canManage: active && can(actor, 'stock.auditManagement', MANAGERS.includes(actor.role as Role)),
       canChangeThresholds: active && actor.role === Role.SUPER_ADMIN,
     };
   }
@@ -230,6 +232,7 @@ export class AuditsService {
       where: { scopeKey },
       create: {
         scopeKey, categoryId,
+        recountMeasure: dto.recountMeasure,
         recountVariancePercent: dto.recountVariancePercent,
         recountVarianceUnits: dto.recountVarianceUnits,
         highCountAlertQty: dto.highCountAlertQty ?? null,
@@ -237,6 +240,7 @@ export class AuditsService {
         changeReason: dto.reason,
       },
       update: {
+        recountMeasure: dto.recountMeasure,
         recountVariancePercent: dto.recountVariancePercent,
         recountVarianceUnits: dto.recountVarianceUnits,
         highCountAlertQty: dto.highCountAlertQty ?? null,
@@ -251,7 +255,7 @@ export class AuditsService {
     const session = await this.prisma.auditSession.findUnique({
       where: { id: sessionId },
       include: {
-        location: { select: { id: true } },
+        location: { select: { id: true, type: true } },
         approvedBy: { select: { id: true, email: true } },
         countItems: {
           include: {
@@ -264,7 +268,7 @@ export class AuditsService {
     });
     if (!session) throw new NotFoundException('Audit session not found');
     this.assertLocationScope(session.locationId, actor);
-    const manager = MANAGERS.includes(actor.role as Role);
+    const manager = can(actor, 'stock.auditManagement', MANAGERS.includes(actor.role as Role));
     const canCount = await this.canManageOrCount(actor);
     if (session.status !== AuditSessionStatus.ACTIVE) {
       if (manager) return session;
@@ -284,7 +288,7 @@ export class AuditsService {
   }
 
   async recordCount(sessionId: string, itemId: string, dto: { quantityBaseUnits: number; notes?: string }, actor: RequestUser) {
-    await this.get(sessionId, actor);
+    const session = await this.get(sessionId, actor);
     if (actor.role !== Role.SUPER_ADMIN) {
       const counter = await this.prisma.user.findUnique({ where: { id: actor.userId }, select: { role: true, canCountStockAudits: true, isActive: true } });
       if (!counter?.isActive || !counter.canCountStockAudits) {
@@ -306,8 +310,11 @@ export class AuditsService {
       const variancePercent = item.expectedQtyBase === 0
         ? null
         : Math.abs(variance) / Math.abs(item.expectedQtyBase) * 100;
-      const thresholdExceeded = Math.abs(variance) > item.recountThresholdUnits
-        || (variancePercent !== null && variancePercent > Number(item.recountThresholdPercent));
+      const overUnitLimit = Math.abs(variance) > item.recountThresholdUnits;
+      const overPercentLimit = variancePercent === null ? variance !== 0 : variancePercent > Number(item.recountThresholdPercent);
+      const thresholdExceeded = item.recountMeasure === 'units' ? overUnitLimit
+        : item.recountMeasure === 'percent' ? overPercentLimit
+        : overUnitLimit || (variancePercent !== null && overPercentLimit);
       const highCountAlert = item.highCountAlertQty !== null && dto.quantityBaseUnits >= item.highCountAlertQty;
       const data = item.requiresRecount
         ? { recountQtyBase: dto.quantityBaseUnits, recountedByUserId: actor.userId, recountedAt: new Date(), varianceBase: variance, highCountAlert, variancePercent, notes: dto.notes ?? item.notes }
@@ -322,7 +329,11 @@ export class AuditsService {
             notes: dto.notes ?? item.notes,
           };
       const updated = await tx.auditCountItem.update({ where: { id: item.id }, data });
-      return this.hideBlindCountItem(updated);
+      const result = this.hideBlindCountItem(updated);
+      if (session.location?.type && session.location.type !== LocationType.RETAIL_STORE && !item.requiresRecount && thresholdExceeded) {
+        return { ...result, recountComparison: { expected: item.expectedQtyBase, counted: dto.quantityBaseUnits } };
+      }
+      return result;
     });
   }
 
@@ -434,7 +445,7 @@ export class AuditsService {
   }
 
   private async canManageOrCount(actor: RequestUser) {
-    if (MANAGERS.includes(actor.role as Role)) return true;
+    if (can(actor, 'stock.auditManagement', MANAGERS.includes(actor.role as Role))) return true;
     const user = await this.prisma.user.findUnique({ where: { id: actor.userId }, select: { isActive: true, canCountStockAudits: true } });
     return Boolean(user?.isActive && user.canCountStockAudits);
   }

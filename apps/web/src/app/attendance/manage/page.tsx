@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccess } from '@/lib/permissions';
 import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
 import {
@@ -48,11 +49,11 @@ async function attendanceRequest<T>(route: string, signal?: AbortSignal, body?: 
 
 type ReportEntry = {
   date: string; clockInAt: string | null; clockOutAt: string | null;
-  targetStartTime: string | null; isLate: boolean; workMinutes: number;
+  targetStartTime: string | null; isLate: boolean; workMinutes: number; breakMinutes?: number; overtimeMinutes?: number; earlyMinutes?: number;
 };
 type AttendanceReport = {
   timezone: string;
-  employees: Array<{ employee: AttendanceRow['employee']; entries: ReportEntry[]; presentDays: number; lateDays: number; workMinutes: number }>;
+  employees: Array<{ employee: AttendanceRow['employee']; entries: ReportEntry[]; presentDays: number; lateDays: number; workMinutes: number; earlyDays?: number; breakMinutes?: number; overtimeMinutes?: number }>;
 };
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './oversight.module.css';
@@ -62,12 +63,18 @@ type Location = { id: string; name: string; type: string };
 type AttendanceRow = {
   employee: { id: string; name: string; employeeCode: string };
   status: 'NOT_STARTED' | 'WORKING' | 'COMPLETED';
+  workMinutes?: number;
+  breakMinutes?: number;
+  earlyMinutes?: number;
+  overtimeMinutes?: number;
+  onBreak?: boolean;
   clockInId: string | null;
   clockOutId: string | null;
   clockInAt: string | null;
   clockOutAt: string | null;
   isLate: boolean;
   targetStartTime: string | null;
+  targetEndTime?: string | null;
   clockInCorrectionReason: string | null;
   clockOutCorrectionReason: string | null;
 };
@@ -77,6 +84,7 @@ type LocationDay = {
   localDate: string;
   timezone: string;
   targetStartTime: string | null;
+  targetEndTime?: string | null;
   employees: AttendanceRow[];
 };
 
@@ -90,6 +98,9 @@ type DayRecord = {
   inMin: number | null; // minutes after local midnight
   outMin: number | null;
   workMin: number;
+  breakMin?: number;
+  earlyMin?: number;
+  overtimeMin?: number;
   lateBy: number;
   corrected?: boolean;
 };
@@ -136,7 +147,7 @@ function recordFromLive(row: AttendanceRow | undefined, today: string, targetMin
   const endMs = row.clockOutAt ? new Date(row.clockOutAt).getTime() : Date.now();
   const workMin = Math.max(0, Math.round((endMs - new Date(row.clockInAt).getTime()) / 60000));
   const lateBy = row.isLate && inMin !== null && targetMin !== null ? Math.max(1, inMin - targetMin) : 0;
-  return { date: today, status: row.isLate ? 'late' : 'ontime', inMin, outMin, workMin, lateBy, corrected: !!(row.clockInCorrectionReason || row.clockOutCorrectionReason) };
+  return { date: today, status: row.isLate ? 'late' : 'ontime', inMin, outMin, workMin: row.workMinutes ?? workMin, breakMin: row.breakMinutes, earlyMin: row.earlyMinutes, overtimeMin: row.overtimeMinutes, lateBy, corrected: !!(row.clockInCorrectionReason || row.clockOutCorrectionReason) };
 }
 
 const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
@@ -201,6 +212,8 @@ export default function AttendanceManagerPage() {
   const [viewing, setViewing] = useState<Employee | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
+  const { can } = useAccess();
+  const [targetEndTime, setTargetEndTime] = useState('');
   const [targetStartTime, setTargetStartTime] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -250,6 +263,7 @@ export default function AttendanceManagerPage() {
           setSelectedDate(result.localDate);
           setReportDate(result.localDate);
           setTargetStartTime(result.targetStartTime || '');
+          setTargetEndTime(result.targetEndTime || '');
         }
       } catch (caught) {
         if (!controller.signal.aborted) setError((caught as Error).message);
@@ -318,7 +332,7 @@ export default function AttendanceManagerPage() {
       const target = hhmmToMin(entry.targetStartTime);
       return {
         date: entry.date, status: !entry.clockInAt ? 'pending' : entry.isLate ? 'late' : 'ontime',
-        inMin, outMin: minutesOf(entry.clockOutAt, day.timezone), workMin: entry.workMinutes,
+        inMin, outMin: minutesOf(entry.clockOutAt, day.timezone), workMin: entry.workMinutes, breakMin: entry.breakMinutes, earlyMin: entry.earlyMinutes, overtimeMin: entry.overtimeMinutes,
         lateBy: entry.isLate && target !== null && inMin !== null ? Math.max(1, inMin - target) : 0,
       };
     });
@@ -362,7 +376,7 @@ export default function AttendanceManagerPage() {
   }, [reportPeriod, reportDate]);
   const reportRows = (report?.employees ?? []).map((row) => ({
     emp: { ...row.employee, role: 'Employee', locationId },
-    presentDays: row.presentDays, lateDays: row.lateDays, workMinutes: row.workMinutes,
+    presentDays: row.presentDays, lateDays: row.lateDays, workMinutes: row.workMinutes, earlyDays: row.earlyDays ?? 0, breakMinutes: row.breakMinutes ?? 0, overtimeMinutes: row.overtimeMinutes ?? 0,
     punctual: row.presentDays ? Math.round((row.presentDays - row.lateDays) / row.presentDays * 100) : null,
   }));
 
@@ -371,10 +385,8 @@ export default function AttendanceManagerPage() {
     setError('');
     try {
       const route = `/attendance/locations/${locationId}`;
-      if ((targetStartTime || null) !== day.targetStartTime) {
-        await attendanceRequest(route + '/target-time', undefined, { startTime: targetStartTime || null });
-        setDay((current) => ({ ...current, targetStartTime: targetStartTime || null }));
-      }
+      await attendanceRequest(route + '/target-time', undefined, { startTime: targetStartTime || null, endTime: targetEndTime || null });
+      setDay((current) => ({ ...current, targetStartTime: targetStartTime || null, targetEndTime: targetEndTime || null }));
       setNotice('Shift settings saved.');
     } catch (caught) {
       setError((caught as Error).message);
@@ -414,8 +426,8 @@ export default function AttendanceManagerPage() {
 
   function exportReport() {
     if (!report || !location) return;
-    const header = ['Employee', 'Code', 'Location', 'Days present', 'Late days', 'On-time %', 'Hours worked'];
-    const rows = reportRows.map((r) => [r.emp.name, r.emp.employeeCode, location.name, r.presentDays, r.lateDays, r.punctual ?? '', (r.workMinutes / 60).toFixed(1)]);
+    const header = ['Employee', 'Code', 'Location', 'Days present', 'Late days', 'On-time %', 'Hours worked', 'Early checkouts', 'Break minutes', 'Overtime minutes'];
+    const rows = reportRows.map((r) => [r.emp.name, r.emp.employeeCode, location.name, r.presentDays, r.lateDays, r.punctual ?? '', (r.workMinutes / 60).toFixed(1), r.earlyDays, r.breakMinutes, r.overtimeMinutes]);
     const csv = [header, ...rows].map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
@@ -525,13 +537,14 @@ export default function AttendanceManagerPage() {
       </section>
 
       {/* ---------- Shift settings (collapsible) ---------- */}
-      {settingsOpen && (
+      {settingsOpen && can('attendance.manage', true) && (
         <section className={styles.settings}>
           <div className={styles.settingBlock}>
-            <h3><Icon name="clock" size={15} /> Shift start time</h3>
-            <p>Clock-ins after this time count as <b>late</b>.</p>
+            <h3><Icon name="clock" size={15} /> Shift hours</h3>
+            <p>The end time is saved when each employee clocks in. Breaks are excluded from worked time and overtime.</p>
             <div className={styles.inline}>
-              <input type="time" value={targetStartTime} onChange={(e) => setTargetStartTime(e.target.value)} aria-label="Shift start time" />
+              <label>Shift start <input type="time" value={targetStartTime} onChange={(e) => setTargetStartTime(e.target.value)} aria-label="Shift start time" /></label>
+              <label>Shift end <input type="time" value={targetEndTime} onChange={(e) => setTargetEndTime(e.target.value)} aria-label="Shift end time" /></label>
             </div>
             <button type="button" className={styles.primaryButton} onClick={handleSaveSettings} disabled={saving}><Icon name="check" size={15} /> Save settings</button>
           </div>
@@ -574,10 +587,14 @@ export default function AttendanceManagerPage() {
                 <span className={styles.times}>
                   <span className={rec.status === 'late' ? styles.lateText : ''}><Icon name="arrowIn" size={13} /> {fmtMin(rec.inMin)}{live?.clockInCorrectionReason ? <em title={`Corrected: ${live.clockInCorrectionReason}`}>edited</em> : null}</span>
                   <span className={styles.line} aria-hidden="true"><i style={{ width: `${span}%` }} className={rec.status === 'late' ? styles.lineLate : ''} /></span>
-                  <span><Icon name="arrowOut" size={13} /> {live?.status === 'WORKING' ? <b className={styles.workingText}>Working</b> : fmtMin(rec.outMin)}{live?.clockOutCorrectionReason ? <em title={`Corrected: ${live.clockOutCorrectionReason}`}>edited</em> : null}</span>
+                  <span><Icon name="arrowOut" size={13} /> {live?.status === 'WORKING' ? <b className={styles.workingText}>{live.onBreak ? 'On break' : 'Working'}</b> : fmtMin(rec.outMin)}{live?.clockOutCorrectionReason ? <em title={`Corrected: ${live.clockOutCorrectionReason}`}>edited</em> : null}</span>
                 </span>
 
-                <span className={styles.worked}>{fmtDur(rec.workMin)}</span>
+                <span className={styles.worked}>{fmtDur(rec.workMin)}
+                  {!!rec.breakMin && <small> · {rec.breakMin}m break</small>}
+                  {!!rec.earlyMin && <small> · {rec.earlyMin}m early</small>}
+                  {!!rec.overtimeMin && <small> · {rec.overtimeMin}m overtime</small>}
+                </span>
 
                 <span>{statusPill(rec, live)}</span>
 
@@ -587,7 +604,7 @@ export default function AttendanceManagerPage() {
 
                 <span className={styles.rowActions}>
                   <button type="button" className={styles.viewButton} onClick={() => setViewing(emp)}><Icon name="eye" size={14} /> View</button>
-                  {live && live.clockInAt && (
+                  {can('attendance.manage', true) && live && live.clockInAt && (
                     <span className={styles.menuWrap} data-row-menu>
                       <button type="button" className={styles.moreButton} onClick={() => setMenuFor(menuFor === emp.id ? null : emp.id)} aria-label={`Correct punches for ${emp.name}`} aria-expanded={menuFor === emp.id}><Icon name="edit" size={14} /></button>
                       {menuFor === emp.id && (
@@ -609,7 +626,7 @@ export default function AttendanceManagerPage() {
           <span><i className={styles.cell_late} /> Late</span>
           <span><i className={styles.cell_absent} /> Absent</span>
           <span><i className={styles.cell_off} /> Day off</span>
-          <span className={styles.legendNote}>Shift starts {fmtMin(targetMin)}</span>
+          <span className={styles.legendNote}>Shift {fmtMin(targetMin)} – {fmtMin(hhmmToMin(day.targetEndTime ?? null))}</span>
         </footer>
       </section>
 
@@ -637,7 +654,10 @@ export default function AttendanceManagerPage() {
               <span>{r.punctual === null ? '—' : `${r.punctual}%`}</span>
               <span className={styles.num}>{r.presentDays}</span>
               <span className={`${styles.num} ${r.lateDays ? styles.lateText : ''}`}>{r.lateDays}</span>
-              <span className={styles.num}>{(r.workMinutes / 60).toFixed(1)}</span>
+              <span className={styles.num}>{(r.workMinutes / 60).toFixed(1)}
+                {(r.earlyDays > 0 || r.breakMinutes > 0 || r.overtimeMinutes > 0) &&
+                  <small style={{ display: 'block', fontWeight: 400 }}>{r.earlyDays} early · {r.breakMinutes}m break · {r.overtimeMinutes}m OT</small>}
+              </span>
             </div>
           ))}
           {reportError ? <Feedback tone="error">{reportError}</Feedback> : !report ? <p role="status">Loading report…</p> : !reportRows.length && <div className={styles.empty}><p>No staff at this location.</p></div>}

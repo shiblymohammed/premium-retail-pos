@@ -1,3 +1,4 @@
+import { Permission } from '../../common/decorators/permission.decorator';
 import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
@@ -31,6 +32,7 @@ export class TransfersController {
   constructor(private readonly transfers: TransfersService) {}
 
   @Post('replenishment/generate')
+  @Permission('transfers.request')
   async generateReplenishment(
     @Body() dto: GenerateReplenishmentDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
@@ -41,11 +43,13 @@ export class TransfersController {
 
   @Get('replenishment')
   @Roles(...MANAGER_ROLES, Role.INVENTORY)
+  @Permission('transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive')
   async listReplenishments(@CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findReplenishments(actor) };
   }
 
   @Post('replenishment/:id/approve')
+  @Permission('transfers.approve')
   async approveReplenishment(
     @Param('id') id: string,
     @Body() dto: ApproveReplenishmentDto,
@@ -56,6 +60,7 @@ export class TransfersController {
   }
 
   @Post('replenishment/:id/reject')
+  @Permission('transfers.approve')
   async rejectReplenishment(
     @Param('id') id: string,
     @Body() dto: RejectTransferDto,
@@ -67,6 +72,7 @@ export class TransfersController {
 
   @Post()
   @Roles(...MANAGER_ROLES, Role.INVENTORY)
+  @Permission('transfers.request')
   async create(
     @Body() dto: CreateTransferDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
@@ -77,18 +83,21 @@ export class TransfersController {
 
   @Get()
   @Roles(...MANAGER_ROLES, Role.INVENTORY, Role.STAFF, Role.CASHIER)
+  @Permission('transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive')
   async findAll(@CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findTransfers(actor) };
   }
 
   @Get(':id')
   @Roles(...MANAGER_ROLES, Role.INVENTORY, Role.STAFF, Role.CASHIER)
+  @Permission('transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive')
   async findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findTransfer(id, actor) };
   }
 
   @Post(':id/submit')
   @Roles(...MANAGER_ROLES, Role.INVENTORY)
+  @Permission('transfers.request')
   async submit(
     @Param('id') id: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
@@ -98,6 +107,7 @@ export class TransfersController {
   }
 
   @Post(':id/approve')
+  @Permission('transfers.approve')
   async approve(
     @Param('id') id: string,
     @Body() dto: ApproveTransferDto,
@@ -108,6 +118,7 @@ export class TransfersController {
   }
 
   @Post(':id/reject')
+  @Permission('transfers.approve')
   async reject(
     @Param('id') id: string,
     @Body() dto: RejectTransferDto,
@@ -118,6 +129,7 @@ export class TransfersController {
   }
 
   @Post(':id/dispatch')
+  @Permission('transfers.dispatch')
   async dispatch(
     @Param('id') id: string,
     @Body() dto: DispatchTransferDto,
@@ -129,6 +141,7 @@ export class TransfersController {
 
   @Post(':id/receive')
   @Roles(...MANAGER_ROLES, Role.STAFF, Role.CASHIER)
+  @Permission('transfers.receive')
   async receive(
     @Param('id') id: string,
     @Body() dto: ReceiveTransferDto,
@@ -139,6 +152,7 @@ export class TransfersController {
   }
 
   @Patch(':id/cancel')
+  @Permission('transfers.approve')
   async cancel(
     @Param('id') id: string,
     @Body() dto: CancelTransferDto,

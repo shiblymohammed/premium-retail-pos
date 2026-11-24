@@ -11,6 +11,43 @@ type DateScope = { locationIds: string[]; from: Date; to: Date };
 export class ReportsService {
   constructor(private readonly prisma: PrismaService, private readonly inventory: InventoryService) {}
 
+  async cashSettlements(query: ReportQuery, actor: RequestUser) {
+    if (!query.from || !query.to || !/^\d{4}-\d{2}-\d{2}$/.test(query.from) || !/^\d{4}-\d{2}-\d{2}$/.test(query.to)) {
+      throw new BadRequestException('Choose a start date and end date');
+    }
+    const start = this.parseDate(query.from, new Date(), 'from');
+    const end = this.parseDate(query.to, new Date(), 'to');
+    if (start.toISOString().slice(0, 10) !== query.from || end.toISOString().slice(0, 10) !== query.to) {
+      throw new BadRequestException('Choose valid report dates');
+    }
+    const scope = await this.resolveScope({ ...query, to: new Date(end.getTime() + 86400000).toISOString() }, actor);
+    const rows = await this.prisma.$queryRaw<Array<{
+      id: string; location: string; operator: string; currency: string; cadence: string; period: string;
+      closedAt: Date; openingCash: string; expectedCash: string; countedCash: string;
+      expectedCard: string; countedCard: string; cashDifference: string; cardDifference: string;
+    }>>(Prisma.sql`
+      SELECT drawer.id, location.name AS location, operator.email AS operator,
+        company.currency, company.cash_settlement_frequency AS cadence,
+        date_trunc(CASE company.cash_settlement_frequency WHEN 'weekly' THEN 'week' WHEN 'monthly' THEN 'month' ELSE 'day' END,
+          drawer.closed_at AT TIME ZONE 'UTC' AT TIME ZONE company.timezone)::date::text AS period,
+        drawer.closed_at AS "closedAt", drawer.opening_cash::text AS "openingCash",
+        drawer.expected_cash::text AS "expectedCash", drawer.counted_cash::text AS "countedCash",
+        drawer.expected_card::text AS "expectedCard", drawer.counted_card::text AS "countedCard",
+        (drawer.counted_cash - drawer.expected_cash)::text AS "cashDifference",
+        (drawer.counted_card - drawer.expected_card)::text AS "cardDifference"
+      FROM cash_drawer_sessions drawer
+      JOIN locations location ON location.id = drawer.location_id
+      JOIN companies company ON company.id = location.company_id
+      JOIN users operator ON operator.id = drawer.operator_id
+      WHERE drawer.location_id IN (${Prisma.join(scope.locationIds)})
+        AND (drawer.closed_at AT TIME ZONE 'UTC' AT TIME ZONE company.timezone)::date BETWEEN ${query.from}::date AND ${query.to}::date
+      ORDER BY period DESC, drawer.closed_at DESC, drawer.id
+      LIMIT 1001
+    `);
+    if (rows.length > 1000) throw new BadRequestException('More than 1,000 settlements match. Choose a shorter date range or one location.');
+    return rows;
+  }
+
   async salesSummary(query: ReportQuery, actor: RequestUser) {
     const scope = await this.resolveScope(query, actor);
     const where = { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } };

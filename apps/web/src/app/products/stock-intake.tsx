@@ -10,7 +10,8 @@ export type IntakeMode = 'opening' | 'supplier';
 
 type Line = { variantId: string; cartons: number; looseBaseUnits: number };
 
-export function StockIntake({ mode, apiBase, token, locations, initialLocation, variants, onCancel, onSaved }: {
+export function StockIntake({ mode, apiBase, token, locations, initialLocation, variants, onCancel, onSaved, purchaseOrder }: {
+  purchaseOrder?: { id: string; number: string; supplierName: string };
   mode: IntakeMode;
   apiBase: string;
   token: string;
@@ -23,7 +24,7 @@ export function StockIntake({ mode, apiBase, token, locations, initialLocation, 
   const supplierReceipt = mode === 'supplier';
   const title = supplierReceipt ? 'Receive from supplier' : 'Import opening stock';
   const [locationId, setLocationId] = useState(locations.find((location) => location.name === initialLocation)?.id ?? '');
-  const [supplierName, setSupplierName] = useState('');
+  const [supplierName, setSupplierName] = useState(purchaseOrder?.supplierName ?? '');
   const [receiptNumber, setReceiptNumber] = useState('');
   const [notes, setNotes] = useState('');
   const [query, setQuery] = useState('');
@@ -56,6 +57,7 @@ export function StockIntake({ mode, apiBase, token, locations, initialLocation, 
       locationId, notes: notes.trim() || undefined,
       ...(supplierReceipt ? {
         supplierName: supplierName.trim(), receiptNumber: receiptNumber.trim(),
+        ...(purchaseOrder && { purchaseOrderId: purchaseOrder.id }),
         lines: lines.map(({ variantId, cartons, looseBaseUnits }) => ({ variantId, cartons, looseBaseUnits })),
       } : { lines: converted.map(({ variantId, quantityBaseUnits }) => ({ variantId, quantityBaseUnits })) }),
     });
@@ -82,18 +84,18 @@ export function StockIntake({ mode, apiBase, token, locations, initialLocation, 
     <div className={styles.modalOverlay}>
       <section className={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="stock-intake-title" onKeyDown={(event) => { if (event.key === 'Escape' && !saving) onCancel(); }}>
         <header className={styles.modalHeader}>
-          <div><h2 id="stock-intake-title">{title}</h2><p>{supplierReceipt ? 'Record a goods receipt and add the products received to available stock.' : 'Record initial quantities at one location.'}</p></div>
+          <div><h2 id="stock-intake-title">{title}</h2><p>{purchaseOrder ? `Purchase order ${purchaseOrder.number} · Record only the quantities that arrived.` : supplierReceipt ? 'Record a goods receipt and add the products received to available stock.' : 'Record initial quantities at one location.'}</p></div>
         </header>
         <form className={styles.modalBody} onSubmit={save}>
           <fieldset disabled={saving} className={styles.intakeFields}>
             <label className={styles.formGroup}>Stock location
-              <select autoFocus required className={styles.modalInput} value={locationId} onChange={(event) => setLocationId(event.target.value)}>
+              <select autoFocus required disabled={!!purchaseOrder} className={styles.modalInput} value={locationId} onChange={(event) => setLocationId(event.target.value)}>
                 <option value="">Select a location</option>
                 {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
               </select>
             </label>
             {supplierReceipt && <div className={styles.formRow}>
-              <label className={styles.formGroup}>Supplier<input className={styles.modalInput} required maxLength={200} value={supplierName} onChange={(event) => setSupplierName(event.target.value)} /></label>
+              <label className={styles.formGroup}>Supplier<input className={styles.modalInput} required readOnly={!!purchaseOrder} maxLength={200} value={supplierName} onChange={(event) => setSupplierName(event.target.value)} /></label>
               <label className={styles.formGroup}>Goods receipt number<input className={styles.modalInput} required maxLength={100} value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value)} /></label>
             </div>}
             <label className={styles.formGroup}>Find a product to add

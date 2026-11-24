@@ -1,3 +1,4 @@
+import { PERMISSIONS, PermissionOverrides, can } from '../../common/decorators/permission.decorator';
 import { InitialPermissionsDto } from './dto/initial-permissions.dto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -7,7 +8,7 @@ import { EmployeeProfileDto } from './dto/employee-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserWithEmployeeDto } from './dto/create-user-with-employee.dto';
 
-type UserActor = { userId: string; role: string; locationIds: string[] };
+type UserActor = { userId: string; role: string; locationIds: string[]; permissionOverrides?: PermissionOverrides };
 
 const employeeProfileSelect = {
   id: true, employeeCode: true, firstName: true, lastName: true, locationId: true, isActive: true,
@@ -54,6 +55,36 @@ export class UsersService {
    */
   async findById(id: string) {
     return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  async permissionProfile(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id }, select: { id: true, role: true, isActive: true, permissionOverrides: true },
+    });
+    if (!user) throw new NotFoundException('Staff account not found');
+    return user;
+  }
+
+  async setPermissionProfile(id: string, overrides: PermissionOverrides, actor: UserActor) {
+    if (actor.role !== Role.SUPER_ADMIN || actor.userId === id) throw new ForbiddenException('Only a Super Admin can change staff permissions');
+    if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides) ||
+      Object.entries(overrides).some(([key, value]) => !Object.prototype.hasOwnProperty.call(PERMISSIONS, key) || typeof value !== 'boolean')) {
+      throw new BadRequestException('Provide supported permission names and boolean values');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
+      const target = await tx.user.findUnique({ where: { id }, select: { role: true, isActive: true, permissionOverrides: true } });
+      if (!target?.isActive) throw new NotFoundException('Active staff account not found');
+      if (target.role === Role.SUPER_ADMIN) throw new ForbiddenException('Super Admin permissions are inherent');
+      const updated = await tx.user.update({
+        where: { id }, data: { permissionOverrides: overrides }, select: { id: true, role: true, isActive: true, permissionOverrides: true },
+      });
+      await tx.auditEvent.create({ data: {
+        actorId: actor.userId, targetEntity: 'User', targetId: id, action: 'STAFF_PERMISSION_OVERRIDES_UPDATED',
+        beforeValue: JSON.stringify(target.permissionOverrides), afterValue: JSON.stringify(overrides),
+      } });
+      return updated;
+    });
   }
 
   async getDiscountAuthority(userId: string) {
@@ -241,6 +272,7 @@ export class UsersService {
   }
 
   async createUserWithEmployee(data: CreateUserWithEmployeeDto, actor: UserActor) {
+    if (data.monthlyBaseSalary !== undefined && (!can(actor, 'payroll.manage', actor.role === Role.ADMIN) || !can(actor, 'payroll.view', actor.role === Role.ADMIN))) throw new ForbiddenException('Payroll management is required to set base salary');
     const permissions = this.initialPermissions(data.role, actor, data.initialPermissions);
     const email = normalizeEmail(data.email);
     if (Buffer.byteLength(data.password, 'utf8') > 72) {
@@ -350,7 +382,7 @@ export class UsersService {
           select: { locationId: true },
         },
         employee: {
-          select: employeeProfileSelect,
+          select: { ...employeeProfileSelect, monthlyBaseSalary: !actor || can(actor, 'payroll.view', actor.role === Role.ADMIN) },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -417,6 +449,7 @@ export class UsersService {
       }
 
       if (data.employeeProfile) {
+        if (data.employeeProfile.monthlyBaseSalary !== undefined && (!can(actor, 'payroll.manage', actor.role === Role.ADMIN) || !can(actor, 'payroll.view', actor.role === Role.ADMIN))) throw new ForbiddenException('Payroll management is required to change base salary');
         const workplace = locationIds[0];
         if (!workplace || nextRole === Role.SUPER_ADMIN) throw new BadRequestException('An employee profile requires an assigned workplace');
         const profile = employeeProfileFields(data.employeeProfile);
@@ -447,7 +480,9 @@ export class UsersService {
           canCancelSales: true,
           canProcessReturns: true,
           canCountStockAudits: true,
-          employee: { select: employeeProfileSelect },
+          employee: { select: { ...employeeProfileSelect,
+            monthlyBaseSalary: can(actor, 'payroll.view', actor.role === Role.ADMIN),
+          } },
           isActive: true,
           createdAt: true,
           locationScopes: { select: { locationId: true } },

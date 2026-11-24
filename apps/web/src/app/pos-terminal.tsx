@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccess } from '@/lib/permissions';
 import { CashDrawer } from './cash-drawer';
 import { InfoHint } from '@/components/ui/info-hint';
 import {
@@ -42,14 +43,16 @@ type Product = {
   category?: { id: string; name: string } | null;
   baseUnit: string;
   unitsPerCarton: number | null;
+  sellByCarton?: boolean;
   hasVariants: boolean;
   sellingPrice: string;
   variants: Variant[];
 };
 
 type TerminalContext = {
+  access?: { checkout: boolean; drawer: boolean; receipts: boolean };
   cashierUserId: string;
-  location: { id: string; name: string; type: string; currency: string };
+  location: { id: string; name: string; type: string; currency: string; requireCheckoutDrawer?: boolean };
 };
 
 type SaleUnit = 'BASE_UNIT' | 'CARTON';
@@ -197,6 +200,7 @@ async function replaceOfflineProducts(products: Product[], locationId: string) {
     name: product.name,
     baseUnit: product.baseUnit,
     unitsPerCarton: product.unitsPerCarton,
+    sellByCarton: product.sellByCarton,
     hasVariants: product.hasVariants,
     sellingPrice: product.sellingPrice,
     variants: (product.variants || []).filter((variant) => variant.isActive).map((variant) => ({
@@ -224,6 +228,7 @@ async function saveOfflineProducts(products: Product[], locationId: string) {
       name: product.name,
       baseUnit: product.baseUnit,
       unitsPerCarton: product.unitsPerCarton,
+      sellByCarton: product.sellByCarton,
       hasVariants: product.hasVariants,
       sellingPrice: product.sellingPrice,
       variants: (product.variants || []).filter((variant) => variant.isActive).map((variant) => ({
@@ -282,6 +287,7 @@ export default function PosTerminal() {
   const [checkoutRole, setCheckoutRole] = useState('');
   const [storeOptions, setStoreOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [checkoutLocation, setCheckoutLocation] = useState('');
+  const { can } = useAccess();
   const [cashDrawerId, setCashDrawerId] = useState<string | null>(null);
   const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
   const [receiptHistory, setReceiptHistory] = useState<SaleReceipt[] | null>(null);
@@ -377,6 +383,15 @@ export default function PosTerminal() {
       percent: grossCents ? (requestedDiscount / grossCents + billRate) * 100 : 0,
     };
   }, [billDiscount, cart, lineDiscounts]);
+  const hasStockShortage = (line: CartLine) => {
+    const stock = stockBalances[line.variantId];
+    return stock !== undefined && baseQuantity(line) > Math.max(stock.quantityBaseUnits, 0);
+  };
+  const stockBlocksCheckout = isOnline && !stockError && !saleRetryPending && cart.some(hasStockShortage);
+  const drawerBlocksCheckout = terminal?.location.requireCheckoutDrawer && !cashDrawerId && !saleRetryPending;
+  const checkoutDisabled = busy || drawerBlocksCheckout || cart.length === 0 || cart.some((line) => !baseQuantity(line))
+    || stockBlocksCheckout || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001);
+
   const formatMoney = (amount: number | string) => new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: terminal?.location.currency || 'INR',
@@ -640,12 +655,12 @@ export default function PosTerminal() {
       } else if (event.key === 'F4') {
         event.preventDefault(); if (!checkoutOpen) void clearBasket();
       } else if (event.key === 'F12') {
-        event.preventDefault(); if (cart.length && !busy) setCheckoutOpen(true);
+        event.preventDefault(); if (!checkoutDisabled) setCheckoutOpen(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [busy, cart.length, checkoutOpen, terminal]);
+  }, [checkoutDisabled, checkoutOpen, terminal]);
 
   function addToCart(product: Product, variant: Variant) {
     setCart((current) => {
@@ -663,7 +678,7 @@ export default function PosTerminal() {
         cartonQuantity: 0,
         primaryUnit: 'BASE_UNIT',
         secondUnit: false,
-        unitsPerCarton: product.unitsPerCarton ?? 1,
+        unitsPerCarton: product.sellByCarton === false ? 1 : product.unitsPerCarton ?? 1,
         sellingPrice: Number(product.sellingPrice),
       }];
     });
@@ -869,6 +884,7 @@ export default function PosTerminal() {
       setError('Enter a quantity for every basket line.');
       return;
     }
+    if (stockBlocksCheckout || drawerBlocksCheckout) return;
     if (saleTotals.percent > discountLimit + 0.000001) {
       setError(`Discount exceeds your assigned ${discountLimit.toFixed(2)}% limit.`);
       return;
@@ -1138,17 +1154,21 @@ export default function PosTerminal() {
     </main>
   );
 
+  const canCreateSale = can('sales.checkout', terminal.access?.checkout ?? true);
+
   return (
     <main className="pos-shell">
-      <div className="pos-content">
+      <div className={`pos-content${canCreateSale ? '' : ' pos-utility-only'}`}>
+        {!canCreateSale && <header><h1>Register tools</h1><p>{terminal.location.name}</p></header>}
         <div className="pos-history-actions">
-          <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id}
+          {can('cash.drawer', terminal.access?.drawer ?? true) && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id}
             onDrawer={setCashDrawerId} formatMoney={formatMoney}
-            canClose={!cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length} />
-          <button className="admin-secondary" type="button" onClick={() => { setReceiptHistory(null); setReceiptHistoryOpen(true); }}><ReceiptText size={16} /> Receipt history</button>
+            canClose={!cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length} />}
+          {can('sales.receipts', terminal.access?.receipts ?? true) && <button className="admin-secondary" type="button" onClick={() => { setReceiptHistory(null); setReceiptHistoryOpen(true); }}><ReceiptText size={16} /> Receipt history</button>}
           {storeOptions.length > 1 && <button className="admin-secondary" type="button" disabled={cart.length > 0 || busy || saleRetryPending || syncingSales}
             onClick={() => { setTerminal(null); setCashDrawerId(null); setResults([]); setSaleControl(null); setOfflineSales([]); setCheckoutLocation(''); }}>Change store</button>}
         </div>
+        {canCreateSale && <>
         <section className="catalog-panel">
           <div className="catalog-search-area">
             <div className="search-wrap">
@@ -1211,53 +1231,81 @@ export default function PosTerminal() {
         </section>
 
         <aside className="basket-panel" id="pos-basket" aria-label="Current basket" tabIndex={-1}>
-          <div className="basket-heading"><div><div className="eyebrow">CURRENT SALE</div><h2>Current basket</h2><small>{terminal.location.name}</small></div><div className="basket-heading-actions"><span className="item-count">{cart.reduce((sum, line) => sum + baseQuantity(line), 0)} items</span><button className="clear-basket-button" disabled={!cart.length || busy || saleRetryPending} onClick={() => void clearBasket()}>Clear basket</button></div></div>
+          <div className="basket-heading">
+            <div><h2>Current basket</h2><small>{terminal.location.name}</small></div>
+            <div className="basket-heading-actions">
+              <span className="item-count">{cart.length} {cart.length === 1 ? 'line' : 'lines'}</span>
+              <button className="clear-basket-button" disabled={!cart.length || busy || saleRetryPending} onClick={() => void clearBasket()}>Clear basket</button>
+            </div>
+          </div>
+          <div className="basket-body">
           {cart.length ? (
             <div className="basket-lines">
-              {cart.map((line) => (
-                <div className="basket-line" key={line.variantId}>
-                  <div className="basket-line-main"><div className="basket-item-icon">{line.productName.slice(0, 1).toUpperCase()}</div><div className="basket-item-copy"><strong>{line.productName}</strong><span>{line.variantName} · {line.sku}</span><small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small><small className="basket-line-total">Line total · {formatMoney(line.sellingPrice * baseQuantity(line))}</small><small className={stockBalances[line.variantId]?.negativeAvailable ? 'stock-warning-text' : 'basket-stock'}>{stockBalances[line.variantId] ? <>{stockBalances[line.variantId].negativeAvailable ? <><TriangleAlert size="1em" className="inline-icon" aria-hidden="true" /> Negative stock: </> : 'Available: '}{stockBalances[line.variantId].quantityBaseUnits} {line.baseUnit}s</> : 'Checking store stock…'}</small></div><button className="remove-button" disabled={removingVariantId === line.variantId || saleRetryPending} aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>{removingVariantId === line.variantId ? <Ellipsis size={16} className="inline-icon" aria-hidden="true" /> : <X size={16} className="inline-icon" aria-hidden="true" />}</button></div>
-                  <div className="basket-quantity-fields">
-                    {line.unitsPerCarton > 1 && <label className="discount-input">Selling unit
-                      <select aria-label={`Selling unit for ${line.productName}`} disabled={busy || saleRetryPending} value={line.primaryUnit}
-                        onChange={(event) => changePrimaryUnit(line.variantId, event.target.value as SaleUnit)}>
-                        <option value="BASE_UNIT">{line.baseUnit}</option>
-                        <option value="CARTON">Carton ({line.unitsPerCarton} {line.baseUnit}s)</option>
-                      </select>
-                    </label>}
-                    <label className="discount-input">{line.primaryUnit === 'CARTON' ? 'Carton quantity' : `${line.baseUnit} quantity`}
-                      <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
-                        value={line.primaryUnit === 'CARTON' ? line.cartonQuantity : line.quantity}
-                        onChange={(event) => setQuantity(line.variantId, line.primaryUnit === 'CARTON' ? 'cartonQuantity' : 'quantity', event.target.value)} />
-                    </label>
+              {cart.map((line) => {
+                const stock = stockBalances[line.variantId];
+                const quantity = baseQuantity(line);
+                const cartonFirst = line.primaryUnit === 'CARTON';
+                const quantityLabel = `${line.baseUnit} quantity`;
+                const unitCount = (count: number) => `${count} ${line.baseUnit}${Math.abs(count) === 1 ? '' : 's'}`;
+                return (
+                  <div className="basket-line" key={line.variantId}>
+                    <div className="basket-line-main">
+                      <div className="basket-item-icon" aria-hidden="true">{line.productName.slice(0, 1).toUpperCase()}</div>
+                      <div className="basket-item-copy">
+                        <strong>{line.productName}</strong>
+                        <span>{line.variantName} · {line.sku}</span>
+                        <small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small>
+                        <small className={hasStockShortage(line) ? 'stock-warning-text' : 'basket-stock'}>
+                          {stock ? `${stock.negativeAvailable ? 'Negative stock' : 'Available'}: ${unitCount(stock.quantityBaseUnits)}` : isOnline ? 'Checking store stock…' : 'Stock unavailable offline'}
+                        </small>
+                      </div>
+                      <button className="remove-button" disabled={busy || removingVariantId === line.variantId || saleRetryPending}
+                        aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>
+                        {removingVariantId === line.variantId ? <Ellipsis size={16} className="inline-icon" aria-hidden="true" /> : <X size={16} className="inline-icon" aria-hidden="true" />}
+                      </button>
+                    </div>
+                    <div className="basket-quantity-fields">
+                      {line.unitsPerCarton > 1 && <label className="basket-selling-unit">
+                        Selling unit
+                        <select aria-label={`Selling unit for ${line.productName}`} disabled={busy || saleRetryPending} value={line.primaryUnit}
+                          onChange={(event) => changePrimaryUnit(line.variantId, event.target.value as SaleUnit)}>
+                          <option value="BASE_UNIT">{line.baseUnit}</option>
+                          <option value="CARTON">Carton ({unitCount(line.unitsPerCarton)})</option>
+                        </select>
+                      </label>}
+                      <label>
+                        {cartonFirst ? 'Carton quantity' : quantityLabel}
+                        <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
+                          value={cartonFirst ? line.cartonQuantity : line.quantity}
+                          onChange={(event) => setQuantity(line.variantId, cartonFirst ? 'cartonQuantity' : 'quantity', event.target.value)} />
+                      </label>
+                      {line.secondUnit && <label>
+                        {cartonFirst ? quantityLabel : 'Carton quantity'}
+                        <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
+                          value={cartonFirst ? line.quantity : line.cartonQuantity}
+                          onChange={(event) => setQuantity(line.variantId, cartonFirst ? 'quantity' : 'cartonQuantity', event.target.value)} />
+                      </label>}
+                      <label>
+                        Line discount (%)
+                        <input type="number" min="0" max="100" step="0.01" value={lineDiscounts[line.variantId] || ''}
+                          disabled={busy || saleRetryPending || Number(billDiscount || 0) > 0}
+                          onChange={(event) => setLineDiscounts((current) => ({ ...current, [line.variantId]: event.target.value }))} />
+                      </label>
+                    </div>
+                    {line.unitsPerCarton > 1 && <button type="button" className="small-action-button secondary basket-unit-action"
+                      disabled={busy || saleRetryPending} onClick={() => toggleSecondUnit(line.variantId)}>
+                      {line.secondUnit ? 'Remove' : 'Add'} {cartonFirst ? line.baseUnit + 's' : 'cartons'}
+                    </button>}
+                    <div className="basket-line-summary">
+                      <small>{unitCount(quantity)} deducted from stock</small>
+                      <strong>{formatMoney(line.sellingPrice * quantity)}</strong>
+                    </div>
+                    {hasStockShortage(line) && <small className="basket-stock-warning">Quantity exceeds available stock.</small>}
                   </div>
-                  {line.secondUnit && <div className="basket-quantity-fields">
-                    <label className="discount-input">{line.primaryUnit === 'CARTON' ? `${line.baseUnit} quantity` : 'Carton quantity'}
-                      <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
-                        value={line.primaryUnit === 'CARTON' ? line.quantity : line.cartonQuantity}
-                        onChange={(event) => setQuantity(line.variantId, line.primaryUnit === 'CARTON' ? 'quantity' : 'cartonQuantity', event.target.value)} />
-                    </label>
-                  </div>}
-                  {line.unitsPerCarton > 1 && <button type="button" className="small-action-button secondary" disabled={busy || saleRetryPending}
-                    onClick={() => toggleSecondUnit(line.variantId)}>
-                    {line.secondUnit ? 'Remove' : 'Add'} {line.primaryUnit === 'CARTON' ? line.baseUnit + 's' : 'cartons'}
-                  </button>}
-                  <small className="basket-stock">{baseQuantity(line)} {line.baseUnit}s deducted from stock</small>
-                  {stockBalances[line.variantId] && baseQuantity(line) > Math.max(stockBalances[line.variantId].quantityBaseUnits, 0) &&
-                    <small className="stock-warning-text">Quantity exceeds available stock. Reduce it or restock before checkout.</small>}
-                  <label className="discount-input">Line discount (%)<input type="number" min="0" max="100" step="0.01" value={lineDiscounts[line.variantId] || ''} disabled={saleRetryPending || Number(billDiscount || 0) > 0} onChange={(event) => setLineDiscounts((current) => ({ ...current, [line.variantId]: event.target.value }))} /></label>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : <div className="basket-empty"><div className="basket-empty-icon" aria-hidden="true"><ShoppingCart size="1em" className="inline-icon" aria-hidden="true" /></div><strong>Your basket is empty</strong><span>Scan an item or choose a product to get started.</span></div>}
-          <div className="basket-footer">
-            <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
-            <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
-            <button className="checkout-button" disabled={busy || cart.length === 0 || cart.some((line) => !baseQuantity(line)) || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
-            <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
-            {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
-            <p>Prices, discounts, payment, and stock are verified by the server before invoice finalization.</p>
-          </div>
           {offlineDrawerOpen && <div className="offline-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOfflineDrawerOpen(false); }}><section className="offline-queue offline-drawer" role="dialog" aria-modal="true" aria-label="Offline sale queue">
             <div className="offline-drawer-title"><div><div className="eyebrow">LOCAL SYNC QUEUE</div><h2>Offline sales</h2></div><button className="small-action-button" onClick={() => setOfflineDrawerOpen(false)}>Close</button></div>
             {offlineSales.length === 0 && <p className="offline-empty-note">No sales are waiting to sync.</p>}
@@ -1311,16 +1359,27 @@ export default function PosTerminal() {
               </>}
             </div>}
           </section>}
+          </div>
+          <div className="basket-footer">
+            <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
+            <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
+            <button className="checkout-button" disabled={checkoutDisabled} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
+            <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
+            {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
+            {drawerBlocksCheckout && <p role="status">Open your cash drawer to complete a sale.</p>}
+            {stockBlocksCheckout && <p className="basket-stock-warning" role="status">Reduce the flagged quantities or restock to continue.</p>}
+          </div>
         </aside>
+        </>}
       </div>
-      {checkoutOpen && <div className="checkout-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCheckoutOpen(false); }}>
+      {canCreateSale && checkoutOpen && <div className="checkout-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCheckoutOpen(false); }}>
         <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
           <header><div><div className="eyebrow">PAYMENT</div><div className="heading-with-info"><h2 id="checkout-title">Complete sale</h2><InfoHint label="About checkout">Choose the payment method. For cash, enter the amount received to calculate change.</InfoHint></div><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout"><X size={16} className="inline-icon" aria-hidden="true" /></button></header>
           <div className="checkout-due"><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
           <label className="payment-select">Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
           {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button disabled={saleRetryPending} onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{(terminal.location.currency === 'INR' ? [100, 200, 500, 2000] : [5, 10, 20, 50]).map((amount) => <button key={amount} disabled={saleRetryPending} onClick={() => setCashTendered(String(amount))}>{formatMoney(amount)}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
           {error && <Feedback tone="error">{error}</Feedback>}
-          <button className="checkout-button" disabled={busy || cart.length === 0 || cart.some((line) => !baseQuantity(line)) || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
+          <button className="checkout-button" disabled={checkoutDisabled} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
         </section>
       </div>}
       {receiptHistoryOpen && <div className="receipt-overlay">

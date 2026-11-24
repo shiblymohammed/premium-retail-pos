@@ -123,3 +123,6 @@
 .shiftSummary div { display: grid; gap: 5px; }
 .shiftSummary small, .shiftSummary p { margin: 0; color: var(--retail-muted); }
 .shiftSummary strong { font-size: clamp(30px, 5vw, 42px); font-variant-numeric: tabular-nums; line-height: 1.1; }
+
+.breakActions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.shiftMetrics { color: var(--retail-muted); line-height: 1.5; margin: 6px 0; font-size: .875rem; }

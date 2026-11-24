@@ -1,6 +1,6 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { AttendanceService } from './attendance.service';
+import { AttendanceService, shiftMetrics } from './attendance.service';
 
 describe('AttendanceService basic daily punches', () => {
   afterEach(() => jest.useRealTimers());
@@ -119,6 +119,7 @@ describe('AttendanceService basic daily punches', () => {
     const original = new Date('2026-11-15T03:00:00.000Z');
     const corrected = new Date('2026-11-15T03:15:00.000Z');
     const tx = {
+      $queryRaw: jest.fn(),
       attendance: {
         findUnique: jest.fn().mockResolvedValue({ id: 'punch-id', employeeId: employee.id, locationId: employee.locationId, punchType: 'IN', punchTimestamp: original, originalTimestamp: null, targetStartTime: '08:30', isLate: false, employee: { id: employee.id, firstName: employee.firstName, lastName: employee.lastName, employeeCode: employee.employeeCode } }),
         findMany: jest.fn().mockResolvedValue([{ id: 'punch-id', punchType: 'IN', punchTimestamp: original }]),
@@ -153,5 +154,26 @@ describe('AttendanceService basic daily punches', () => {
     const result = await new AttendanceService(prisma as any).getReport('location-id', 'daily', '2026-11-15', manager);
     expect(result.summary).toEqual(expect.objectContaining({ employeesPresent: 1, completedDays: 1, lateDays: 1, workMinutes: 540 }));
     expect(result.employees[0].entries[0].date).toBe('2026-11-15');
+  });
+});
+
+describe('shift metrics', () => {
+  const at = (time: string) => new Date(`2026-11-25T${time}:00Z`);
+
+  it('counts only worked minutes after the scheduled end as overtime', () => {
+    const shift = {
+      punchTimestamp: at('09:00'), scheduledEndAt: at('17:00'),
+      breaks: [{ startedAt: at('12:00'), endedAt: at('12:30') }, { startedAt: at('16:50'), endedAt: at('17:10') }],
+    };
+    expect(shiftMetrics(shift, at('17:40'))).toEqual({
+      workMinutes: 470, breakMinutes: 50, overtimeMinutes: 30, earlyMinutes: 0, onBreak: false,
+    });
+  });
+
+  it('flags an early check-out from the saved scheduled end and stops time on an open break', () => {
+    const shift = { punchTimestamp: at('09:00'), scheduledEndAt: at('17:00') };
+    expect(shiftMetrics(shift, at('16:50'))).toMatchObject({ earlyMinutes: 10, overtimeMinutes: 0 });
+    expect(shiftMetrics({ ...shift, breaks: [{ startedAt: at('12:00'), endedAt: null }] }, null, at('12:30')))
+      .toMatchObject({ workMinutes: 180, breakMinutes: 30, overtimeMinutes: 0, onBreak: true });
   });
 });

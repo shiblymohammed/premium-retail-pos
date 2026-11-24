@@ -1,3 +1,4 @@
+import { Permission } from '../../common/decorators/permission.decorator';
 import { BadRequestException, Body, Controller, Get, Headers, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
@@ -13,6 +14,7 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get('balances')
+  @Permission('stock.view')
   async getBalances(@Query() query: InventoryBalanceQueryDto) {
     const variantIds = query.variantIds
       ?.split(',')
@@ -29,6 +31,7 @@ export class InventoryController {
 
   @Post('opening-stock/import')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER)
+  @Permission('stock.intake')
   async importOpeningStock(
     @Body() dto: OpeningStockImportDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,

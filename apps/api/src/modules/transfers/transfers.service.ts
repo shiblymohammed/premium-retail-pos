@@ -1,3 +1,4 @@
+import { can, PermissionKey } from '../../common/decorators/permission.decorator';
 import {
   BadRequestException,
   ConflictException,
@@ -18,7 +19,7 @@ import {
   TransferQuantityDto,
 } from './dto';
 
-type TransferActor = { userId: string; role: string; locationIds: string[] };
+type TransferActor = { userId: string; role: string; locationIds: string[]; permissionOverrides?: Partial<Record<PermissionKey, boolean>> };
 type Tx = Prisma.TransactionClient;
 type LockedLocation = { id: string; companyId: string; type: LocationType; parentId: string | null; isActive: boolean; isAuditLocked: boolean };
 
@@ -51,7 +52,7 @@ export class TransfersService {
     actor: TransferActor,
     rawIdempotencyKey: string | undefined,
   ) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'transfers.request');
     this.assertLocationAccess(actor, destLocationId);
     const idempotencyKey = this.requireIdempotencyKey(rawIdempotencyKey);
     const payloadHash = this.hash({ actorId: actor.userId, destLocationId });
@@ -113,10 +114,9 @@ export class TransfersService {
           const reorderLevelBase = variant.product.reorderLevel!;
           const availableQtyBase = balanceByVariant.get(variant.id) ?? 0;
           const cartonSize = variant.product.unitsPerCarton ?? 0;
-          const cartonRoute = this.isCartonRoute(source, destination);
-          if (cartonRoute && cartonSize <= 1) return [];
+          const shipsInCartons = cartonSize > 1;
           const needed = reorderLevelBase - availableQtyBase;
-          const systemSuggestedQtyBase = cartonRoute ? Math.ceil(needed / cartonSize) * cartonSize : needed;
+          const systemSuggestedQtyBase = shipsInCartons ? Math.ceil(needed / cartonSize) * cartonSize : needed;
           if (systemSuggestedQtyBase <= 0) return [];
           if (!Number.isSafeInteger(systemSuggestedQtyBase) || systemSuggestedQtyBase > 2147483647) {
             throw new BadRequestException(`Suggested replenishment for variant ${variant.id} exceeds the supported quantity range`);
@@ -164,7 +164,7 @@ export class TransfersService {
   }
 
   async approveReplenishment(id: string, dto: ApproveReplenishmentDto, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'transfers.approve');
     return this.runIdempotentMutation(idempotencyKey, 'POST', `/transfers/replenishment/${id}/approve`, actor, dto, async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "replenishment_requests" WHERE "id" = ${id} FOR UPDATE`);
       const request = await tx.replenishmentRequest.findUnique({ where: { id }, include: { lines: true } });
@@ -189,10 +189,12 @@ export class TransfersService {
         const existing = suggestions.get(line.variantId);
         const product = variants.get(line.variantId)!.product;
         const unitsPerCarton = existing ? existing.unitsPerCarton : product.unitsPerCarton;
-        this.assertCartonQuantity(source, destination, line.approvedQtyBase, unitsPerCarton);
+        const cartonRequired = (unitsPerCarton ?? 0) > 1;
+        this.assertShippingQuantity(line.approvedQtyBase, unitsPerCarton, cartonRequired);
         return {
           variantId: line.variantId,
           managerApprovedQtyBase: line.approvedQtyBase,
+          cartonRequired,
           systemSuggestedQtyBase: existing?.systemSuggestedQtyBase ?? 0,
           unitsPerCarton,
           baseUnitSnapshot: existing?.baseUnitSnapshot ?? product.baseUnit,
@@ -217,6 +219,7 @@ export class TransfersService {
             create: transferLines.map((line) => ({
               variant: { connect: { id: line.variantId } },
               requestedQtyBase: line.managerApprovedQtyBase,
+              cartonRequired: line.cartonRequired,
               systemSuggestedQtyBase: line.systemSuggestedQtyBase,
               unitsPerCarton: line.unitsPerCarton,
               baseUnitSnapshot: line.baseUnitSnapshot,
@@ -237,7 +240,7 @@ export class TransfersService {
               where: { id: line.id },
               data: { managerApprovedQtyBase: approvedByVariant.get(line.variantId)!.approvedQtyBase },
             })),
-            create: addedLines.map((line) => ({
+            create: addedLines.map(({ cartonRequired: _cartonRequired, ...line }) => ({
               ...line,
               availableQtyBase: availableByVariant.get(line.variantId) ?? 0,
               reorderLevelBase: variants.get(line.variantId)!.product.reorderLevel ?? 0,
@@ -251,7 +254,7 @@ export class TransfersService {
   }
 
   async rejectReplenishment(id: string, reason: string, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'transfers.approve');
     const cleanReason = reason.trim();
     if (!cleanReason) throw new BadRequestException('A rejection reason is required');
     return this.runIdempotentMutation(idempotencyKey, 'POST', `/transfers/replenishment/${id}/reject`, actor, { reason: cleanReason }, async (tx) => {
@@ -275,7 +278,7 @@ export class TransfersService {
   }
 
   async findReplenishments(actor: TransferActor) {
-    if (actor.role !== Role.INVENTORY) this.assertManager(actor);
+    if (actor.role !== Role.INVENTORY) this.assertTransferAccess(actor);
     return this.prisma.replenishmentRequest.findMany({
       where: actor.role === Role.SUPER_ADMIN
         ? {}
@@ -286,7 +289,7 @@ export class TransfersService {
   }
 
   async createTransfer(dto: CreateTransferDto, actor: TransferActor, idempotencyKey: string | undefined) {
-    if (actor.role !== Role.INVENTORY) this.assertManager(actor);
+    if (actor.role !== Role.INVENTORY) this.assertManager(actor, 'transfers.request');
     this.assertCanViewTransfer(actor, dto.sourceLocationId, dto.destLocationId);
     const linesByVariant = this.uniqueByVariant(dto.lines, 'transfer line');
     return this.runIdempotentMutation(idempotencyKey, 'POST', '/transfers', actor, dto, async (tx) => {
@@ -299,11 +302,12 @@ export class TransfersService {
       const variants = await this.loadTransferVariants(tx, [...linesByVariant.values()].map((line) => line.variantId));
       const lines = [...linesByVariant.values()].map((line) => {
         const variant = variants.get(line.variantId)!;
-        const requestedQtyBase = this.convertLine(line, variant.product.unitsPerCarton);
-        this.assertCartonQuantity(source, destination, requestedQtyBase, variant.product.unitsPerCarton);
+        const cartonRequired = (variant.product.unitsPerCarton ?? 0) > 1;
+        const requestedQtyBase = this.convertLine(line, variant.product.unitsPerCarton, cartonRequired);
         return {
           variantId: line.variantId,
           requestedQtyBase,
+          cartonRequired,
           unitsPerCarton: variant.product.unitsPerCarton,
             baseUnitSnapshot: variant.product.baseUnit,
         };
@@ -318,6 +322,7 @@ export class TransfersService {
           lines: { create: lines.map((line) => ({
             variant: { connect: { id: line.variantId } },
             requestedQtyBase: line.requestedQtyBase,
+            cartonRequired: line.cartonRequired,
             unitsPerCarton: line.unitsPerCarton,
             baseUnitSnapshot: line.baseUnitSnapshot,
           })) },
@@ -328,8 +333,9 @@ export class TransfersService {
   }
 
   async findTransfers(actor: TransferActor) {
-    const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role);
-    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertManager(actor);
+    const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role) &&
+      !actor.permissionOverrides?.['transfers.request'] && !actor.permissionOverrides?.['transfers.approve'] && !actor.permissionOverrides?.['transfers.dispatch'];
+    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertTransferAccess(actor);
     const where: Prisma.TransferWhereInput = storeReceiver
       ? {
         destLocationId: { in: actor.locationIds },
@@ -343,8 +349,9 @@ export class TransfersService {
   }
 
   async findTransfer(id: string, actor: TransferActor) {
-    const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role);
-    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertManager(actor);
+    const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role) &&
+      !actor.permissionOverrides?.['transfers.request'] && !actor.permissionOverrides?.['transfers.approve'] && !actor.permissionOverrides?.['transfers.dispatch'];
+    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertTransferAccess(actor);
     const transfer = await this.prisma.transfer.findUnique({ where: { id }, include: transferInclude });
     if (!transfer) throw new NotFoundException('Transfer not found');
     if (storeReceiver) {
@@ -357,20 +364,20 @@ export class TransfersService {
   }
 
   async submitTransfer(id: string, actor: TransferActor, idempotencyKey: string | undefined) {
-    if (actor.role !== Role.INVENTORY) this.assertManager(actor);
+    if (actor.role !== Role.INVENTORY) this.assertManager(actor, 'transfers.request');
     return this.updateTransferInTransaction(id, idempotencyKey, 'POST', `/transfers/${id}/submit`, actor, {}, async (tx, transfer) => {
       this.assertCanViewTransfer(actor, transfer.sourceLocationId, transfer.destLocationId);
       if (transfer.status !== TransferStatus.DRAFT) throw new ConflictException('Only a draft transfer can be submitted');
       if (transfer.lines.length === 0) throw new BadRequestException('A transfer must contain at least one line');
       for (const line of transfer.lines) {
-        this.assertCartonQuantity(transfer.sourceLocation, transfer.destLocation, line.requestedQtyBase, line.unitsPerCarton);
+        this.assertShippingQuantity(line.requestedQtyBase, line.unitsPerCarton, line.cartonRequired);
       }
       return tx.transfer.update({ where: { id }, data: { status: TransferStatus.PENDING_APPROVAL }, include: transferInclude });
     });
   }
 
   async approveTransfer(id: string, dto: ApproveTransferDto, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'transfers.approve');
     return this.updateTransferInTransaction(id, idempotencyKey, 'POST', `/transfers/${id}/approve`, actor, dto, async (tx, transfer) => {
       this.assertLocationAccess(actor, transfer.sourceLocationId);
       if (transfer.status !== TransferStatus.PENDING_APPROVAL) throw new ConflictException('Only a pending transfer can be approved');
@@ -381,7 +388,7 @@ export class TransfersService {
       }
       for (const line of transfer.lines) {
         const approvedQuantity = approved.get(line.variantId)!.approvedQtyBase;
-        this.assertCartonQuantity(transfer.sourceLocation, transfer.destLocation, approvedQuantity, line.unitsPerCarton);
+        this.assertShippingQuantity(approvedQuantity, line.unitsPerCarton, line.cartonRequired);
         if (approvedQuantity > line.requestedQtyBase) {
           throw new BadRequestException('Approved quantity cannot exceed the requested quantity');
         }
@@ -400,7 +407,7 @@ export class TransfersService {
   }
 
   async rejectTransfer(id: string, reason: string, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'transfers.approve');
     const cleanReason = reason.trim();
     if (!cleanReason) throw new BadRequestException('A rejection reason is required');
     return this.updateTransferInTransaction(id, idempotencyKey, 'POST', `/transfers/${id}/reject`, actor, { reason: cleanReason }, async (tx, transfer) => {
@@ -415,7 +422,7 @@ export class TransfersService {
   }
 
   async dispatchTransfer(id: string, dto: { lines: TransferQuantityDto[] }, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'transfers.dispatch');
     const dispatchLines = this.uniqueByVariant(dto.lines, 'dispatch line');
     return this.updateTransferInTransaction(id, idempotencyKey, 'POST', `/transfers/${id}/dispatch`, actor, dto, async (tx, transfer) => {
       this.assertLocationAccess(actor, transfer.sourceLocationId);
@@ -432,8 +439,7 @@ export class TransfersService {
         const line = transferLines.get(variantId)!;
         const approved = line.approvedQtyBase ?? 0;
         const alreadyDispatched = line.dispatchedQtyBase ?? 0;
-        const quantity = this.convertLine(request, line.unitsPerCarton);
-        this.assertCartonQuantity(transfer.sourceLocation, transfer.destLocation, quantity, line.unitsPerCarton);
+        const quantity = this.convertLine(request, line.unitsPerCarton, line.cartonRequired);
         if (quantity > approved - alreadyDispatched) {
           throw new BadRequestException(`Dispatch exceeds the approved remaining quantity for variant ${variantId}`);
         }
@@ -484,7 +490,7 @@ export class TransfersService {
 
   async receiveTransfer(id: string, dto: ReceiveTransferDto, actor: TransferActor, idempotencyKey: string | undefined) {
     const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role);
-    if (!storeReceiver) this.assertManager(actor);
+    if (!storeReceiver) this.assertManager(actor, 'transfers.receive');
     const receipts = this.uniqueByVariant(dto.lines, 'receipt line');
     return this.updateTransferInTransaction(id, idempotencyKey, 'POST', `/transfers/${id}/receive`, actor, dto, async (tx, transfer) => {
       this.assertLocationAccess(actor, transfer.destLocationId);
@@ -611,7 +617,7 @@ export class TransfersService {
   }
 
   async cancelTransfer(id: string, reason: string, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'transfers.approve');
     const cleanReason = reason.trim();
     if (!cleanReason) throw new BadRequestException('A cancellation reason is required');
     return this.updateTransferInTransaction(id, idempotencyKey, 'PATCH', `/transfers/${id}/cancel`, actor, { reason: cleanReason }, async (tx, transfer) => {
@@ -803,7 +809,9 @@ export class TransfersService {
     return new Map(variants.map((variant) => [variant.id, variant]));
   }
 
-  private convertLine(line: TransferQuantityDto, unitsPerCarton: number | null): number {
+  private convertLine(line: TransferQuantityDto, unitsPerCarton: number | null, cartonRequired: boolean): number {
+    if (cartonRequired && (line.looseBaseUnits ?? 0) > 0) throw new BadRequestException('This product ships in whole cartons');
+    if ((unitsPerCarton ?? 0) <= 1 && (line.cartons ?? 0) > 0) throw new BadRequestException('This product ships as individual units');
     try {
       const quantity = convertToBaseUnits({ cartons: line.cartons ?? 0, baseUnits: line.looseBaseUnits ?? 0, unitsPerCarton });
       if (quantity < 1 || quantity > 2147483647) throw new BadRequestException('Transfer quantity must be between 1 and 2,147,483,647 base units');
@@ -815,14 +823,9 @@ export class TransfersService {
     }
   }
 
-  private isCartonRoute(source: Pick<LockedLocation, 'type'>, destination: Pick<LockedLocation, 'type'>): boolean {
-    return (source.type === LocationType.MAIN_WAREHOUSE && destination.type === LocationType.SUB_WAREHOUSE)
-      || (source.type === LocationType.SUB_WAREHOUSE && destination.type === LocationType.RETAIL_STORE);
-  }
-
-  private assertCartonQuantity(source: Pick<LockedLocation, 'type'>, destination: Pick<LockedLocation, 'type'>, quantity: number, unitsPerCarton: number | null): void {
-    if (quantity > 0 && this.isCartonRoute(source, destination) && (!unitsPerCarton || unitsPerCarton <= 1 || quantity % unitsPerCarton !== 0)) {
-      throw new BadRequestException('Warehouse deliveries on this route require whole cartons');
+  private assertShippingQuantity(quantity: number, unitsPerCarton: number | null, cartonRequired: boolean): void {
+    if (quantity > 0 && cartonRequired && (!unitsPerCarton || quantity % unitsPerCarton !== 0)) {
+      throw new BadRequestException('This product ships in whole cartons');
     }
   }
 
@@ -864,8 +867,15 @@ export class TransfersService {
     return { message: 'Replenishment request already generated', data: request, replayed: true };
   }
 
-  private assertManager(actor: TransferActor): void {
-    if (!MANAGER_ROLES.includes(actor.role as Role)) throw new ForbiddenException('Only managers can manage transfers and replenishment');
+  private assertTransferAccess(actor: TransferActor): void {
+    if (!(['transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive'] as const)
+      .some((permission) => can(actor, permission, MANAGER_ROLES.includes(actor.role as Role)))) {
+      throw new ForbiddenException('Transfer access has not been assigned');
+    }
+  }
+
+  private assertManager(actor: TransferActor, permission: PermissionKey): void {
+    if (!can(actor, permission, MANAGER_ROLES.includes(actor.role as Role))) throw new ForbiddenException('Only managers can manage transfers and replenishment');
   }
 
   private assertLocationAccess(actor: TransferActor, locationId: string): void {

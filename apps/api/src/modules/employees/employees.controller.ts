@@ -1,3 +1,4 @@
+import { Permission, RestrictedPermission } from '../../common/decorators/permission.decorator';
 import {
   BadRequestException,
   Body,
@@ -25,11 +26,13 @@ export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
   @Post()
+  @RestrictedPermission('staff.manage')
   create(@Body() dto: CreateEmployeeDto, @CurrentUser() actor: RequestUser) {
     return this.employeesService.create(dto, actor);
   }
 
   @Get()
+  @Permission('staff.view')
   findAll(
     @Query('locationId') locationId: string | undefined,
     @Query('isActive') activeQuery: string | undefined,
@@ -43,11 +46,13 @@ export class EmployeesController {
   }
 
   @Get(':id')
+  @Permission('staff.view')
   findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     return this.employeesService.findOne(id, actor);
   }
 
   @Patch(':id')
+  @RestrictedPermission('staff.manage')
   update(
     @Param('id') id: string,
     @Body() dto: UpdateEmployeeDto,
@@ -57,6 +62,7 @@ export class EmployeesController {
   }
 
   @Patch(':id/deactivate')
+  @RestrictedPermission('staff.manage')
   deactivate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     return this.employeesService.deactivate(id, actor);
   }

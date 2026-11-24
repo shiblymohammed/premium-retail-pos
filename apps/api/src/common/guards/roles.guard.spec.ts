@@ -4,7 +4,7 @@ import { Role } from '@prisma/client';
 import { RolesGuard } from './roles.guard';
 
 describe('RolesGuard', () => {
-  const reflector = { getAllAndOverride: jest.fn() } as unknown as Reflector;
+  const reflector = { getAllAndOverride: jest.fn(), get: jest.fn() } as unknown as Reflector;
 
   it('denies a cashier access to an admin-only endpoint', () => {
     (reflector.getAllAndOverride as jest.Mock).mockReturnValue([Role.ADMIN, Role.SUPER_ADMIN]);

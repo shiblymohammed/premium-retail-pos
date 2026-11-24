@@ -1,0 +1,16 @@
+.page { display: grid; gap: 20px; min-width: 0; padding: clamp(16px, 3vw, 32px); }
+.page header { display: grid; gap: 8px; }
+.page header a { justify-self: start; color: var(--retail-accent-strong); }
+.page header :is(h1, p) { margin: 0; }
+.page p, .period small { color: var(--retail-muted); }
+.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.filters label { display: grid; gap: 5px; font-weight: 650; }
+.filters :is(input, select) { min-height: 40px; border: 1px solid var(--retail-edge-strong); border-radius: 8px; padding: 6px 10px; background: var(--retail-card); color: var(--retail-ink); }
+.period { min-width: 0; border: 1px solid var(--retail-edge); border-radius: 14px; background: var(--retail-card); }
+.period h2 { margin: 0; padding: 14px; font-size: 16px; text-transform: capitalize; }
+.tableScroll { overflow-x: auto; }
+.period table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.period :is(th, td) { padding: 10px 14px; border-top: 1px solid var(--retail-edge); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.period th:first-child { text-align: left; }
+.period small { display: block; margin-top: 4px; font-weight: 400; }
+.shortage { color: light-dark(#ab251b, #ffaaa1); font-weight: 700; }

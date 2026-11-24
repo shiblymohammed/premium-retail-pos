@@ -145,6 +145,7 @@ model User {
   discountLimitPercent Decimal   @default(0) @map("discount_limit_percent") @db.Decimal(5, 2)
   canCancelSales       Boolean   @default(false) @map("can_cancel_sales")
   canProcessReturns    Boolean   @default(false) @map("can_process_returns")
+  permissionOverrides  Json      @default("{}") @map("permission_overrides")
   canCountStockAudits  Boolean   @default(false) @map("can_count_stock_audits")
   isActive             Boolean   @default(true) @map("is_active")
   createdAt            DateTime  @default(now()) @map("created_at")
@@ -155,6 +156,11 @@ model User {
 
   // Relations
   employee                Employee?
+  payrollCreated PayrollRecord[] @relation("PayrollCreated")
+  payrollPaid PayrollRecord[] @relation("PayrollPaid")
+  purchaseOrders PurchaseOrder[]
+  supplierPayments SupplierPayment[]
+  creditEntries CustomerCreditEntry[]
   locationScopes          UserLocationScope[]
   auditEvents             AuditEvent[]           @relation("AuditActor")
   priceChanges            PriceChangeLog[]       @relation("PriceChangeActor")
@@ -207,6 +213,8 @@ model Company {
   name            String
   currency        String   @default("INR")
   timezone        String   @default("Asia/Kolkata")
+  requireCheckoutDrawer Boolean @default(true) @map("require_checkout_drawer")
+  cashSettlementFrequency String @default("daily") @map("cash_settlement_frequency")
   invoicePrefix   String   @unique @default("INV") @map("invoice_prefix")
   invoiceSequence Int      @default(0) @map("invoice_sequence")
   // Reserved nullable storage for an explicitly approved future tax extension.
@@ -225,6 +233,8 @@ model Company {
 /// Main Warehouse → Sub-Warehouses → Retail Stores
 model Location {
   cashDrawers CashDrawerSession[]
+  purchaseOrders PurchaseOrder[]
+  creditAccounts CustomerCreditAccount[]
   id                    String       @id @default(uuid())
   companyId             String       @map("company_id")
   name                  String
@@ -240,6 +250,7 @@ model Location {
   dailyAuditEnabled     Boolean      @default(true) @map("daily_audit_enabled")
   dailyAuditTime        String       @default("19:00") @map("daily_audit_time") @db.VarChar(5)
   dailyAuditLastRunDate String?      @map("daily_audit_last_run_date") @db.VarChar(10)
+  attendanceEndTime     String?      @map("attendance_end_time") @db.VarChar(5)
   attendanceStartTime   String?      @map("attendance_start_time") @db.VarChar(5)
   attendanceQrRequired  Boolean      @default(false) @map("attendance_qr_required")
   createdAt             DateTime     @default(now()) @map("created_at")
@@ -293,6 +304,7 @@ model Employee {
   subordinates Employee[]   @relation("ReportingChain")
   loans        Loan[]
   attendances  Attendance[]
+  payroll PayrollRecord[]
 
   @@map("employees")
 }
@@ -312,6 +324,7 @@ model Product {
   imageUrl       String?  @map("image_url")
   baseUnit       String   @map("base_unit") // Required canonical stock unit, e.g. packet or piece
   unitsPerCarton Int?     @map("units_per_carton") // Invariant 2; null = packet-only (Invariant 3)
+  sellByCarton   Boolean  @default(false) @map("sell_by_carton")
   hasVariants    Boolean  @default(false) @map("has_variants")
   sellingPrice   Decimal  @map("selling_price") @db.Decimal(12, 2)
   purchasePrice  Decimal  @map("purchase_price") @db.Decimal(12, 2)
@@ -365,6 +378,7 @@ model Variant {
   replenishmentRequestLines ReplenishmentRequestLine[]
   auditCountItems           AuditCountItem[]
   supplierReceiptLines      SupplierReceiptLine[]
+  purchaseOrderLines PurchaseOrderLine[]
 
   @@map("variants")
 }
@@ -456,6 +470,9 @@ model SupplierReceipt {
   location   Location              @relation(fields: [locationId], references: [id], onDelete: Restrict)
   receivedBy User                  @relation(fields: [receivedByUserId], references: [id], onDelete: Restrict)
   lines      SupplierReceiptLine[]
+  purchaseOrderId String? @map("purchase_order_id")
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  @@index([purchaseOrderId])
 
   @@index([locationId, confirmedAt])
   @@map("supplier_receipts")
@@ -531,6 +548,7 @@ model TransferLine {
   discrepancyNotes       String? @map("discrepancy_notes")
   unitsPerCarton         Int?    @map("units_per_carton")
   baseUnitSnapshot       String? @map("base_unit_snapshot")
+  cartonRequired         Boolean @default(false) @map("carton_required")
   shortQtyBase           Int     @default(0) @map("short_qty_base")
   damagedQtyBase         Int     @default(0) @map("damaged_qty_base")
   excessQtyBase          Int     @default(0) @map("excess_qty_base")
@@ -811,6 +829,7 @@ model AuditCountItem {
   varianceBase            Int?      @map("variance_base")
   requiresRecount         Boolean   @default(false) @map("requires_recount")
   adjustmentApproved      Boolean   @default(false) @map("adjustment_approved")
+  recountMeasure String @default("either") @map("recount_measure")
   recountThresholdPercent Decimal   @default(2.00) @map("recount_threshold_percent") @db.Decimal(5, 2)
   recountThresholdUnits   Int       @default(5) @map("recount_threshold_units")
   highCountAlertQty       Int?      @map("high_count_alert_qty")
@@ -837,6 +856,7 @@ model AuditCountItem {
 model AuditThreshold {
   scopeKey               String   @id @map("scope_key") // "default" or "category:<category-id>"
   categoryId             String?  @unique @map("category_id")
+  recountMeasure String @default("either") @map("recount_measure")
   recountVariancePercent Decimal  @default(2.00) @map("recount_variance_percent") @db.Decimal(5, 2)
   recountVarianceUnits   Int      @default(5) @map("recount_variance_units")
   highCountAlertQty      Int?     @map("high_count_alert_qty")
@@ -869,6 +889,8 @@ model Attendance {
   correctionReason  String?   @map("correction_reason")
   originalTimestamp DateTime? @map("original_timestamp") // Preserved if corrected
   isLate            Boolean   @default(false) @map("is_late")
+  scheduledEndAt    DateTime? @map("scheduled_end_at")
+  breaks            AttendanceBreak[]
   targetStartTime   String?   @map("target_start_time") @db.VarChar(5)
   createdAt         DateTime  @default(now()) @map("created_at")
 
@@ -995,4 +1017,105 @@ model AuthRateLimit {
 
   @@index([windowStartedAt])
   @@map("auth_rate_limits")
+}
+
+model PayrollRecord {
+  id String @id @default(uuid())
+  employeeId String @map("employee_id")
+  period String
+  currency String
+  base Decimal @db.Decimal(12, 2)
+  allowances Decimal @db.Decimal(12, 2)
+  bonus Decimal @db.Decimal(12, 2)
+  deductions Decimal @db.Decimal(12, 2)
+  advanceRecovery Decimal @map("advance_recovery") @db.Decimal(12, 2)
+  net Decimal @db.Decimal(14, 2)
+  createdById String @map("created_by_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  paidAt DateTime? @map("paid_at")
+  paidById String? @map("paid_by_id")
+  paymentReference String? @map("payment_reference")
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  createdBy User @relation("PayrollCreated", fields: [createdById], references: [id], onDelete: Restrict)
+  paidBy User? @relation("PayrollPaid", fields: [paidById], references: [id], onDelete: Restrict)
+  @@unique([employeeId, period])
+  @@map("payroll_records")
+}
+
+model PurchaseOrder {
+  id String @id @default(uuid())
+  number String
+  supplierName String @map("supplier_name")
+  locationId String @map("location_id")
+  currency String
+  actorId String @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  lines PurchaseOrderLine[]
+  receipts SupplierReceipt[]
+  payments SupplierPayment[]
+  @@unique([locationId, number])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  orderId String @map("order_id")
+  variantId String @map("variant_id")
+  quantity Int
+  unitCost Decimal @map("unit_cost") @db.Decimal(12, 2)
+  order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  @@id([orderId, variantId])
+  @@map("purchase_order_lines")
+}
+
+model SupplierPayment {
+  id String @id @default(uuid())
+  orderId String @map("order_id")
+  amount Decimal @db.Decimal(12, 2)
+  reference String
+  actorId String @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  order PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@unique([orderId, reference])
+  @@map("supplier_payments")
+}
+
+model CustomerCreditAccount {
+  id String @id @default(uuid())
+  locationId String @map("location_id")
+  code String
+  name String
+  currency String
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  entries CustomerCreditEntry[]
+  @@unique([locationId, code])
+  @@map("customer_credit_accounts")
+}
+
+model CustomerCreditEntry {
+  id String @id @default(uuid())
+  accountId String @map("account_id")
+  amount Decimal @db.Decimal(12, 2)
+  kind String
+  reference String
+  note String
+  actorId String @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  account CustomerCreditAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  @@unique([accountId, reference])
+  @@map("customer_credit_entries")
+}
+
+model AttendanceBreak {
+  id String @id @default(uuid())
+  clockInId String @map("clock_in_id")
+  startedAt DateTime @map("started_at")
+  endedAt DateTime? @map("ended_at")
+  clockIn Attendance @relation(fields: [clockInId], references: [id], onDelete: Restrict)
+  @@index([clockInId])
+  @@map("attendance_breaks")
 }

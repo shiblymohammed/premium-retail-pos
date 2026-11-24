@@ -28,7 +28,7 @@ const isolatedTestDatabase = (() => {
 
   beforeAll(async () => {
     await prisma.$connect();
-    const company = await prisma.company.create({ data: { name: `Phase 11 stress ${suffix}`, invoicePrefix: `T${suffix}` } });
+    const company = await prisma.company.create({ data: { name: `Phase 11 stress ${suffix}`, invoicePrefix: `T${suffix}`, requireCheckoutDrawer: false } });
     const location = await prisma.location.create({ data: { companyId: company.id, name: `Stress store ${suffix}`, type: 'RETAIL_STORE' } });
     const cashier = await prisma.user.create({
       data: { email: `phase11-${suffix.toLowerCase()}@example.test`, passwordHash: 'integration-only', role: Role.CASHIER },

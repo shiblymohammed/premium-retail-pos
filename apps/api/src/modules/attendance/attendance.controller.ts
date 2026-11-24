@@ -1,3 +1,4 @@
+import { Permission } from '../../common/decorators/permission.decorator';
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
@@ -5,6 +6,7 @@ import { CurrentUser, RequestUser } from '../../common/decorators/current-user.d
 import { Roles } from '../../common/decorators';
 import { LocationScopeGuard } from '../../common/guards';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AttendanceActionDto } from './dto/attendance-action.dto';
 import { AttendanceStartTimeDto } from './dto/attendance-start-time.dto';
 import { AttendanceCorrectionDto } from './dto/attendance-correction.dto';
 import { AttendanceService } from './attendance.service';
@@ -27,13 +29,24 @@ export class AttendanceController {
   }
 
   @Post('me/punch')
-  async punch(@CurrentUser() actor: RequestUser) {
-    return { message: 'Attendance recorded', data: await this.attendance.punch(actor) };
+  async punch(@CurrentUser() actor: RequestUser, @Body() dto?: AttendanceActionDto) {
+    return { message: 'Attendance recorded', data: await this.attendance.punch(actor, dto?.action) };
+  }
+
+  @Post('me/break/start')
+  async startBreak(@CurrentUser() actor: RequestUser) {
+    return { data: await this.attendance.changeBreak(actor, true) };
+  }
+
+  @Post('me/break/end')
+  async endBreak(@CurrentUser() actor: RequestUser) {
+    return { data: await this.attendance.changeBreak(actor, false) };
   }
 
   @Get('locations/:locationId/target-time')
   @UseGuards(LocationScopeGuard)
   @Roles(...MANAGERS)
+  @Permission('staff.view', 'attendance.manage')
   async targetTime(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.attendance.getLocationTargetStartTime(locationId, actor) };
   }
@@ -41,19 +54,22 @@ export class AttendanceController {
   @Patch('locations/:locationId/target-time')
   @UseGuards(LocationScopeGuard)
   @Roles(...MANAGERS)
+  @Permission('attendance.manage')
   async updateTargetTime(@Param('locationId') locationId: string, @Body() dto: AttendanceStartTimeDto, @CurrentUser() actor: RequestUser) {
-    return { message: 'Attendance target time saved', data: await this.attendance.setLocationTargetStartTime(locationId, dto.startTime ?? null, actor) };
+    return { message: 'Attendance target time saved', data: await this.attendance.setLocationTargetStartTime(locationId, dto.startTime, actor, dto.endTime) };
   }
 
   @Get('locations/:locationId/today')
   @UseGuards(LocationScopeGuard)
   @Roles(...MANAGERS)
+  @Permission('staff.view', 'attendance.manage')
   async locationToday(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.attendance.getLocationAttendanceToday(locationId, actor) };
   }
 
   @Patch('punches/:attendanceId/correct')
   @Roles(...MANAGERS)
+  @Permission('attendance.manage')
   async correctPunch(@Param('attendanceId') attendanceId: string, @Body() dto: AttendanceCorrectionDto, @CurrentUser() actor: RequestUser) {
     return { message: 'Attendance punch corrected', data: await this.attendance.correctPunch(attendanceId, dto.punchTimestamp, dto.reason, actor) };
   }
@@ -61,6 +77,7 @@ export class AttendanceController {
   @Get('locations/:locationId/reports')
   @UseGuards(LocationScopeGuard)
   @Roles(...MANAGERS)
+  @Permission('staff.view', 'attendance.manage')
   async report(@Param('locationId') locationId: string, @Query('period') period: string, @Query('date') date: string | undefined, @CurrentUser() actor: RequestUser) {
     return { data: await this.attendance.getReport(locationId, period, date, actor) };
   }

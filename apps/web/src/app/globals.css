@@ -580,13 +580,11 @@ button:disabled { cursor: not-allowed; }
 .clear-basket-button:disabled { opacity: .45; cursor: not-allowed; }
 .pos-shell .item-count { padding: 5px 9px; background: light-dark(#eaf1ff, #1e2535); color: light-dark(#155eef, #a9c2f4); font-size: 13px; font-weight: 700; }
 .pos-shell .basket-lines { flex: 0 0 auto; }
-.pos-shell .basket-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px 9px; padding: 10px 13px; border-bottom-color: #edf1f6; }
-.pos-shell .basket-line-main { min-width: 0; grid-column: 1 / -1; gap: 8px; }
+.pos-shell .basket-line-main { min-width: 0; gap: 8px; }
 .pos-shell .basket-item-icon { width: 34px; height: 34px; border: 1px solid light-dark(#e4ebf4, #2b3e55); border-radius: 7px; background: light-dark(#f0f5ff, #1d2433); color: light-dark(#155eef, #a9c2f4); }
 .pos-shell .basket-item-copy strong { color: light-dark(#172b45, #c6d7ec); font-size: 13px; }
 .pos-shell .basket-item-copy span { color: light-dark(#64748b, #c8ced7); font-size: 12.5px; }
 .pos-shell .basket-item-copy small { margin-top: 2px; font-size: 12px; }
-.pos-shell .basket-item-copy .basket-line-total { color: light-dark(#273b55, #c8d5e6); font-size: 12.5px; font-weight: 700; }
 .pos-shell .quantity-control { grid-column: 2; margin: 0; border-color: light-dark(#dbe3ed, #2d4059); }
 .pos-shell .quantity-control button { color: light-dark(#155eef, #a9c2f4); }
 .pos-shell .discount-input { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: 7px; margin: 0; color: light-dark(#64748b, #c8ced7); font-size: 12.5px; }

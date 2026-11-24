@@ -9,7 +9,7 @@ describe('SalesService Phase 6 rules', () => {
     const tx: any = {
       $queryRaw: jest.fn(),
       userLocationScope: { findMany: jest.fn().mockResolvedValue([{ locationId: 'store-1' }]) },
-      location: { findUnique: jest.fn().mockResolvedValue({ id: 'store-1', type: 'RETAIL_STORE', isActive: true, isAuditLocked: false }) },
+      location: { findUnique: jest.fn().mockResolvedValue({ id: 'store-1', type: 'RETAIL_STORE', isActive: true, isAuditLocked: false, company: { requireCheckoutDrawer: false } }) },
       variant: { findMany: jest.fn() },
       idempotencyRecord: { deleteMany: jest.fn(), findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
       invoice: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },

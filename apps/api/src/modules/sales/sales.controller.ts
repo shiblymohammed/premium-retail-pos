@@ -1,3 +1,4 @@
+import { Permission } from '../../common/decorators/permission.decorator';
 import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CHECKOUT_ROLES } from '../pos/checkout-access';
@@ -17,6 +18,7 @@ export class SalesController {
 
   @Post('quote')
   @Roles(...CHECKOUT_ROLES)
+  @Permission('sales.checkout')
   async quote(@Body() dto: QuoteSaleDto, @CurrentUser() actor: RequestUser) {
     return { data: await this.sales.quoteSale(dto, actor) };
   }
@@ -28,6 +30,7 @@ export class SalesController {
 
   @Post()
   @Roles(...CHECKOUT_ROLES)
+  @Permission('sales.checkout')
   async create(
     @Body() dto: CreateSaleDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,

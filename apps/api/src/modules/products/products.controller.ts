@@ -1,3 +1,4 @@
+import { can, Permission } from '../../common/decorators/permission.decorator';
 import {
   BadRequestException,
   Body,
@@ -33,10 +34,11 @@ export class ProductsController {
   @Roles(Role.SUPER_ADMIN)
   async create(@Body() dto: CreateProductDto, @CurrentUser() actor: RequestUser) {
     const product = await this.productsService.create(dto, actor);
-    return { message: 'Product created', data: this.hidePurchasePrice(product, actor.role) };
+    return { message: 'Product created', data: this.hidePurchasePrice(product, actor) };
   }
 
   @Get()
+  @Permission('stock.view')
   async findAll(
     @Query('search') search?: string,
     @Query('categoryId') categoryId?: string,
@@ -51,37 +53,42 @@ export class ProductsController {
       categoryId,
       isActive: activeQuery === undefined ? undefined : activeQuery === 'true',
     });
-    return { data: products.map((product) => this.hidePurchasePrice(product, actor?.role)) };
+    return { data: products.map((product) => this.hidePurchasePrice(product, actor)) };
   }
 
   @Get(':id/price-history')
   @Roles(Role.SUPER_ADMIN)
-  async findPriceHistory(@Param('id') id: string) {
-    return { data: await this.productsService.findPriceHistory(id) };
+  @Permission('products.prices')
+  async findPriceHistory(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
+    const rows = await this.productsService.findPriceHistory(id);
+    return { data: can(actor, 'products.cost', actor.role === Role.ADMIN || actor.role === Role.INVENTORY)
+      ? rows : rows.filter((row) => row.fieldChanged !== 'purchase_price') };
   }
 
   @Get(':id')
+  @Permission('stock.view')
   async findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     const product = await this.productsService.findById(id);
-    return { data: this.hidePurchasePrice(product, actor.role) };
+    return { data: this.hidePurchasePrice(product, actor) };
   }
 
   @Patch(':id/prices')
   @Roles(Role.SUPER_ADMIN)
+  @Permission('products.prices')
   async updatePrices(
     @Param('id') id: string,
     @Body() dto: UpdateProductPricesDto,
     @CurrentUser() actor: RequestUser,
   ) {
     const product = await this.productsService.updatePrices(id, dto, actor);
-    return { message: 'Product prices updated', data: this.hidePurchasePrice(product, actor.role) };
+    return { message: 'Product prices updated', data: this.hidePurchasePrice(product, actor) };
   }
 
   @Patch(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async update(@Param('id') id: string, @Body() dto: UpdateProductDto, @CurrentUser() actor: RequestUser) {
     const product = await this.productsService.update(id, dto);
-    return { message: 'Product updated', data: this.hidePurchasePrice(product, actor.role) };
+    return { message: 'Product updated', data: this.hidePurchasePrice(product, actor) };
   }
 
   @Post(':id/variants')
@@ -101,12 +108,13 @@ export class ProductsController {
   }
 
   @Post(':id/convert-quantity')
+  @Permission('stock.view')
   async convertQuantity(@Param('id') id: string, @Body() dto: ConvertQuantityDto) {
     return { data: await this.productsService.convertQuantity(id, dto) };
   }
 
-  private hidePurchasePrice<T extends { purchasePrice: unknown }>(product: T, role?: string): Omit<T, 'purchasePrice'> | T {
-    if (role === Role.SUPER_ADMIN || role === Role.ADMIN || role === Role.INVENTORY) return product;
+  private hidePurchasePrice<T extends { purchasePrice: unknown }>(product: T, actor?: RequestUser): Omit<T, 'purchasePrice'> | T {
+    if (actor && can(actor, 'products.cost', actor.role === Role.ADMIN || actor.role === Role.INVENTORY)) return product;
     const { purchasePrice: _purchasePrice, ...visible } = product;
     return visible;
   }

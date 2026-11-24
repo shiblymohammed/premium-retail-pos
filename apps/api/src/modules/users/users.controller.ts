@@ -1,3 +1,4 @@
+import { PERMISSIONS, PermissionOverrides, RestrictedPermission } from '../../common/decorators/permission.decorator';
 import {
   Controller,
   Get,
@@ -41,6 +42,7 @@ export class UsersController {
 
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @RestrictedPermission('staff.manage')
   async create(@Body() dto: CreateUserDto, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.createUser({
       email: dto.email,
@@ -54,6 +56,7 @@ export class UsersController {
 
   @Post('with-employee')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @RestrictedPermission('staff.manage')
   async createWithEmployee(@Body() dto: CreateUserWithEmployeeDto, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.createUserWithEmployee(dto, actor);
     return { message: 'User and employee profile created', data: user };
@@ -61,6 +64,7 @@ export class UsersController {
 
   @Get()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @RestrictedPermission('staff.view')
   async findAll(
     @Query('role') roleQuery?: string,
     @Query('isActive') activeQuery?: string,
@@ -77,6 +81,23 @@ export class UsersController {
     return { data: users };
   }
 
+  @Get('me/permissions')
+  myPermissions(@CurrentUser() actor: RequestUser) {
+    return { data: actor.permissionOverrides ?? {} };
+  }
+
+  @Get(':id/permissions')
+  @Roles(Role.SUPER_ADMIN)
+  async permissionProfile(@Param('id') id: string) {
+    return { data: { ...(await this.usersService.permissionProfile(id)), definitions: PERMISSIONS } };
+  }
+
+  @Patch(':id/permissions')
+  @Roles(Role.SUPER_ADMIN)
+  async setPermissionProfile(@Param('id') id: string, @Body() overrides: PermissionOverrides, @CurrentUser() actor: RequestUser) {
+    return { data: await this.usersService.setPermissionProfile(id, overrides, actor) };
+  }
+
   @Get('me/discount-limit')
   async getMyDiscountAuthority(@CurrentUser() actor: RequestUser) {
     return { data: await this.usersService.getDiscountAuthority(actor.userId) };
@@ -89,6 +110,7 @@ export class UsersController {
 
   @Patch(':id')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @RestrictedPermission('staff.manage')
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateUserDto,
@@ -100,6 +122,7 @@ export class UsersController {
 
   @Patch(':id/deactivate')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @RestrictedPermission('staff.manage')
   async deactivate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.deactivateUser(id, actor);
     return { message: 'User deactivated', data: { id: user.id } };
@@ -107,6 +130,7 @@ export class UsersController {
 
   @Patch(':id/reactivate')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @RestrictedPermission('staff.manage')
   async reactivate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.reactivateUser(id, actor);
     return { message: 'User reactivated', data: { id: user.id } };

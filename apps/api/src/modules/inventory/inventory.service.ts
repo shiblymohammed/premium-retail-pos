@@ -140,9 +140,28 @@ export class InventoryService {
             unitsPerCarton: variant.product.unitsPerCarton,
           };
         });
+        if (dto.purchaseOrderId) {
+          await tx.$queryRaw`SELECT id FROM purchase_orders WHERE id = ${dto.purchaseOrderId} FOR UPDATE`;
+          const order = await tx.purchaseOrder.findFirst({ where: { id: dto.purchaseOrderId, locationId: dto.locationId }, include: { lines: true } });
+          if (!order) throw new NotFoundException('Purchase order not found for this location');
+          if (supplierName.toLowerCase() !== order.supplierName.toLowerCase()) {
+            throw new BadRequestException('The supplier must match the purchase order');
+          }
+          const received = await tx.supplierReceiptLine.groupBy({
+            by: ['variantId'], where: { receipt: { purchaseOrderId: order.id } }, _sum: { quantityBaseUnits: true },
+          });
+          for (const line of normalizedLines) {
+            const ordered = order.lines.find((item) => item.variantId === line.variantId)?.quantity ?? 0;
+            const previous = received.find((item) => item.variantId === line.variantId)?._sum.quantityBaseUnits ?? 0;
+            if (line.quantityBaseUnits > ordered - previous) {
+              throw new BadRequestException('A received SKU or quantity exceeds the outstanding purchase order');
+            }
+          }
+        }
         const receipt = await tx.supplierReceipt.create({
           data: {
             receiptNumber,
+            purchaseOrderId: dto.purchaseOrderId,
             supplierName,
             locationId: dto.locationId,
             receivedByUserId: actor.userId,

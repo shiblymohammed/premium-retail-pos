@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccess } from '@/lib/permissions';
 import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
 import { ArrowRight } from 'lucide-react';
@@ -80,7 +81,7 @@ const REPORT_GROUPS: Array<{ label: string; keys: ReportKind[] }> = [
   { label: 'Operations', keys: ['transferDiscrepancies', 'auditVariances'] },
 ];
 
-const isoDate = (date: Date) => date.toISOString().slice(0, 10);
+const isoDate = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 
 function pdfSafe(value: string) {
   return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/₹/g, 'INR ').replace(/[→➜]/g, '->').replace(/[•·]/g, '-').replace(/[^\x20-\x7E]/g, '?');
@@ -295,15 +296,22 @@ export default function ReportsPage() {
     return () => controller.abort();
   }, [showNotifications, token, notifications, alertRetry]);
 
+  const { can, loading: accessLoading } = useAccess(token);
+  const reportRole = ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'STORE_MANAGER'].includes(role);
+  const canReadSales = can('sales.reports', reportRole);
+  const canReadStock = can('stock.view', reportRole);
   const visibleReportTabs = REPORT_TABS.filter((tab) => {
-    if (tab.key === 'priceChanges') return role === 'SUPER_ADMIN';
-    if (tab.key === 'itemDeletions') return role === 'SUPER_ADMIN' || role === 'ADMIN';
-    return true;
+    if (tab.key === 'overview') return canReadSales && canReadStock;
+    if (tab.key === 'priceChanges') return can('products.prices', role === 'SUPER_ADMIN');
+    if (tab.key === 'itemDeletions') return canReadSales;
+    if (['stock', 'lowStock', 'ledger', 'transferDiscrepancies', 'auditVariances'].includes(tab.key)) return canReadStock;
+    return canReadSales;
   });
+  const canReadReport = visibleReportTabs.some((tab) => tab.key === report);
 
   useEffect(() => {
-    if (!visibleReportTabs.some((tab) => tab.key === report)) setReport('overview');
-  }, [visibleReportTabs, report]);
+    if (!accessLoading && !canReadReport && visibleReportTabs.length) setReport(visibleReportTabs[0].key);
+  }, [accessLoading, canReadReport, visibleReportTabs]);
   useEffect(() => {
     const url = new URL(window.location.href);
     if (report === 'overview') url.searchParams.delete('tab');
@@ -328,7 +336,7 @@ export default function ReportsPage() {
   const formatShortAmount = (value: number) => formatCompactMoney(currency, value);
 
   useEffect(() => {
-    if (!token || locationState !== 'ready' || scopeError) return;
+    if (!token || locationState !== 'ready' || scopeError || accessLoading || !canReadReport) return;
     const controller = new AbortController();
     const params = reportParams(from, to, locationId);
     const read = <T,>(route: string) => requestData<T>(`/reports/${route}?${params}`, token, controller.signal);
@@ -362,7 +370,7 @@ export default function ReportsPage() {
       if (!controller.signal.aborted) setReportResult({ key: reportKey, error: error instanceof Error ? error.message : 'Could not load this report.' });
     });
     return () => controller.abort();
-  }, [token, locationState, scopeError, reportKey, report, locationId, from, to, invoicePage]);
+  }, [token, locationState, scopeError, reportKey, report, locationId, from, to, invoicePage, accessLoading, canReadReport]);
 
   async function markRead(id: string) {
     if (!notifications || !token) return;
@@ -532,6 +540,7 @@ export default function ReportsPage() {
           <p>{scopeName}{needsCurrency && currencies.length === 1 ? ` · ${currency}` : ''}</p>
         </div>
         <div className={styles.headerActions}>
+          {can('cash.reports', ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER'].includes(role)) && <a className="admin-secondary" href="/reports/cash-settlements">Cash settlements</a>}
           <label className={styles.search}>
             <Icon name="search" size={16} />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search stores, SKUs, invoices…" aria-label="Search reports" />
@@ -565,8 +574,8 @@ export default function ReportsPage() {
       {/* ---------- Tabs + filters ---------- */}
       <div className={styles.toolbar}>
         <div className={styles.reportGroups} role="group" aria-label="Report category">
-          {REPORT_GROUPS.map((group) => (
-            <button key={group.label} type="button" aria-pressed={group === reportGroup} onClick={() => { if (group !== reportGroup) setReport(group.keys[0]); }}>
+          {REPORT_GROUPS.filter((group) => group.keys.some((key) => visibleReportTabs.some((tab) => tab.key === key))).map((group) => (
+            <button key={group.label} type="button" aria-pressed={group === reportGroup} onClick={() => { if (group !== reportGroup) setReport(group.keys.find((key) => visibleReportTabs.some((tab) => tab.key === key)) ?? report); }}>
               {group.label}
             </button>
           ))}

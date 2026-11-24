@@ -23,6 +23,12 @@ export class SupplierReceiptLineDto {
 }
 
 export class SupplierReceiptDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  purchaseOrderId?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)

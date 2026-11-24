@@ -1,3 +1,4 @@
+import { can, PermissionOverrides } from '../../common/decorators/permission.decorator';
 import {
   BadRequestException,
   ConflictException,
@@ -30,6 +31,8 @@ export class ProductsService {
     if (dto.hasVariants !== true && dto.variants !== undefined) {
       throw new BadRequestException('Products without variants accept one default SKU, not a variants array');
     }
+    const sellByCarton = dto.sellByCarton ?? (dto.unitsPerCarton ?? 0) > 1;
+    this.assertCartonSale(sellByCarton, dto.unitsPerCarton);
     if (dto.unitsPerCarton === 0) {
       throw new BadRequestException('unitsPerCarton must be a positive integer or omitted for base-unit-only tracking');
     }
@@ -50,6 +53,7 @@ export class ProductsService {
             imageUrl: dto.imageUrl?.trim() || null,
             baseUnit: this.normalizeBaseUnit(dto.baseUnit),
             unitsPerCarton: dto.unitsPerCarton ?? null,
+            sellByCarton,
             reorderLevel: dto.reorderLevel ?? null,
             hasVariants: dto.hasVariants === true,
             categoryId: dto.categoryId,
@@ -135,12 +139,18 @@ export class ProductsService {
     }
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
 
-    if (dto.baseUnit !== undefined || dto.isActive === false || dto.reorderLevel !== undefined) {
+    if (dto.baseUnit !== undefined || dto.isActive === false || dto.reorderLevel !== undefined || dto.unitsPerCarton !== undefined || dto.sellByCarton !== undefined) {
       return this.prisma.$transaction(async (tx) => {
         // Serialize catalog changes with inventory and transfer writers, which take a shared product-row lock.
         await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "products" WHERE "id" = ${id} FOR UPDATE`;
-        const current = await tx.product.findUnique({ where: { id }, select: { id: true, baseUnit: true, isActive: true } });
+        const current = await tx.product.findUnique({ where: { id }, select: { id: true, baseUnit: true, isActive: true, unitsPerCarton: true, sellByCarton: true } });
         if (!current) throw new NotFoundException('Product not found');
+        if (dto.unitsPerCarton !== undefined || dto.sellByCarton !== undefined) {
+          const nextSize = dto.unitsPerCarton === undefined ? current.unitsPerCarton : dto.unitsPerCarton;
+          const nextCartonSales = dto.sellByCarton ?? (current.sellByCarton && (nextSize ?? 0) > 1);
+          this.assertCartonSale(nextCartonSales, nextSize);
+          data.sellByCarton = nextCartonSales;
+        }
         const nextBaseUnit = data.baseUnit as string | undefined;
         if (nextBaseUnit !== undefined && nextBaseUnit !== current.baseUnit) {
           const historicalMovements = await tx.inventoryMovement.count({
@@ -191,10 +201,13 @@ export class ProductsService {
     return this.prisma.product.update({ where: { id }, data, include: productInclude });
   }
 
-  async updatePrices(id: string, dto: UpdateProductPricesDto, actor: { userId: string; role: string }) {
-    this.assertSuperAdmin(actor.role);
+  async updatePrices(id: string, dto: UpdateProductPricesDto, actor: { userId: string; role: string; permissionOverrides?: PermissionOverrides }) {
+    if (!can(actor, 'products.prices', false)) throw new ForbiddenException('Shared catalogue price changes require explicit permission');
     const hasSellingPrice = dto.sellingPrice !== undefined;
     const hasPurchasePrice = dto.purchasePrice !== undefined;
+    if (hasPurchasePrice && !can(actor, 'products.cost', actor.role === Role.ADMIN || actor.role === Role.INVENTORY)) {
+      throw new ForbiddenException('Product cost access is required to change the purchase price');
+    }
     if (!hasSellingPrice && !hasPurchasePrice) {
       throw new BadRequestException('Provide sellingPrice and/or purchasePrice');
     }
@@ -357,6 +370,12 @@ export class ProductsService {
     if (categoryId == null) return;
     const category = await this.prisma.category.findUnique({ where: { id: categoryId }, select: { id: true } });
     if (!category) throw new BadRequestException('Category not found');
+  }
+
+  private assertCartonSale(sellByCarton: boolean, cartonSize?: number | null) {
+    if (sellByCarton && (cartonSize ?? 0) < 2) {
+      throw new BadRequestException('Carton sales require at least two units per carton');
+    }
   }
 
   private normalizeBaseUnit(value: string): string {

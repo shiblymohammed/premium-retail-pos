@@ -32,7 +32,9 @@ export class AuditLoggingInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const safeBody = redactSensitiveValues(request.body);
+    const safeBody = context.getClass().name === 'StaffRecordsController' && context.getHandler().name === 'payroll'
+      ? { period: request.body?.period }
+      : redactSensitiveValues(request.body);
     return next.handle().pipe(
       mergeMap(async (responseBody) => {
         try {

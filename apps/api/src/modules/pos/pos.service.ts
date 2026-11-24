@@ -1,31 +1,40 @@
+import { can, PermissionKey } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { CashDrawerSession, InvoiceStatus, LocationType, Prisma, Role } from '@prisma/client';
 import { CloseCashDrawerDto, OpenCashDrawerDto } from './dto/cash-drawer.dto';
 import type { RequestUser } from '../../common/decorators/current-user.decorator';
-import { checkoutLocationId } from './checkout-access';
+import { CHECKOUT_ROLES, checkoutLocationId } from './checkout-access';
 import { PrismaService } from '../../prisma/prisma.service';
 
-type Operator = Pick<RequestUser, 'userId' | 'role' | 'locationIds'>;
+type Operator = Pick<RequestUser, 'userId' | 'role' | 'locationIds' | 'permissionOverrides'>;
 
 @Injectable()
 export class PosService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getTerminalContext(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string) {
-    const location = await this.getCheckoutLocation(actor, requestedLocationId);
+  async getTerminalContext(actor: Operator, requestedLocationId?: string) {
+    const roleDefault = CHECKOUT_ROLES.includes(actor.role as Role);
+    const access = {
+      checkout: can(actor, 'sales.checkout', roleDefault),
+      drawer: can(actor, 'cash.drawer', roleDefault),
+      receipts: can(actor, 'sales.receipts', roleDefault),
+    };
+    const permission = access.checkout ? 'sales.checkout' : access.drawer ? 'cash.drawer' : 'sales.receipts';
+    const location = await this.getCheckoutLocation(actor, requestedLocationId, permission);
 
-    return {
+    return { access,
       cashierUserId: actor.userId,
       location: {
         id: location.id,
         name: location.name,
         type: location.type,
         currency: location.company.currency,
+        requireCheckoutDrawer: location.company.requireCheckoutDrawer,
       },
     };
   }
 
-  async getOfflineCatalog(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string) {
+  async getOfflineCatalog(actor: Operator, requestedLocationId?: string) {
     await this.getCheckoutLocation(actor, requestedLocationId);
     return this.prisma.product.findMany({
       // The current catalogue schema is global (Product has no companyId); only safe sale fields are exposed here.
@@ -35,6 +44,7 @@ export class PosService {
         name: true,
         baseUnit: true,
         unitsPerCarton: true,
+        sellByCarton: true,
         hasVariants: true,
         sellingPrice: true,
         variants: {
@@ -48,7 +58,7 @@ export class PosService {
   }
 
   async logCartDeletion(
-    actor: { userId: string; role: string; locationIds: string[] },
+    actor: Operator,
     input: { variantId: string; quantityRemoved: number; reason?: string },
     requestedLocationId?: string,
   ) {
@@ -74,8 +84,8 @@ export class PosService {
     });
   }
 
-  async recentReceipts(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string, invoiceNumber?: string) {
-    const location = await this.getCheckoutLocation(actor, requestedLocationId);
+  async recentReceipts(actor: Operator, requestedLocationId?: string, invoiceNumber?: string) {
+    const location = await this.getCheckoutLocation(actor, requestedLocationId, 'sales.receipts');
     const search = invoiceNumber?.trim().slice(0, 100);
     return this.prisma.invoice.findMany({
       where: {
@@ -98,7 +108,7 @@ export class PosService {
   }
 
   async cashDrawers(actor: Operator, requestedLocationId?: string) {
-    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId);
+    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId, 'cash.drawer');
     const where = { operatorId: actor.userId, locationId };
     const [drawer, history] = await Promise.all([
       this.prisma.cashDrawerSession.findFirst({ where: { ...where, closedAt: null } }),
@@ -110,7 +120,7 @@ export class PosService {
   }
 
   async openCashDrawer(actor: Operator, dto: OpenCashDrawerDto, requestedLocationId?: string) {
-    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId);
+    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId, 'cash.drawer');
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${actor.userId} FOR UPDATE`;
       const existing = await tx.cashDrawerSession.findFirst({ where: { operatorId: actor.userId, locationId, closedAt: null } });
@@ -120,7 +130,7 @@ export class PosService {
   }
 
   async closeCashDrawer(actor: Operator, dto: CloseCashDrawerDto, requestedLocationId?: string) {
-    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId);
+    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId, 'cash.drawer');
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${actor.userId} FOR UPDATE`;
       const drawer = await tx.cashDrawerSession.findFirst({ where: { id: dto.id, operatorId: actor.userId, locationId } });
@@ -147,11 +157,11 @@ export class PosService {
     return { expectedCash: drawer.openingCash.add(net('CASH')), expectedCard: net('CARD') };
   }
 
-  private async getCheckoutLocation(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string) {
-    const locationId = checkoutLocationId(actor, requestedLocationId);
+  private async getCheckoutLocation(actor: Operator, requestedLocationId?: string, permission?: PermissionKey) {
+    const locationId = checkoutLocationId(actor, requestedLocationId, permission);
     const location = await this.prisma.location.findUnique({
       where: { id: locationId },
-      select: { id: true, name: true, type: true, isActive: true, company: { select: { currency: true } } },
+      select: { id: true, name: true, type: true, isActive: true, company: { select: { currency: true, requireCheckoutDrawer: true } } },
     });
     if (!location) throw new NotFoundException('Retail store not found');
     if (!location.isActive || location.type !== LocationType.RETAIL_STORE) {

@@ -1,11 +1,12 @@
+import { can, PermissionKey } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import type { RequestUser } from '../../common/decorators/current-user.decorator';
 
 export const CHECKOUT_ROLES: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.STORE_MANAGER, Role.CASHIER];
 
-export function checkoutLocationId(actor: Pick<RequestUser, 'role' | 'locationIds'>, requestedLocationId?: string) {
-  if (!CHECKOUT_ROLES.includes(actor.role as Role)) throw new ForbiddenException('This account cannot open checkout');
+export function checkoutLocationId(actor: Pick<RequestUser, 'role' | 'locationIds' | 'permissionOverrides'>, requestedLocationId?: string, permission: PermissionKey = 'sales.checkout') {
+  if (!can(actor, permission, CHECKOUT_ROLES.includes(actor.role as Role))) throw new ForbiddenException('This account cannot open checkout');
   if (actor.role === Role.CASHIER) {
     if (actor.locationIds.length !== 1) throw new ForbiddenException('Cashier must be bound to exactly one retail store');
     if (requestedLocationId && requestedLocationId !== actor.locationIds[0]) throw new ForbiddenException('Choose your assigned store');

@@ -1,3 +1,4 @@
+import { Permission } from '../../common/decorators/permission.decorator';
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
@@ -17,6 +18,7 @@ export class AuditsController {
   @Post('locations/:locationId/sessions')
   @UseGuards(LocationScopeGuard)
   @Roles(...MANAGERS)
+  @Permission('stock.auditManagement')
   async start(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
       return { message: 'Stock audit started; location movements are frozen until approval or abort', data: await this.audits.start(locationId, actor) };
   }
@@ -41,6 +43,7 @@ export class AuditsController {
   @Patch('locations/:locationId/schedule')
   @UseGuards(LocationScopeGuard)
   @Roles(...MANAGERS)
+  @Permission('stock.auditManagement')
   async saveSchedule(@Param('locationId') locationId: string, @Body() dto: DailyAuditScheduleDto, @CurrentUser() actor: RequestUser) {
     return { message: 'Daily audit schedule saved', data: await this.audits.saveSchedule(locationId, dto, actor) };
   }
@@ -53,6 +56,7 @@ export class AuditsController {
 
   @Get('thresholds')
   @Roles(...MANAGERS)
+  @Permission('stock.auditManagement')
   async thresholds() {
     return { data: await this.audits.listThresholds() };
   }
@@ -75,6 +79,7 @@ export class AuditsController {
 
   @Post('sessions/:sessionId/items/:itemId/recount-required')
   @Roles(...MANAGERS)
+  @Permission('stock.auditManagement')
   async requestRecount(@Param('sessionId') sessionId: string, @Param('itemId') itemId: string, @Body() dto: AuditRecountRequestDto, @CurrentUser() actor: RequestUser) {
     return { message: 'Recount required', data: await this.audits.requestRecount(sessionId, itemId, dto.reason, actor) };
   }
@@ -86,12 +91,14 @@ export class AuditsController {
 
   @Post('sessions/:sessionId/approve')
   @Roles(...MANAGERS)
+  @Permission('stock.auditManagement')
   async approve(@Param('sessionId') sessionId: string, @Body() dto: AuditApprovalDto, @CurrentUser() actor: RequestUser) {
     return { message: 'Audit approved and stock adjustments posted', data: await this.audits.approve(sessionId, dto.reason, actor) };
   }
 
   @Post('sessions/:sessionId/abort')
   @Roles(...MANAGERS)
+  @Permission('stock.auditManagement')
   async abort(@Param('sessionId') sessionId: string, @Body() dto: AuditApprovalDto, @CurrentUser() actor: RequestUser) {
     return { message: 'Audit aborted without stock adjustments', data: await this.audits.abort(sessionId, dto.reason, actor) };
   }

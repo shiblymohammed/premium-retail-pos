@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
+import { PERMISSION_KEY, RESTRICTED_PERMISSION_KEY, PermissionKey, permissionOverride } from '../decorators/permission.decorator';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
 /**
@@ -27,27 +28,19 @@ export class RolesGuard implements CanActivate {
       context.getClass(),
     ]);
 
-    // No @Roles() decorator → allow all authenticated users
-    if (!requiredRoles || requiredRoles.length === 0) {
-      return true;
-    }
-
     const { user } = context.switchToHttp().getRequest();
-    if (!user) {
+    const permissions = this.reflector.get<PermissionKey[]>(PERMISSION_KEY, context.getHandler()) ?? [];
+    const restricted = this.reflector.get<PermissionKey>(RESTRICTED_PERMISSION_KEY, context.getHandler());
+    if (!user && (permissions.length || requiredRoles?.length || restricted)) {
       throw new ForbiddenException('Authentication required');
     }
+    if (!user || user.role === Role.SUPER_ADMIN) return true;
 
-    // SUPER_ADMIN always has access to everything
-    if (user.role === Role.SUPER_ADMIN) {
-      return true;
-    }
-
-    if (!requiredRoles.includes(user.role as Role)) {
-      throw new ForbiddenException(
-        `Role '${user.role}' is not authorized for this action`,
-      );
-    }
-
+    const roleAllowed = !requiredRoles?.length || requiredRoles.includes(user.role as Role);
+    const allowed = permissions.length
+      ? permissions.some((key) => permissionOverride(user, key) === true) || (roleAllowed && permissionOverride(user, permissions[0]) !== false)
+      : roleAllowed;
+    if (!allowed || (restricted && permissionOverride(user, restricted) === false)) throw new ForbiddenException('This account is not authorized for this action');
     return true;
   }
 }

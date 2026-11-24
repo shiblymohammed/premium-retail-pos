@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 export class AuditCountDto {
   @IsInt()
@@ -25,6 +25,10 @@ export class AuditApprovalDto {
 }
 
 export class AuditThresholdDto {
+  @IsOptional()
+  @IsIn(['either', 'units', 'percent'])
+  recountMeasure?: 'either' | 'units' | 'percent';
+
   @IsOptional()
   @IsString()
   @MaxLength(100)

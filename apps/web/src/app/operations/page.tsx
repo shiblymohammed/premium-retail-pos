@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccess } from '@/lib/permissions';
 import { ReasonDialog, type ReasonAction } from '@/components/admin/reason-dialog';
 import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
@@ -45,6 +46,7 @@ interface TransferItem {
   cartons: number;
   unitsPerCarton: number;
   looseUnits: number;
+  cartonRequired: boolean;
   totalUnits: number;
   requestedQtyBase: number;
   approvedQtyBase: number;
@@ -65,7 +67,6 @@ interface StockTransfer {
   sourceLocationId: string;
   destLocationId: string;
   requestedByUserId: string;
-  cartonRoute: boolean;
   transferCode: string;
   sourceLocation: string;
   destLocation: string;
@@ -92,8 +93,6 @@ interface ReplenishmentRequest {
 type LocationOption = { id: string; name: string; type: string; parentId: string | null };
 type CatalogOption = { variantId: string; sku: string; name: string; unitsPerCarton: number };
 
-const isCartonRoute = (source?: string, destination?: string) =>
-  (source === 'MAIN_WAREHOUSE' && destination === 'SUB_WAREHOUSE') || (source === 'SUB_WAREHOUSE' && destination === 'RETAIL_STORE');
 
 const isReceiver = (role?: string) => role === 'STAFF' || role === 'CASHIER';
 const outstandingQuantity = (item: TransferItem) => Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase);
@@ -193,8 +192,14 @@ export default function OperationsPage() {
   const [isSavingLines, setIsSavingLines] = useState(false);
   const [lineError, setLineError] = useState('');
   const pendingKeys = useRef(new Map<string, string>());
-  const receiveOnly = isReceiver(apiRole);
-  const managesTransfers = !receiveOnly && apiRole !== 'INVENTORY';
+  const { can } = useAccess(apiToken);
+  const defaultManager = !isReceiver(apiRole) && apiRole !== 'INVENTORY';
+  const canRequestTransfers = can('transfers.request', defaultManager || apiRole === 'INVENTORY');
+  const canApproveTransfers = can('transfers.approve', defaultManager);
+  const canDispatchTransfers = can('transfers.dispatch', defaultManager);
+  const canReceiveTransfers = can('transfers.receive', apiRole !== 'INVENTORY');
+  const receiveOnly = !canRequestTransfers && !canApproveTransfers && !canDispatchTransfers;
+
   const canActAt = (id: string) => apiRole === 'SUPER_ADMIN' || locations.some((location) => location.id === id);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState('');
@@ -239,9 +244,10 @@ export default function OperationsPage() {
         variantId: line.variantId,
         sku: variant.sku || line.variantId,
         name: variant.product?.name || variant.name || variant.sku || 'Product',
-        cartons: Math.floor(requestedQtyBase / unitsPerCarton),
+        cartons: unitsPerCarton > 1 ? Math.floor(requestedQtyBase / unitsPerCarton) : 0,
         unitsPerCarton,
-        looseUnits: requestedQtyBase % unitsPerCarton,
+        looseUnits: unitsPerCarton > 1 ? requestedQtyBase % unitsPerCarton : requestedQtyBase,
+        cartonRequired: !!line.cartonRequired,
         totalUnits: requestedQtyBase,
         requestedQtyBase,
         approvedQtyBase: Number(line.approvedQtyBase ?? requestedQtyBase),
@@ -258,7 +264,6 @@ export default function OperationsPage() {
       sourceLocationId: row.sourceLocationId,
       destLocationId: row.destLocationId,
       requestedByUserId: row.requestedByUserId,
-      cartonRoute: isCartonRoute(row.sourceLocation?.type, row.destLocation?.type),
       transferCode: row.transferNumber,
       sourceLocation: row.sourceLocation?.name || row.sourceLocationId,
       destLocation: row.destLocation?.name || row.destLocationId,
@@ -518,7 +523,7 @@ export default function OperationsPage() {
     if (!packing || isSavingLines) return;
     const lines = packing.items.filter((item) => lineQuantities[item.variantId] > 0).map((item) => ({
       variantId: item.variantId,
-      ...(packing.cartonRoute ? { cartons: lineQuantities[item.variantId] } : { looseBaseUnits: lineQuantities[item.variantId] }),
+      ...(item.cartonRequired ? { cartons: lineQuantities[item.variantId] } : { looseBaseUnits: lineQuantities[item.variantId] }),
     }));
     if (!lines.length) { setLineError('Enter the quantity packed for at least one product.'); return; }
     setIsSavingLines(true);
@@ -569,9 +574,8 @@ export default function OperationsPage() {
   }
 
   function openReplenishment(request: ReplenishmentRequest) {
-    const cartons = isCartonRoute(request.sourceLocation.type, request.destLocation.type);
     setLineQuantities(Object.fromEntries(request.lines.map((line) => [
-      line.variantId, cartons && line.unitsPerCarton > 1 ? Math.ceil(line.systemSuggestedQtyBase / line.unitsPerCarton) : cartons ? 0 : line.systemSuggestedQtyBase,
+      line.variantId, line.unitsPerCarton > 1 ? Math.ceil(line.systemSuggestedQtyBase / line.unitsPerCarton) : line.systemSuggestedQtyBase,
     ])));
     setAddedVariant('');
     setLineError('');
@@ -581,11 +585,10 @@ export default function OperationsPage() {
   async function approveReplenishment(event: FormEvent) {
     event.preventDefault();
     if (!replenishing || isSavingLines) return;
-    const cartons = isCartonRoute(replenishing.sourceLocation.type, replenishing.destLocation.type);
     const lines = Object.entries(lineQuantities).map(([variantId, quantity]) => {
       const ratio = replenishing.lines.find((line) => line.variantId === variantId)?.unitsPerCarton
         ?? catalog.find((variant) => variant.variantId === variantId)?.unitsPerCarton ?? 1;
-      return { variantId, approvedQtyBase: cartons ? quantity * ratio : quantity };
+      return { variantId, approvedQtyBase: quantity * Math.max(1, ratio) };
     });
     if (!lines.some((line) => line.approvedQtyBase > 0)) { setLineError('Approve a quantity for at least one product.'); return; }
     setIsSavingLines(true);
@@ -621,12 +624,11 @@ export default function OperationsPage() {
     setCreateModalOpen(true);
   }
 
-  const draftCartonRoute = isCartonRoute(locations.find((location) => location.id === newOrigin)?.type, locations.find((location) => location.id === newDest)?.type);
   const draftItems: TransferItem[] = catalog.filter((p) => draft[p.sku]).map((p) => {
     const q = draft[p.sku];
-    const loose = draftCartonRoute ? 0 : q.loose;
+    const loose = p.unitsPerCarton > 1 ? 0 : q.loose;
     const totalUnits = q.cartons * p.unitsPerCarton + loose;
-    return { variantId: p.variantId, sku: p.sku, name: p.name, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: loose, totalUnits, requestedQtyBase: totalUnits, approvedQtyBase: 0, dispatchedQtyBase: 0, receivedQtyBase: 0, shortQtyBase: 0, damagedQtyBase: 0 };
+    return { variantId: p.variantId, sku: p.sku, name: p.name, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: loose, cartonRequired: p.unitsPerCarton > 1, totalUnits, requestedQtyBase: totalUnits, approvedQtyBase: 0, dispatchedQtyBase: 0, receivedQtyBase: 0, shortQtyBase: 0, damagedQtyBase: 0 };
   });
   const draftTotal = draftItems.reduce((s, i) => s + i.totalUnits, 0);
   const setQty = (sku: string, key: keyof DraftQty, value: number) => setDraft((d) => ({ ...d, [sku]: { ...d[sku], [key]: Math.max(0, value) } }));
@@ -640,7 +642,6 @@ export default function OperationsPage() {
     e.preventDefault();
     if (newOrigin === newDest) { setCreateError('Pick a different destination.'); return; }
     if (!draftItems.length) { setCreateError('Choose at least one product to send.'); return; }
-    if (draftCartonRoute && draftItems.some((item) => item.unitsPerCarton <= 1)) { setCreateError('Remove products without a carton size for this route.'); return; }
     if (draftItems.some((i) => i.totalUnits <= 0)) { setCreateError('Each product needs at least one carton or loose unit.'); return; }
 
     setIsCreatingBusy(true);
@@ -706,8 +707,8 @@ export default function OperationsPage() {
           <p>{receiveOnly ? 'Check and receive stock at your assigned store.' : 'Send stock between locations, follow it on the road and receive it into inventory.'}</p>
         </div>
         {!receiveOnly && <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={generateReplenishment} disabled={!managesTransfers || !apiToken || locationFilter === 'ALL'}>Generate replenishment</button>
-          <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={!apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
+          <button type="button" className={styles.ghostButton} onClick={generateReplenishment} disabled={!canRequestTransfers || !apiToken || locationFilter === 'ALL'}>Generate replenishment</button>
+          <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={!canRequestTransfers || !apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
         </div>}
       </header>
 
@@ -823,10 +824,10 @@ export default function OperationsPage() {
             const isOpen = expanded === t.id;
             const issues = hasIssues(t);
             const created = splitStamp(t.createdAt);
-            const canApprove = managesTransfers && t.requestedByUserId !== apiUserId && canActAt(t.sourceLocationId);
-            const canDispatch = managesTransfers && canActAt(t.sourceLocationId) && ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && t.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (t.cartonRoute ? item.unitsPerCarton : 1));
+            const canApprove = canApproveTransfers && t.requestedByUserId !== apiUserId && canActAt(t.sourceLocationId);
+            const canDispatch = canDispatchTransfers && canActAt(t.sourceLocationId) && ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && t.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (item.cartonRequired ? item.unitsPerCarton : 1));
             const hasOutstanding = t.items.some((item) => outstandingQuantity(item) > 0);
-            const canReceive = apiRole !== 'INVENTORY' && canActAt(t.destLocationId) && hasOutstanding && ['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status);
+            const canReceive = canReceiveTransfers && canActAt(t.destLocationId) && hasOutstanding && ['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status);
             const awaitingPacking = ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status)
               && t.items.some((item) => item.approvedQtyBase > item.dispatchedQtyBase);
             const nextSteps = [
@@ -860,7 +861,7 @@ export default function OperationsPage() {
                   <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? 'Received · issues' : meta.label}</span>{nextSteps.map((step) => <small className={styles.nextStep} key={step}>{step}</small>)}</span>
 
                   <span className={styles.rowActions}>
-                    {!receiveOnly && t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
+                    {canRequestTransfers && t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
                     {t.status === 'PENDING_APPROVAL' && (canApprove ? <button type="button" className={styles.actionButton} onClick={() => approveTransfer(t)}>Approve</button> : <small>Waiting for another manager</small>)}
                     {canDispatch && <button type="button" className={styles.actionButton} onClick={() => openPacking(t)}>Confirm packing</button>}
                     {canReceive && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
@@ -870,12 +871,12 @@ export default function OperationsPage() {
                         <div className={styles.menu} role="menu">
                           <div className={styles.menuHeading}>{t.transferCode}</div>
                           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setExpanded(isOpen ? null : t.id); }}><Icon name="eye" size={15} /><span><b>{isOpen ? 'Hide details' : 'View details'}</b><small>Products, timeline and notes</small></span></button>
-                          {!receiveOnly && t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
+                          {canRequestTransfers && t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
                           {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => approveTransfer(t)}><Icon name="check" size={15} /><span><b>Approve</b><small>Approver cannot be the requester</small></span></button>}
                           {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${t.transferCode}?`, submit: (reason) => rejectTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
                           {canDispatch && <button type="button" role="menuitem" onClick={() => openPacking(t)}><Icon name="send" size={15} /><span><b>Confirm packed quantities</b><small>Server checks available inventory</small></span></button>}
                           {canReceive && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
-                          {managesTransfers && !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
+                          {canApproveTransfers && !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
                           <button type="button" role="menuitem" onClick={() => copyTracking(t)}><Icon name="copy" size={15} /><span><b>Copy tracking number</b><small>{t.trackingNumber}</small></span></button>
                           <div className={styles.menuDivider} />
                           <button type="button" role="menuitem" onClick={() => exportCsv([t])}><Icon name="download" size={15} /><span><b>Download as CSV</b><small>This transfer only</small></span></button>
@@ -892,7 +893,7 @@ export default function OperationsPage() {
                       <div className={styles.detailHead}><span>Product</span><span>Cartons</span><span>Loose</span><span className={styles.right}>Units</span></div>
                       {t.items.map((i) => (
                         <div key={i.sku} className={styles.detailLine}>
-                          <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{i.name}</strong><small>{i.sku} · {i.unitsPerCarton} per carton</small></span></span>
+                          <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{i.name}</strong><small>{i.sku} · {i.unitsPerCarton > 1 ? `${i.unitsPerCarton} per carton` : 'Ships loose'}</small></span></span>
                           <span>{i.cartons}</span>
                           <span>{i.looseUnits}</span>
                           <b className={styles.right}>{i.totalUnits}</b>
@@ -946,7 +947,7 @@ export default function OperationsPage() {
             <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
             <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
             <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
-            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => openReplenishment(request)} disabled={!managesTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Review quantities</button><button type="button" className={styles.ghostButton} onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) }); }} disabled={!managesTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Reject</button></span> : <span />}
+            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => openReplenishment(request)} disabled={!canApproveTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Review quantities</button><button type="button" className={styles.ghostButton} onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) }); }} disabled={!canApproveTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Reject</button></span> : <span />}
           </li>)}</ul>
         )}
       </section>}
@@ -960,27 +961,26 @@ export default function OperationsPage() {
           <form onSubmit={packing ? confirmPacking : approveReplenishment}>
             <div className={styles.modalBody}>
               {packing ? packing.items.map((item) => {
-                const ratio = packing.cartonRoute ? item.unitsPerCarton : 1;
+                const ratio = item.cartonRequired ? item.unitsPerCarton : 1;
                 const remaining = Math.floor((item.approvedQtyBase - item.dispatchedQtyBase) / ratio);
-                const unit = packing.cartonRoute ? 'cartons' : 'units';
+                const unit = item.cartonRequired ? 'cartons' : 'units';
                 const available = packingBalances ? Math.floor(Math.max(0, packingBalances[item.variantId] ?? 0) / ratio) : null;
-                if (remaining <= 0 || (packing.cartonRoute && ratio <= 1)) return null;
+                if (remaining <= 0 || (item.cartonRequired && ratio <= 1)) return null;
                 return <label className={styles.field} key={item.variantId}>
                   <span>{item.name} · {remaining} {unit} remaining</span>
                   {available !== null && <small>{available} {unit} available</small>}
                   <input type="number" inputMode="numeric" min="0" max={remaining} step="1" disabled={isSavingLines} value={lineQuantities[item.variantId] ?? ''} onChange={(event) => setLineQuantities((current) => ({ ...current, [item.variantId]: Number(event.target.value) }))} />
                 </label>;
               }) : replenishing && (() => {
-                const cartons = isCartonRoute(replenishing.sourceLocation.type, replenishing.destLocation.type);
-                const choices = catalog.filter((variant) => !(variant.variantId in lineQuantities) && (!cartons || variant.unitsPerCarton > 1));
+                const choices = catalog.filter((variant) => !(variant.variantId in lineQuantities));
                 return <>
                   {Object.entries(lineQuantities).map(([variantId, quantity]) => {
                     const suggested = replenishing.lines.find((line) => line.variantId === variantId);
                     const variant = catalog.find((item) => item.variantId === variantId);
-                    const isPacketOnly = cartons && (suggested?.unitsPerCarton ?? variant?.unitsPerCarton ?? 1) <= 1;
+                    const shipsInCartons = (suggested?.unitsPerCarton ?? variant?.unitsPerCarton ?? 1) > 1;
                     return <label className={styles.field} key={variantId}>
-                      <span>{variant?.name ?? variantId} · {isPacketOnly ? 'Carton size needed' : cartons ? 'Cartons' : 'Units'}</span>
-                      <input type="number" min="0" step="1" max="2147483647" value={quantity} disabled={isSavingLines || isPacketOnly} onChange={(event) => setLineQuantities((current) => ({ ...current, [variantId]: Number(event.target.value) }))} />
+                      <span>{variant?.name ?? variantId} · {shipsInCartons ? 'Cartons' : 'Loose units'}</span>
+                      <input type="number" min="0" step="1" max="2147483647" value={quantity} disabled={isSavingLines} onChange={(event) => setLineQuantities((current) => ({ ...current, [variantId]: Number(event.target.value) }))} />
                     </label>;
                   })}
                   <label className={styles.field}><span>Add another product</span>
@@ -1096,13 +1096,13 @@ export default function OperationsPage() {
                         <div key={p.sku} className={`${styles.productCard} ${q ? styles.productOn : ''}`}>
                           <button type="button" className={styles.productPick} onClick={() => toggleProduct(p.sku)} aria-pressed={!!q}>
                             <span className={styles.check}>{q && <Icon name="check" size={12} />}</span>
-                            <span><strong>{p.name}</strong><small>{p.sku} · {p.unitsPerCarton} per carton</small></span>
+                            <span><strong>{p.name}</strong><small>{p.sku} · {p.unitsPerCarton > 1 ? `${p.unitsPerCarton} per carton` : 'Ships loose'}</small></span>
                           </button>
                           {q && (
                             <div className={styles.productQty}>
                               {p.unitsPerCarton > 1 && <label><small>Cartons</small><Stepper value={q.cartons} onChange={(v) => setQty(p.sku, 'cartons', v)} label={`cartons of ${p.name}`} /></label>}
-                              {!draftCartonRoute && <label><small>Loose</small><Stepper value={q.loose} onChange={(v) => setQty(p.sku, 'loose', v)} label={`loose units of ${p.name}`} /></label>}
-                              <span className={styles.qtyTotal}><small>Units</small><b>{q.cartons * p.unitsPerCarton + (draftCartonRoute ? 0 : q.loose)}</b></span>
+                              {p.unitsPerCarton <= 1 && <label><small>Loose</small><Stepper value={q.loose} onChange={(v) => setQty(p.sku, 'loose', v)} label={`loose units of ${p.name}`} /></label>}
+                              <span className={styles.qtyTotal}><small>Units</small><b>{q.cartons * p.unitsPerCarton + (p.unitsPerCarton > 1 ? 0 : q.loose)}</b></span>
                             </div>
                           )}
                         </div>

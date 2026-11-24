@@ -68,6 +68,8 @@ export default function CompanySettingsPage() {
   const [companyName, setCompanyName] = useState('');
   const [currency, setCurrency] = useState('INR');
   const [timezone, setTimezone] = useState('Asia/Kolkata');
+  const [requireCheckoutDrawer, setRequireCheckoutDrawer] = useState(true);
+  const [cashSettlementFrequency, setCashSettlementFrequency] = useState('daily');
   const [invoicePrefix, setInvoicePrefix] = useState('');
   const [companyId, setCompanyId] = useState('');
   const [profileState, setProfileState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -147,6 +149,8 @@ export default function CompanySettingsPage() {
         setCurrency(company.currency || 'INR');
         setTimezone(company.timezone || 'Asia/Kolkata');
         setInvoicePrefix(company.invoicePrefix || '');
+        setCashSettlementFrequency(company.cashSettlementFrequency ?? 'daily');
+        setRequireCheckoutDrawer(company.requireCheckoutDrawer ?? true);
       }
       const mapped: LocationNode[] = (locationsPayload.data || []).map((loc: any) => ({
         id: loc.id, code: loc.code || loc.id.slice(0, 8).toUpperCase(), name: loc.name,
@@ -253,7 +257,7 @@ export default function CompanySettingsPage() {
       const response = await fetch(companyId ? `${API_BASE}/companies/${companyId}` : `${API_BASE}/companies`, {
         method: companyId ? 'PATCH' : 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: companyName.trim(), currency, timezone, invoicePrefix: invoicePrefix.trim().toUpperCase() }),
+        body: JSON.stringify({ name: companyName.trim(), currency, timezone, cashSettlementFrequency, requireCheckoutDrawer, invoicePrefix: invoicePrefix.trim().toUpperCase() }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'Company settings could not be saved.');
@@ -1120,6 +1124,19 @@ export default function CompanySettingsPage() {
                 </select>
               </div>
 
+              <div>
+                <label htmlFor="settlement-frequency">Cash settlement reporting frequency</label>
+                <select id="settlement-frequency" className="admin-profile-input" value={cashSettlementFrequency} onChange={(event) => setCashSettlementFrequency(event.target.value)}>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+                <small>Groups closed drawers in Reports. Staff still count and close their own drawers.</small>
+                <label style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
+                  <input type="checkbox" checked={requireCheckoutDrawer} onChange={(event) => setRequireCheckoutDrawer(event.target.checked)} />
+                  Require an open drawer at checkout
+                </label>
+              </div>
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
                   Global Unique Invoice Prefix *

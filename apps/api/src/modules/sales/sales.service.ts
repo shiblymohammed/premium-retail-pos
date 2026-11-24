@@ -1,9 +1,10 @@
+import type { PermissionOverrides } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceStatus, LocationType, MovementType, PaymentMethod, Prisma, RefundMethod, RefundType, ReturnDisposition, Role, StockState } from '@prisma/client';
 import { createHash } from 'crypto';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CHECKOUT_ROLES, checkoutLocationId } from '../pos/checkout-access';
+import { checkoutLocationId } from '../pos/checkout-access';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreateSaleDto, SaleUnit } from './dto/create-sale.dto';
 import { CancelSaleDto } from './dto/cancel-sale.dto';
@@ -11,7 +12,7 @@ import { CreateSaleReturnDto } from './dto/create-sale-return.dto';
 import { QuoteSaleDto } from './dto/quote-sale.dto';
 
 type Tx = Prisma.TransactionClient;
-type SaleActor = Pick<RequestUser, 'userId' | 'role' | 'locationIds'>;
+type SaleActor = Pick<RequestUser, 'userId' | 'role' | 'locationIds' | 'permissionOverrides'>;
 const saleInclude = {
   lines: { include: { variant: { select: { id: true, sku: true, barcode: true, name: true, product: { select: { id: true, name: true, baseUnit: true } } } } } },
   payment: true,
@@ -43,18 +44,21 @@ export class SalesService {
         const priorInvoice = await tx.invoice.findUnique({ where: { idempotencyKey: key }, select: { id: true } });
         if (priorInvoice) throw new ConflictException('This sale was already finalized with this Idempotency-Key; use a new key for a new sale');
 
-        const cashierRows = await tx.$queryRaw<Array<{ id: string; role: Role; isActive: boolean; discountLimitPercent: Prisma.Decimal }>>(Prisma.sql`
-          SELECT "id", "role", "is_active" AS "isActive", "discount_limit_percent" AS "discountLimitPercent"
+        const cashierRows = await tx.$queryRaw<Array<{ id: string; role: Role; isActive: boolean; discountLimitPercent: Prisma.Decimal; permissionOverrides?: PermissionOverrides }>>(Prisma.sql`
+          SELECT "id", "role", "is_active" AS "isActive", "discount_limit_percent" AS "discountLimitPercent", "permission_overrides" AS "permissionOverrides"
           FROM "users" WHERE "id" = ${actor.userId} FOR SHARE
         `);
         const cashier = cashierRows[0];
         const locationId = await this.authorizeCheckout(tx, actor, cashier, dto.locationId);
         const location = await tx.location.findUnique({
           where: { id: locationId },
-          select: { id: true, name: true, type: true, companyId: true, isActive: true, isAuditLocked: true },
+          select: { id: true, name: true, type: true, companyId: true, isActive: true, isAuditLocked: true, company: { select: { requireCheckoutDrawer: true } } },
         });
         if (!location?.isActive || location.type !== LocationType.RETAIL_STORE) throw new ForbiddenException('Choose an active retail store for checkout');
         if (location.isAuditLocked) throw new ConflictException('Location is locked for a stock audit');
+        if (location.company?.requireCheckoutDrawer && !dto.cashDrawerId) {
+          throw new ConflictException('Open your cash drawer before completing a sale');
+        }
 
         const lineVariantIds = dto.lines.map((line) => line.variantId);
         if (new Set(lineVariantIds).size !== lineVariantIds.length) throw new BadRequestException('A variant can appear only once per sale');
@@ -69,13 +73,13 @@ export class SalesService {
         `);
         const variants = await tx.variant.findMany({
           where: { id: { in: lineVariantIds }, isActive: true, product: { isActive: true } },
-          include: { product: { select: { id: true, name: true, baseUnit: true, unitsPerCarton: true, sellingPrice: true } } },
+          include: { product: { select: { id: true, name: true, baseUnit: true, unitsPerCarton: true, sellByCarton: true, sellingPrice: true } } },
         });
         if (variants.length !== lineVariantIds.length) throw new NotFoundException('One or more active product variants were not found');
         const variantById = new Map(variants.map((variant) => [variant.id, variant]));
         const lines = dto.lines.map((input) => {
           const variant = variantById.get(input.variantId)!;
-          const ratio = variant.product.unitsPerCarton;
+          const ratio = variant.product.sellByCarton === false ? null : variant.product.unitsPerCarton;
           const quantityBaseUnits = this.saleQuantity(input, ratio, variant.product.name);
           const gross = variant.product.sellingPrice.mul(quantityBaseUnits).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
           const discountPercent = new Prisma.Decimal(input.discountPercent ?? 0);
@@ -240,7 +244,7 @@ export class SalesService {
         data: { status: InvoiceStatus.CANCELLED, cancelledAt, cancelledByUserId: actor.userId, cancellationReason: reason },
         select: { id: true, invoiceNumber: true, status: true, cancelledAt: true, cancelledByUserId: true, cancellationReason: true },
       });
-      const cashDrawerId = await this.findRefundDrawer(tx, actor.userId, invoice.locationId);
+      const cashDrawerId = await this.findRefundDrawer(tx, actor.userId, invoice.locationId, dto.refundMethod);
       const refund = await tx.invoiceRefund.create({ data: {
         invoiceId: invoice.id,
         type: RefundType.SALE_CANCELLATION,
@@ -287,8 +291,8 @@ export class SalesService {
       throw new BadRequestException('Line discounts and bill discounts cannot be combined');
     }
     return this.prisma.$transaction(async (tx) => {
-      const users = await tx.$queryRaw<Array<{ role: Role; isActive: boolean; discountLimitPercent: Prisma.Decimal }>>(Prisma.sql`
-        SELECT "role", "is_active" AS "isActive", "discount_limit_percent" AS "discountLimitPercent"
+      const users = await tx.$queryRaw<Array<{ role: Role; isActive: boolean; discountLimitPercent: Prisma.Decimal; permissionOverrides?: PermissionOverrides }>>(Prisma.sql`
+        SELECT "role", "is_active" AS "isActive", "discount_limit_percent" AS "discountLimitPercent", "permission_overrides" AS "permissionOverrides"
         FROM "users" WHERE "id" = ${actor.userId} FOR SHARE
       `);
       const user = users[0];
@@ -303,13 +307,13 @@ export class SalesService {
       `);
       const variants = await tx.variant.findMany({
         where: { id: { in: variantIds }, isActive: true, product: { isActive: true } },
-        include: { product: { select: { name: true, baseUnit: true, unitsPerCarton: true, sellingPrice: true } } },
+        include: { product: { select: { name: true, baseUnit: true, unitsPerCarton: true, sellByCarton: true, sellingPrice: true } } },
       });
       if (variants.length !== variantIds.length) throw new NotFoundException('One or more active product variants were not found');
       const byId = new Map(variants.map((variant) => [variant.id, variant]));
       const lines = dto.lines.map((input) => {
         const variant = byId.get(input.variantId)!;
-        const quantityBaseUnits = this.saleQuantity(input, variant.product.unitsPerCarton, variant.product.name);
+        const quantityBaseUnits = this.saleQuantity(input, variant.product.sellByCarton === false ? null : variant.product.unitsPerCarton, variant.product.name);
         const gross = variant.product.sellingPrice.mul(quantityBaseUnits).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
         const requestedDiscount = gross.mul(input.discountPercent ?? 0).div(100);
         const discount = requestedDiscount.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
@@ -479,7 +483,7 @@ export class SalesService {
       }, include: { lines: true } });
       let refund = null;
       if (refundAmount.gt(0)) {
-        const cashDrawerId = await this.findRefundDrawer(tx, actor.userId, invoice.locationId);
+        const cashDrawerId = await this.findRefundDrawer(tx, actor.userId, invoice.locationId, dto.refundMethod);
         refund = await tx.invoiceRefund.create({ data: {
           invoiceId: invoice.id,
           saleReturnId: saleReturn.id,
@@ -517,11 +521,11 @@ export class SalesService {
     });
   }
 
-  private async authorizeCheckout(tx: Tx, actor: SaleActor, current: { role: Role; isActive: boolean } | undefined, requestedLocationId?: string) {
-    if (!current?.isActive || current.role !== actor.role || !CHECKOUT_ROLES.includes(current.role)) {
+  private async authorizeCheckout(tx: Tx, actor: SaleActor, current: { role: Role; isActive: boolean; permissionOverrides?: PermissionOverrides } | undefined, requestedLocationId?: string) {
+    if (!current?.isActive || current.role !== actor.role) {
       throw new ForbiddenException('An active account with checkout access is required');
     }
-    const locationId = checkoutLocationId(actor, requestedLocationId);
+    const locationId = checkoutLocationId({ ...actor, permissionOverrides: current.permissionOverrides ?? actor.permissionOverrides }, requestedLocationId);
     if (current.role !== Role.SUPER_ADMIN) {
       const scopes = await tx.userLocationScope.findMany({ where: { userId: actor.userId }, select: { locationId: true } });
       if (!scopes.some((scope) => scope.locationId === locationId) || (current.role === Role.CASHIER && scopes.length !== 1)) {
@@ -600,10 +604,18 @@ export class SalesService {
     }
   }
 
-  private async findRefundDrawer(tx: Tx, operatorId: string, locationId: string) {
+  private async findRefundDrawer(tx: Tx, operatorId: string, locationId: string, refundMethod: RefundMethod) {
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${operatorId} FOR SHARE`;
     const drawer = await tx.cashDrawerSession.findFirst({
       where: { operatorId, locationId, closedAt: null }, select: { id: true },
     });
+    if (!drawer && refundMethod === RefundMethod.CASH) {
+      const location = await tx.location.findUnique({ where: { id: locationId },
+        select: { company: { select: { requireCheckoutDrawer: true } } } });
+      if (location?.company.requireCheckoutDrawer) {
+        throw new ConflictException('Open your cash drawer at this store before recording a cash refund');
+      }
+    }
     return drawer?.id;
   }
 

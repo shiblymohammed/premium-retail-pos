@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccess } from '@/lib/permissions';
 import { CameraScanner } from '@/components/ui/camera-scanner';
 import { Feedback } from '@/components/ui/feedback';
 import {
@@ -46,6 +47,8 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/
 interface ProductItem {
   id: number;
   variantId: string;
+  productId: string;
+  sellByCarton: boolean;
   name: string;
   imageUrl?: string | null;
   variant: string;
@@ -61,8 +64,19 @@ interface ProductItem {
   inTransit: number;
   reserved: number;
   quarantined?: number;
-  packaging: string;
+  baseUnit: string;
   status: 'Healthy' | 'Low Stock' | 'Negative';
+}
+
+function unitCount(quantity: number, unit: string) {
+  const plural = /[^aeiou]y$/i.test(unit) ? `${unit.slice(0, -1)}ies` : `${unit}${/(s|x|z|ch|sh)$/i.test(unit) ? 'es' : 's'}`;
+  return `${quantity} ${Math.abs(quantity) === 1 ? unit : plural}`;
+}
+
+function cartonEquivalent(product: ProductItem) {
+  const { cartons, loose } = product.availableStock;
+  return [cartons > 0 ? unitCount(cartons, 'carton') : '', loose > 0 ? unitCount(loose, product.baseUnit) : '']
+    .filter(Boolean).join(' + ');
 }
 
 type SortKey = 'name' | 'sku' | 'price' | 'stock' | 'category' | 'status';
@@ -119,7 +133,13 @@ export default function ProductsPage() {
   const [stockLocations, setStockLocations] = useState<StockLocation[]>([]);
   const [intakeMode, setIntakeMode] = useState<IntakeMode | null>(null);
   const [operator, setOperator] = useState({ token: '', role: '' });
-  const canImport = ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER'].includes(operator.role);
+  const { can } = useAccess(operator.token);
+  const canImport = can('stock.intake', ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER'].includes(operator.role));
+  const canEditPrices = can('products.prices', operator.role === 'SUPER_ADMIN');
+  const canSeeCost = can('products.cost', ['SUPER_ADMIN', 'ADMIN', 'INVENTORY'].includes(operator.role));
+  const [priceTarget, setPriceTarget] = useState<ProductItem | null>(null);
+  const [priceInput, setPriceInput] = useState('');
+  const [priceReason, setPriceReason] = useState('');
   const supplierLocations = stockLocations.filter((location) => location.type === 'MAIN_WAREHOUSE');
   const [currency, setCurrency] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -141,12 +161,30 @@ export default function ProductsPage() {
   const [newProdName, setNewProdName] = useState('');
   const [newProdImageUrl, setNewProdImageUrl] = useState('');
   const [newProdVariant, setNewProdVariant] = useState('');
-  const [newProdBaseUnit, setNewProdBaseUnit] = useState('');
+  const [newProdBaseUnit, setNewProdBaseUnit] = useState('packet');
   const [newProdSku, setNewProdSku] = useState('');
   const [newProdBarcode, setNewProdBarcode] = useState('');
   const [newProdPrice, setNewProdPrice] = useState('');
   const [barcodeCameraOpen, setBarcodeCameraOpen] = useState(false);
-  const [newProdCartonRatio, setNewProdCartonRatio] = useState('');
+  const [newProdHasCartons, setNewProdHasCartons] = useState(false);
+  const [newProdSellByCarton, setNewProdSellByCarton] = useState(false);
+  const [editingPackaging, setEditingPackaging] = useState<ProductItem | null>(null);
+  const [newProdCartonRatio, setNewProdCartonRatio] = useState('10');
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [productSaveError, setProductSaveError] = useState('');
+  const productDialogRef = useRef<HTMLDialogElement>(null);
+  const productNameRef = useRef<HTMLInputElement>(null);
+  const productUnit = newProdBaseUnit.trim() || 'packet';
+  const cartonSize = Number(newProdCartonRatio);
+  const validCartonSize = Number.isInteger(cartonSize) && cartonSize >= 2 && cartonSize <= 1000000;
+
+  useEffect(() => {
+    const dialog = productDialogRef.current;
+    if (!addProductModalOpen || !dialog) return;
+    dialog.showModal();
+    productNameRef.current?.focus();
+    return () => dialog.close();
+  }, [addProductModalOpen]);
 
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
@@ -223,6 +261,8 @@ export default function ProductsPage() {
           })(),
           id: productIndex * 1000 + variantIndex + 1,
           variantId: variant.id,
+          productId: product.id,
+          sellByCarton: product.sellByCarton ?? Number(product.unitsPerCarton) > 1,
           name: product.name,
           imageUrl: product.imageUrl || null,
           variant: variant.name || 'Default',
@@ -233,7 +273,7 @@ export default function ProductsPage() {
           price: Number(product.sellingPrice || 0),
           purchasePrice: product.purchasePrice == null ? undefined : Number(product.purchasePrice),
           unitsPerCarton: Number(product.unitsPerCarton || 1),
-          packaging: Number(product.unitsPerCarton) > 1 ? `Carton (${product.unitsPerCarton})` : 'Base unit',
+          baseUnit: product.baseUnit || 'unit',
         })),
       );
       if (!currencyController.signal.aborted) setProducts(rows);
@@ -407,27 +447,90 @@ export default function ProductsPage() {
   // in the Transfers console; this product list does not support line-level requests.
   const openReplenish = () => { window.location.assign('/operations'); };
 
-  // Add New Product Variant
+  const openProductDialog = (product?: ProductItem) => {
+    setPriceTarget(null);
+    setEditingPackaging(product ?? null);
+    setNewProdName(product?.name ?? '');
+    setNewProdSku(product?.sku ?? '');
+    setNewProdImageUrl('');
+    setNewProdVariant('');
+    setNewProdBarcode('');
+    setNewProdPrice('');
+    setNewProdBaseUnit(product?.baseUnit ?? 'packet');
+    setNewProdHasCartons((product?.unitsPerCarton ?? 0) > 1);
+    setNewProdSellByCarton(product?.sellByCarton ?? false);
+    setNewProdCartonRatio(String(product && product.unitsPerCarton > 1 ? product.unitsPerCarton : 10));
+    setAddProductModalOpen(true);
+  };
+
+  const closeProductDialog = () => {
+    if (savingProduct) return;
+    setBarcodeCameraOpen(false);
+    setProductSaveError('');
+    setAddProductModalOpen(false);
+  };
+
   const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProdName.trim() || !newProdSku.trim()) {
-      showToast('Enter a product name and SKU.', 'error');
+    if (savingProduct) return;
+    setProductSaveError('');
+    if (!priceTarget && (!newProdName.trim() || !newProdSku.trim())) {
+      setProductSaveError('Enter a product name and SKU.');
       return;
     }
-
+    if (!priceTarget && newProdHasCartons && !validCartonSize) {
+      setProductSaveError('Enter a whole number from 2 to 1,000,000 for the carton size.');
+      return;
+    }
     const token = getStoredSession()?.accessToken;
-    if (!token) return showToast('Sign in again before creating products.', 'info');
+    if (!token) {
+      setProductSaveError('Sign in again before creating products.');
+      return;
+    }
+    setSavingProduct(true);
     try {
-      const response = await fetch(`${API_BASE}/products`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newProdName.trim(), imageUrl: newProdImageUrl.trim() || undefined, baseUnit: newProdBaseUnit.trim() || 'unit', unitsPerCarton: Number(newProdCartonRatio) > 1 ? Number(newProdCartonRatio) : undefined, hasVariants: true, variants: [{ name: newProdVariant.trim() || 'Default', sku: newProdSku.trim().toUpperCase(), barcode: newProdBarcode.trim() || undefined }], sellingPrice: Number(newProdPrice), purchasePrice: 0, priceChangeReason: 'Initial catalogue setup' }),
+      const response = await fetch(`${API_BASE}/products${priceTarget ? `/${priceTarget.productId}/prices` : editingPackaging ? `/${editingPackaging.productId}` : ''}`, {
+        method: priceTarget || editingPackaging ? 'PATCH' : 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(priceTarget ? { sellingPrice: Number(priceInput), reason: priceReason } : editingPackaging ? {
+          unitsPerCarton: newProdHasCartons ? cartonSize : null,
+          sellByCarton: newProdHasCartons && newProdSellByCarton,
+        } : {
+          name: newProdName.trim(),
+          imageUrl: newProdImageUrl.trim() || undefined,
+          baseUnit: productUnit,
+          unitsPerCarton: newProdHasCartons ? cartonSize : undefined,
+          sellByCarton: newProdHasCartons && newProdSellByCarton,
+          hasVariants: true,
+          variants: [{
+            name: newProdVariant.trim() || 'Default',
+            sku: newProdSku.trim().toUpperCase(),
+            barcode: newProdBarcode.trim() || undefined,
+          }],
+          sellingPrice: Number(newProdPrice),
+          purchasePrice: 0,
+          priceChangeReason: 'Initial catalogue setup',
+        }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'The server could not create this product.');
-      setAddProductModalOpen(false); setReloadKey((value) => value + 1);
-      setNewProdName(''); setNewProdImageUrl(''); setNewProdVariant(''); setNewProdBaseUnit(''); setNewProdSku(''); setNewProdBarcode(''); setNewProdPrice(''); setNewProdCartonRatio('');
-      showToast('Product saved to the catalogue. Add opening stock separately to set quantities.', 'success');
-    } catch (error) { showToast(error instanceof Error ? error.message : 'Product could not be saved.', 'info'); }
+      setAddProductModalOpen(false);
+      setReloadKey((value) => value + 1);
+      setNewProdName('');
+      setNewProdImageUrl('');
+      setNewProdVariant('');
+      setNewProdBaseUnit('packet');
+      setNewProdSku('');
+      setNewProdBarcode('');
+      setNewProdPrice('');
+      setNewProdHasCartons(false);
+      setNewProdCartonRatio('10');
+      showToast(priceTarget ? 'Selling price updated.' : editingPackaging ? 'Product packaging updated.' : 'Product saved to the catalogue. Add opening stock separately to set quantities.', 'success');
+    } catch (error) {
+      setProductSaveError(error instanceof Error ? error.message : 'Product could not be saved.');
+    } finally {
+      setSavingProduct(false);
+    }
   };
 
   const categories = ['All categories', ...Array.from(new Set(products.map((product) => product.category).filter(Boolean))).sort((a, b) => a.localeCompare(b))];
@@ -445,7 +548,6 @@ export default function ProductsPage() {
     ...(currency ? { style: 'currency' as const, currency } : {}),
   });
   const statusTone = (s: ProductItem['status']) => (s === 'Healthy' ? styles.pillGood : s === 'Low Stock' ? styles.pillWarn : styles.pillBad);
-  const unitWord = (n: number) => (Math.abs(n) === 1 ? 'pack' : 'packs');
   const pageNumbers = (() => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
     const pages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
@@ -544,8 +646,8 @@ export default function ProductsPage() {
               <Icon name="upload" size={15} /> Export
             </button>
             {canImport && <button type="button" className={styles.ghostButton} disabled={!products.length || !stockLocations.length} onClick={() => setIntakeMode('opening')}>Import opening stock</button>}
-            {(canImport || operator.role === 'INVENTORY') && supplierLocations.length > 0 && <button type="button" className={styles.ghostButton} disabled={!products.length} onClick={() => setIntakeMode('supplier')}>Receive from supplier</button>}
-            {operator.role === 'SUPER_ADMIN' && <button type="button" onClick={() => setAddProductModalOpen(true)} className={styles.primaryButton}>
+            {can('purchasing.orders', ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'STORE_MANAGER', 'INVENTORY'].includes(operator.role)) && supplierLocations.length > 0 && <button type="button" className={styles.ghostButton} disabled={!products.length} onClick={() => setIntakeMode('supplier')}>Receive from supplier</button>}
+            {operator.role === 'SUPER_ADMIN' && <button type="button" onClick={() => openProductDialog()} className={styles.primaryButton}>
               <Icon name="plus" size={16} /> Add product
             </button>}
           </div>
@@ -674,8 +776,8 @@ export default function ProductsPage() {
                     </div>
 
                     <div className={styles.stockCell}>
-                      <span className={styles.withIcon}><Icon name="package" size={14} /><b className={isNegative ? styles.negative : ''}>{product.totalUnits} {unitWord(product.totalUnits)}</b></span>
-                      <small>{isNegative ? 'Deficit · reconcile ledger' : product.packaging.includes('Carton') ? `${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose` : 'Loose only'}</small>
+                      <span className={styles.withIcon}><Icon name="package" size={14} /><b className={isNegative ? styles.negative : ''}>{unitCount(product.totalUnits, product.baseUnit)}</b></span>
+                      {isNegative ? <small>Deficit · reconcile ledger</small> : product.availableStock.cartons > 0 && <small>Equivalent to {cartonEquivalent(product)}</small>}
                     </div>
 
                     <div className={styles.pipelineCell}>
@@ -684,8 +786,8 @@ export default function ProductsPage() {
                     </div>
 
                     <div className={styles.priceCell}>
-                      <b>{formatPrice(product.price)}</b>{product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}
-                      <small>per pack</small>
+                      <b>{formatPrice(product.price)}</b>{canSeeCost && product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}
+                      <small>per {product.baseUnit}</small>
                     </div>
 
                     <div><span className={`${styles.pill} ${statusTone(product.status)}`}>{product.status === 'Negative' ? 'Negative' : product.status}</span></div>
@@ -697,6 +799,11 @@ export default function ProductsPage() {
                         <button type="button" className={styles.iconAction} onClick={() => setMenuFor(menuFor === product.id ? null : product.id)} aria-haspopup="menu" aria-expanded={menuFor === product.id} aria-label="More actions"><Icon name="more" size={15} /></button>
                         {menuFor === product.id && (
                           <div className={styles.rowMenu} role="menu">
+                            {['SUPER_ADMIN', 'ADMIN'].includes(operator.role) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openProductDialog(product); }}><Icon name="package" size={14} /> Edit packaging</button>}
+                            {canEditPrices && <button type="button" role="menuitem" onClick={() => {
+                              setEditingPackaging(null); setPriceTarget(product); setPriceInput(String(product.price)); setPriceReason('');
+                              setProductSaveError(''); setMenuFor(null); setAddProductModalOpen(true);
+                            }}>Edit selling price</button>}
                             <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openReplenish(); }}><Icon name="truck" size={14} /> Open replenishment tools</button>
                             <button type="button" role="menuitem" onClick={() => { setMenuFor(null); copySku(product); }}><Icon name="copy" size={14} /> Copy SKU</button>
                             <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setSelectedCategory(product.category); setCurrentPage(1); }}><Icon name="tag" size={14} /> Show {product.category}</button>
@@ -726,11 +833,11 @@ export default function ProductsPage() {
                       <small>{product.variant}</small>
                     </div>
                     <div className={styles.gridFigures}>
-                      <div><small>On hand</small><b className={isNegative ? styles.negative : ''}>{product.totalUnits}</b></div>
+                      <div><small>On hand</small><b className={isNegative ? styles.negative : ''}>{unitCount(product.totalUnits, product.baseUnit)}</b></div>
                       <div><small>In transit</small><b className={product.inTransit ? styles.transitText : ''}>+{product.inTransit}</b></div>
-                      <div><small>Price</small><b>{formatPrice(product.price)}</b>{product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}</div>
+                      <div><small>Price</small><b>{formatPrice(product.price)}</b>{canSeeCost && product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}</div>
                     </div>
-                    <div className={styles.gridHealth}><Gauge product={product} /><span>{product.packaging.includes('Carton') && !isNegative ? `${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose` : product.packaging}</span></div>
+                    <div className={styles.gridHealth}><Gauge product={product} />{product.availableStock.cartons > 0 && <span>Equivalent to {cartonEquivalent(product)}</span>}</div>
                     <div className={styles.gridFoot}>
                       <span className={styles.withIcon}><Icon name="mapPin" size={12} />{product.location}</span>
                       <button type="button" onClick={openReplenish} className={styles.smallPrimary}><Icon name="truck" size={13} /> Transfers</button>
@@ -764,151 +871,148 @@ export default function ProductsPage() {
         onSaved={(message) => { setIntakeMode(null); setReloadKey((key) => key + 1); showToast(message, 'success'); }}
       />}
 
-      {/* MODAL 2: Add Product Modal */}
       {addProductModalOpen && (
-        <div className={styles.modalOverlay} onClick={() => setAddProductModalOpen(false)}>
-          <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+        <dialog ref={productDialogRef} className={`${styles.modalCard} ${styles.productDialog}`} aria-labelledby="add-product-title"
+          onCancel={(event) => {
+            if (event.target !== event.currentTarget) return;
+            event.preventDefault();
+            closeProductDialog();
+          }}>
+          <form className={styles.productForm} onSubmit={handleAddProductSubmit}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitleGroup}>
-                <div className={styles.modalIconWrap} style={{ background: 'light-dark(#e0f2fe, #1f2e38)', color: 'light-dark(#0369a1, #b4def5)' }}>
-                  <Icon name="package" size={20} />
-                </div>
-                <div>
-                  <h2>Add product</h2>
-                  <p>Add new SKU, packaging ratio, and retail price</p>
-                </div>
+                <div className={styles.modalIconWrap}><Icon name="package" size={20} /></div>
+                <h2 id="add-product-title">{priceTarget ? `Edit selling price · ${priceTarget.name}` : editingPackaging ? `Edit packaging · ${editingPackaging.name}` : 'Add product'}</h2>
               </div>
-              <button onClick={() => setAddProductModalOpen(false)} className={styles.modalCloseBtn}>
+              <button type="button" onClick={closeProductDialog} className={styles.modalCloseBtn} disabled={savingProduct} aria-label="Close add product">
                 <Icon name="x" size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleAddProductSubmit} className={styles.modalBody}>
-              <div className={styles.formRow}>
+            <div className={`${styles.modalBody} ${styles.productFormBody}`}>
+              {priceTarget ? <fieldset className={styles.productFormSection} disabled={savingProduct}>
+                <legend>Catalogue price</legend>
+                <label className={styles.formGroup}>Selling price per {priceTarget.baseUnit}
+                  <input className={styles.modalInput} type="number" min="0" max="9999999999.99" step="0.01" required value={priceInput} onChange={(event) => setPriceInput(event.target.value)} />
+                </label>
+                <label className={styles.formGroup}>Reason for change
+                  <input className={styles.modalInput} required minLength={3} maxLength={500} value={priceReason} onChange={(event) => setPriceReason(event.target.value)} />
+                </label>
+              </fieldset> : <>
+              {!editingPackaging && <fieldset className={styles.productFormSection} disabled={savingProduct}>
+                <legend>Product details</legend>
                 <div className={styles.formGroup}>
-                  <label>Product Title *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Organic Rolled Oats"
-                    value={newProdName}
-                    onChange={(e) => setNewProdName(e.target.value)}
-                    className={styles.modalInput}
-                  />
+                  <label htmlFor="product-name">Product name *</label>
+                  <input ref={productNameRef} id="product-name" required placeholder="e.g. Organic rolled oats"
+                    value={newProdName} onChange={(e) => setNewProdName(e.target.value)} className={styles.modalInput} />
                 </div>
-                <div className={styles.formGroup}>
-                  <label>Variant Sub-Spec</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 500 g resealable pouch"
-                    value={newProdVariant}
-                    onChange={(e) => setNewProdVariant(e.target.value)}
-                    className={styles.modalInput}
-                  />
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="product-sku">SKU *</label>
+                    <input id="product-sku" required placeholder="e.g. PAN-5099"
+                      value={newProdSku} onChange={(e) => setNewProdSku(e.target.value)} className={styles.modalInput} />
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="product-barcode">Barcode (EAN/UPC)</label>
+                    <div className={styles.barcodeEntry}>
+                      <input id="product-barcode" inputMode="numeric" placeholder="Scan or enter"
+                        onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}
+                        value={newProdBarcode} onChange={(e) => setNewProdBarcode(e.target.value)} className={styles.modalInput} />
+                      <button type="button" className={styles.modalCloseBtn} onClick={() => setBarcodeCameraOpen(true)}
+                        aria-label="Scan barcode with camera" title="Scan barcode with camera"><Camera size={16} aria-hidden="true" /></button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              </fieldset>}
 
-              <div className={styles.formRow}>
-                <div className={styles.formGroup}>
-                  <label htmlFor="product-image-url">Product image URL</label>
-                  <input id="product-image-url" type="url" inputMode="url" placeholder="https://example.com/product-image.jpg" value={newProdImageUrl} onChange={(e) => setNewProdImageUrl(e.target.value)} className={styles.modalInput} />
-                  <small className={styles.fieldHint}>Use a public HTTPS image link. You can leave this blank and add an image later.</small>
-                  {newProdImageUrl.trim() && <img className={styles.imagePreview} src={newProdImageUrl.trim()} alt="Product image preview" />}
+              <fieldset className={styles.productFormSection} disabled={savingProduct}>
+                <legend>Packaging and price</legend>
+                <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="product-packaging">Ship between locations as</label>
+                    <select id="product-packaging" className={styles.modalSelect} value={newProdHasCartons ? 'cartons' : 'individual'}
+                      onChange={(e) => { setNewProdHasCartons(e.target.value === 'cartons'); if (e.target.value !== 'cartons') setNewProdSellByCarton(false); }}>
+                      <option value="individual">Loose {productUnit === 'packet' ? 'packets' : 'units'}</option>
+                      <option value="cartons">Whole cartons</option>
+                    </select>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="product-selling-unit">Sell at checkout as</label>
+                    <select id="product-selling-unit" className={styles.modalSelect} value={newProdSellByCarton ? 'cartons' : 'individual'}
+                      onChange={(e) => setNewProdSellByCarton(e.target.value === 'cartons')}>
+                      <option value="individual">{productUnit === 'packet' ? 'Packets only' : 'Individual units only'}</option>
+                      {newProdHasCartons && <option value="cartons">{productUnit === 'packet' ? 'Packets and cartons' : 'Individual units and cartons'}</option>}
+                    </select>
+                  </div>
                 </div>
-              </div>
+                {!editingPackaging && <div className={styles.formGroup}>
+                  <label htmlFor="product-selling-price">Price per {productUnit}{currency ? ` (${currency})` : ''} *</label>
+                  <input type="number" id="product-selling-price" inputMode="decimal" step="0.01" min="0" required
+                    value={newProdPrice} onChange={(e) => setNewProdPrice(e.target.value)} className={styles.modalInput} />
+                </div>}
+                {newProdHasCartons && <div className={styles.formRow}>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="product-carton-units">{productUnit === 'packet' ? 'Packets per carton' : 'Units per carton'} *</label>
+                    <input type="number" id="product-carton-units" inputMode="numeric" min="2" max="1000000" step="1" required
+                      value={newProdCartonRatio} onChange={(e) => setNewProdCartonRatio(e.target.value)} className={styles.modalInput} />
+                  </div>
+                  {validCartonSize && <div className={styles.cartonPreview} aria-live="polite">
+                    <strong>1 carton = {unitCount(cartonSize, productUnit)}</strong>
+                    {newProdSellByCarton && newProdPrice !== '' && Number.isFinite(Number(newProdPrice)) && Number(newProdPrice) >= 0 &&
+                      <span>{formatPrice(Math.round(Number(newProdPrice) * 100) * cartonSize / 100)} per carton</span>}
+                  </div>}
+                </div>}
+                <small className={styles.fieldHint}>Stock is counted in {productUnit === 'packet' ? 'packets' : 'individual units'}.
+                  {newProdHasCartons && ' Carton quantities are converted automatically.'}</small>
+              </fieldset>
 
-              <div className={styles.formRow}>
-                <div className={styles.formGroup}>
-                  <label htmlFor="product-base-unit">Base unit *</label>
-                  <input type="text" id="product-base-unit" list="product-base-units" required placeholder="e.g. packet" value={newProdBaseUnit} onChange={(e) => setNewProdBaseUnit(e.target.value)} className={styles.modalInput} />
-                  <datalist id="product-base-units"><option value="packet" /><option value="bottle" /><option value="piece" /></datalist>
-                  <small className={styles.fieldHint}>Use the smallest unit sold or counted individually. Put the number of those units per carton below.</small>
-                </div>
-              </div>
+              {!editingPackaging && <details className={styles.productOptions}>
+                <summary>Optional product details</summary>
+                <fieldset className={styles.productFormSection} disabled={savingProduct}>
+                  <div className={styles.formRow}>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="product-variant">Variant description</label>
+                      <input id="product-variant" placeholder="e.g. 500 g pouch" value={newProdVariant}
+                        onChange={(e) => setNewProdVariant(e.target.value)} className={styles.modalInput} />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="product-base-unit">Individual unit name</label>
+                      <input id="product-base-unit" minLength={1} maxLength={30} placeholder="packet" value={newProdBaseUnit}
+                        onChange={(e) => setNewProdBaseUnit(e.target.value)} className={styles.modalInput} />
+                      <small className={styles.fieldHint}>Change for products counted by piece, bottle, or another unit.</small>
+                    </div>
+                  </div>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="product-image-url">Product image URL</label>
+                    <input id="product-image-url" type="url" inputMode="url" placeholder="https://example.com/product.jpg"
+                      value={newProdImageUrl} onChange={(e) => setNewProdImageUrl(e.target.value)}
+                      onInvalid={(e) => e.currentTarget.closest('details')?.setAttribute('open', '')} className={styles.modalInput} />
+                    {newProdImageUrl.trim() && <img className={styles.imagePreview} src={newProdImageUrl.trim()} alt="Product image preview" />}
+                  </div>
+                </fieldset>
+              </details>}
+              {!editingPackaging && canImport && <small className={styles.fieldHint}>After saving, use Import opening stock to set quantities at a location.</small>}
+              </>}
+            </div>
 
-              <div className={styles.formRow}>
-                <div className={styles.formGroup}>
-                  <label>SKU Code *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. PAN-5099"
-                    value={newProdSku}
-                    onChange={(e) => setNewProdSku(e.target.value)}
-                    className={styles.modalInput}
-                  />
-                </div>
-                <div className={styles.formGroup}>
-                  <label htmlFor="product-barcode">Barcode (EAN/UPC)</label>
-                  <input
-                    type="text"
-                    id="product-barcode"
-                    inputMode="numeric"
-                    onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}
-                    placeholder="Scan or enter barcode"
-                    value={newProdBarcode}
-                    onChange={(e) => setNewProdBarcode(e.target.value)}
-                    className={styles.modalInput}
-                  />
-                  <small className={styles.fieldHint}>Focus this field to use a USB or Bluetooth barcode scanner.</small>
-                  <button type="button" className="admin-secondary" onClick={() => setBarcodeCameraOpen(true)}><Camera size={16} /> Scan with camera</button>
-                </div>
-              </div>
-
-              <div className={styles.formRow}>
-                <div className={styles.formGroup}>
-                  <label htmlFor="product-selling-price">Selling price per base unit{currency ? ` (${currency})` : ''}</label>
-                  <input
-                    type="number"
-                    id="product-selling-price"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={newProdPrice}
-                    onChange={(e) => setNewProdPrice(e.target.value)}
-                    className={styles.modalInput}
-                  />
-                </div>
-                <div className={styles.formGroup}>
-                  <label htmlFor="product-carton-units">Base units per carton</label>
-                  <input
-                    type="number"
-                    id="product-carton-units"
-                    min="2"
-                    placeholder="e.g. 10"
-                    step="1"
-                    value={newProdCartonRatio}
-                    onChange={(e) => setNewProdCartonRatio(e.target.value)}
-                    className={styles.modalInput}
-                  />
-                  <small className={styles.fieldHint}>Leave blank when sold and counted individually only.</small>
-                </div>
-              </div>
-
-              <p className={styles.fieldHint}>After saving, use Import opening stock to record quantities at a location.</p>
-
+            <div className={styles.productFormFooter}>
+              {productSaveError && <Feedback tone="error">{productSaveError}</Feedback>}
               <div className={styles.modalFooter}>
-                <button
-                  type="button"
-                  onClick={() => setAddProductModalOpen(false)}
-                  className={styles.btnSecondary}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className={styles.btnPrimary}>
+                <button type="button" onClick={closeProductDialog} className={styles.btnSecondary} disabled={savingProduct}>Cancel</button>
+                <button type="submit" className={styles.btnPrimary} disabled={savingProduct}>
                   <Icon name="check" size={16} />
-                  <span>Save Product</span>
+                  {savingProduct ? 'Saving…' : priceTarget ? 'Save price' : editingPackaging ? 'Save packaging' : 'Save product'}
                 </button>
               </div>
-            </form>
-            {barcodeCameraOpen && <CameraScanner onClose={() => setBarcodeCameraOpen(false)} onScan={(value) => {
-              if (!/^(?:\d{8}|\d{12}|\d{13})$/.test(value)) return false;
-              setNewProdBarcode(value);
-              setBarcodeCameraOpen(false);
-              return true;
-            }} />}
-          </div>
-        </div>
+            </div>
+          </form>
+          {barcodeCameraOpen && <CameraScanner onClose={() => setBarcodeCameraOpen(false)} onScan={(value) => {
+            if (!/^(?:\d{8}|\d{12}|\d{13})$/.test(value)) return false;
+            setNewProdBarcode(value);
+            setBarcodeCameraOpen(false);
+            return true;
+          }} />}
+        </dialog>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccess } from '@/lib/permissions';
 import {
   ChartNoAxesColumn,
   Check,
@@ -123,6 +124,7 @@ export default function UserManagementPage() {
   const [formPhone, setFormPhone] = useState('');
   const [formAddress, setFormAddress] = useState('');
   const [formDesignation, setFormDesignation] = useState('');
+  const { can } = useAccess();
   const [formSalary, setFormSalary] = useState('');
   const [formRole, setFormRole] = useState<ManagedUser['role']>('CASHIER');
   const [presets, setPresets] = useState<Record<string, PermissionPreset>>({});
@@ -326,7 +328,8 @@ export default function UserManagementPage() {
     const employeeProfile = {
       employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0],
       hireDate: formHireDate, phone: formPhone.trim() || null, address: formAddress.trim() || null,
-      designation: formDesignation.trim() || null, monthlyBaseSalary: formSalary.trim() || null,
+      designation: formDesignation.trim() || null,
+      ...(can('payroll.manage', true) && can('payroll.view', true) ? { monthlyBaseSalary: formSalary.trim() || null } : {}),
     };
     setFormError('');
     setSavingUser(true);
@@ -1240,7 +1243,7 @@ export default function UserManagementPage() {
                 <label>Joining date <input className="admin-profile-input" type="date" required value={formHireDate} onChange={(event) => setFormHireDate(event.target.value)} /></label>
                 <label>Phone <input className="admin-profile-input" type="tel" maxLength={21} value={formPhone} onChange={(event) => setFormPhone(event.target.value)} /></label>
                 <label>Designation <input className="admin-profile-input" maxLength={120} value={formDesignation} onChange={(event) => setFormDesignation(event.target.value)} /></label>
-                <label>Monthly base salary <input className="admin-profile-input" type="number" min="0" max="9999999999.99" step="0.01" value={formSalary} onChange={(event) => setFormSalary(event.target.value)} /></label>
+                {can('payroll.manage', true) && can('payroll.view', true) && <label>Monthly base salary <input className="admin-profile-input" type="number" min="0" max="9999999999.99" step="0.01" value={formSalary} onChange={(event) => setFormSalary(event.target.value)} /></label>}
                 <label>Address <input className="admin-profile-input" maxLength={400} value={formAddress} onChange={(event) => setFormAddress(event.target.value)} /></label>
               </div>}
 

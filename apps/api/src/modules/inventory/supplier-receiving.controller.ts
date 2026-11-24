@@ -1,3 +1,4 @@
+import { Permission } from '../../common/decorators/permission.decorator';
 import { Body, Controller, Headers, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
@@ -21,6 +22,7 @@ export class SupplierReceivingController {
     Role.STORE_MANAGER,
     Role.INVENTORY,
   )
+  @Permission('purchasing.orders')
   async receive(
     @Body() dto: SupplierReceiptDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,

@@ -1,0 +1,20 @@
+CREATE TABLE "payroll_records" (
+  "id" TEXT PRIMARY KEY,
+  "employee_id" TEXT NOT NULL REFERENCES "employees"("id") ON DELETE RESTRICT,
+  "period" TEXT NOT NULL,
+  "currency" TEXT NOT NULL,
+  "base" DECIMAL(12,2) NOT NULL,
+  "allowances" DECIMAL(12,2) NOT NULL,
+  "bonus" DECIMAL(12,2) NOT NULL,
+  "deductions" DECIMAL(12,2) NOT NULL,
+  "advance_recovery" DECIMAL(12,2) NOT NULL,
+  "net" DECIMAL(14,2) NOT NULL,
+  "created_by_id" TEXT NOT NULL REFERENCES "users"("id") ON DELETE RESTRICT,
+  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "paid_at" TIMESTAMP(3),
+  "paid_by_id" TEXT REFERENCES "users"("id") ON DELETE RESTRICT,
+  "payment_reference" TEXT,
+  UNIQUE ("employee_id", "period"),
+  CHECK ("base" >= 0 AND "allowances" >= 0 AND "bonus" >= 0 AND "deductions" >= 0 AND "advance_recovery" >= 0 AND "net" >= 0),
+  CHECK ("net" = "base" + "allowances" + "bonus" - "deductions" - "advance_recovery")
+);

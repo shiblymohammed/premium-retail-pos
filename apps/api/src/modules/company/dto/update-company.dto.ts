@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, IsTimeZone, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, IsTimeZone, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class UpdateCompanyDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(100)
@@ -12,4 +12,10 @@ export class UpdateCompanyDto {
 
   @IsOptional() @IsString() @MaxLength(10) @Matches(/^[A-Z0-9]+$/)
   invoicePrefix?: string;
+  @IsOptional()
+  @IsIn(['daily', 'weekly', 'monthly'])
+  cashSettlementFrequency?: 'daily' | 'weekly' | 'monthly';
+  @IsOptional()
+  @IsBoolean()
+  requireCheckoutDrawer?: boolean;
 }

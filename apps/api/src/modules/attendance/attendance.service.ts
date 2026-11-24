@@ -1,3 +1,4 @@
+import { can, PermissionKey } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -11,10 +12,43 @@ type EmployeeContext = {
   isActive: boolean;
   locationId: string;
   user: { isActive: boolean };
-  location: { id: string; name: string; isActive: boolean; attendanceStartTime: string | null; company: { timezone: string } };
+  location: { id: string; name: string; isActive: boolean; attendanceStartTime: string | null; attendanceEndTime?: string | null; company: { timezone: string } };
 };
 
 const MANAGERS: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER];
+
+const shiftFields = {
+  scheduledEndAt: true,
+  breaks: { select: { id: true, startedAt: true, endedAt: true }, orderBy: { startedAt: 'asc' } },
+} satisfies Prisma.AttendanceSelect;
+
+type Shift = {
+  punchTimestamp: Date;
+  scheduledEndAt?: Date | null;
+  breaks?: Array<{ startedAt: Date; endedAt: Date | null }>;
+};
+
+export function shiftMetrics(clockIn: Shift | null, finishedAt: Date | null, activeUntil?: Date) {
+  if (!clockIn) return { workMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, earlyMinutes: 0, onBreak: false };
+  const start = clockIn.punchTimestamp.getTime();
+  const finish = (finishedAt ?? activeUntil ?? clockIn.punchTimestamp).getTime();
+  const scheduled = clockIn.scheduledEndAt?.getTime();
+  const overlap = (from: number, breakStart: number, breakEnd: number) => Math.max(0, Math.min(finish, breakEnd) - Math.max(from, breakStart));
+  let breakMs = 0;
+  let overtimeBreakMs = 0;
+  for (const pause of clockIn.breaks ?? []) {
+    const breakEnd = pause.endedAt?.getTime() ?? finish;
+    breakMs += overlap(start, pause.startedAt.getTime(), breakEnd);
+    if (scheduled !== undefined) overtimeBreakMs += overlap(Math.max(start, scheduled), pause.startedAt.getTime(), breakEnd);
+  }
+  return {
+    workMinutes: Math.floor(Math.max(0, finish - start - breakMs) / 60_000),
+    breakMinutes: Math.floor(breakMs / 60_000),
+    overtimeMinutes: finishedAt && scheduled !== undefined ? Math.floor(Math.max(0, finish - Math.max(start, scheduled) - overtimeBreakMs) / 60_000) : 0,
+    earlyMinutes: finishedAt && scheduled !== undefined ? Math.ceil(Math.max(0, scheduled - finish) / 60_000) : 0,
+    onBreak: !finishedAt && (clockIn.breaks ?? []).some((pause) => !pause.endedAt),
+  };
+}
 
 @Injectable()
 export class AttendanceService {
@@ -22,10 +56,11 @@ export class AttendanceService {
 
   async getToday(actor: RequestUser) {
     const employee = await this.employeeFor(actor);
-    const { start, end } = localDayRange(new Date(), employee.location.company.timezone);
+    const now = new Date();
+    const { start, end } = localDayRange(now, employee.location.company.timezone);
     const punches = await this.prisma.attendance.findMany({
       where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
-      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
+      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
       orderBy: { punchTimestamp: 'asc' },
     });
     const last = punches.at(-1);
@@ -36,6 +71,8 @@ export class AttendanceService {
       localDate: new Intl.DateTimeFormat('en-CA', { timeZone: employee.location.company.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()),
       timezone: employee.location.company.timezone,
       targetStartTime: employee.location.attendanceStartTime,
+      targetEndTime: employee.location.attendanceEndTime ?? null,
+      ...shiftMetrics(punches.find((row) => row.punchType === 'IN') ?? null, last?.punchType === 'OUT' ? last.punchTimestamp : null, now),
       status,
       nextAction: status === 'WORKING' ? 'OUT' : status === 'NOT_STARTED' ? 'IN' : null,
       punches,
@@ -57,7 +94,7 @@ export class AttendanceService {
     const end = localMidnightUtc(endYear, endMonth, endDay, employee.location.company.timezone);
     const punches = await this.prisma.attendance.findMany({
       where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
-      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
+      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
       orderBy: { punchTimestamp: 'asc' },
     });
     const byDay = new Map<string, typeof punches>();
@@ -71,21 +108,20 @@ export class AttendanceService {
       const dayPunches = byDay.get(dateKey) ?? [];
       const clockIn = dayPunches.find((punch) => punch.punchType === 'IN') ?? null;
       const clockOut = dayPunches.find((punch) => punch.punchType === 'OUT') ?? null;
-      const durationEnd = clockOut?.punchTimestamp ?? (dateKey === today && clockIn ? now : null);
-      const workMinutes = clockIn && durationEnd ? Math.max(0, Math.floor((durationEnd.getTime() - clockIn.punchTimestamp.getTime()) / 60_000)) : 0;
+      const metrics = shiftMetrics(clockIn, clockOut?.punchTimestamp ?? null, dateKey === today ? now : undefined);
       return {
         date: dateKey,
         status: !clockIn ? 'off' : clockIn.isLate ? 'late' : 'present',
         clockInAt: clockIn?.punchTimestamp ?? null,
         clockOutAt: clockOut?.punchTimestamp ?? null,
         isLate: clockIn?.isLate ?? false,
-        workMinutes,
+        ...metrics,
       };
     });
     return { employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode }, location: { id: employee.location.id, name: employee.location.name }, timezone: employee.location.company.timezone, days };
   }
 
-  async punch(actor: RequestUser) {
+  async punch(actor: RequestUser, action?: 'IN' | 'OUT') {
     return this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT "id" FROM "employees" WHERE "user_id" = ${actor.userId} FOR UPDATE
@@ -103,17 +139,21 @@ export class AttendanceService {
       const { start, end } = localDayRange(now, employee.location.company.timezone);
       const punches = await tx.attendance.findMany({
         where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
-        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
+        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
         orderBy: { punchTimestamp: 'asc' },
       });
       const last = punches.at(-1);
       if (last?.punchType === 'OUT') throw new ConflictException('Your attendance is already complete for today');
+      if (last?.breaks?.some((pause) => !pause.endedAt)) throw new ConflictException('End your break before clocking out');
       const punchType = last?.punchType === 'IN' ? 'OUT' : 'IN';
+      if (action && action !== punchType) throw new ConflictException('The shift changed. Refresh attendance before trying again');
+      const endTime = employee.location.attendanceEndTime;
+      const scheduledEndAt = punchType === 'IN' && endTime ? localScheduledTime(now, endTime, employee.location.company.timezone) : null;
       const targetStartTime = punchType === 'IN' ? employee.location.attendanceStartTime ?? null : null;
       const isLate = punchType === 'IN' && targetStartTime !== null && isAfterLocalTarget(now, targetStartTime, employee.location.company.timezone);
       const punch = await tx.attendance.create({
-        data: { employeeId: employee.id, locationId: employee.locationId, punchType, punchTimestamp: now, isLate, targetStartTime },
-        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true },
+        data: { employeeId: employee.id, locationId: employee.locationId, punchType, punchTimestamp: now, isLate, targetStartTime, scheduledEndAt },
+        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields },
       });
       return {
         employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode },
@@ -121,8 +161,33 @@ export class AttendanceService {
         punch,
         status: punchType === 'IN' ? 'WORKING' : 'COMPLETED',
         nextAction: punchType === 'IN' ? 'OUT' : null,
+        ...shiftMetrics(punchType === 'IN' ? punch : last ?? null, punchType === 'OUT' ? now : null, now),
       };
     });
+  }
+
+  async changeBreak(actor: RequestUser, startBreak: boolean) {
+    const employee = await this.employeeFor(actor);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM employees WHERE id = ${employee.id} FOR UPDATE`;
+      const now = new Date();
+      const range = localDayRange(now, employee.location.company.timezone);
+      const active = await tx.attendance.findFirst({
+        where: { employeeId: employee.id, locationId: employee.locationId, punchTimestamp: { gte: range.start, lt: range.end } },
+        orderBy: { punchTimestamp: 'desc' },
+        select: { id: true, punchType: true, breaks: { where: { endedAt: null }, select: { id: true } } },
+      });
+      if (active?.punchType !== 'IN') throw new ConflictException('Clock in before starting or ending a break');
+      const open = active.breaks[0];
+      if (startBreak) {
+        if (open) throw new ConflictException('You already have a break in progress');
+        await tx.attendanceBreak.create({ data: { clockInId: active.id, startedAt: now } });
+      } else {
+        if (!open) throw new ConflictException('There is no open break to end');
+        await tx.attendanceBreak.update({ where: { id: open.id }, data: { endedAt: now } });
+      }
+    });
+    return this.getToday(actor);
   }
 
   async getLocationAttendanceToday(locationId: string, actor: RequestUser) {
@@ -141,7 +206,7 @@ export class AttendanceService {
         id: true, employeeCode: true, firstName: true, lastName: true,
         attendances: {
           where: { punchTimestamp: { gte: start, lt: end } },
-          select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
+          select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
           orderBy: { punchTimestamp: 'asc' },
         },
       },
@@ -153,6 +218,7 @@ export class AttendanceService {
       localDate,
       timezone: location.company.timezone,
       targetStartTime: location.attendanceStartTime,
+      targetEndTime: location.attendanceEndTime ?? null,
       employees: employees.map((employee) => {
         const clockIn = employee.attendances.find((punch) => punch.punchType === 'IN') ?? null;
         const clockOut = employee.attendances.find((punch) => punch.punchType === 'OUT') ?? null;
@@ -165,6 +231,7 @@ export class AttendanceService {
           clockOutAt: clockOut?.punchTimestamp ?? null,
           isLate: clockIn?.isLate ?? false,
           targetStartTime: clockIn?.targetStartTime ?? location.attendanceStartTime,
+          ...shiftMetrics(clockIn, clockOut?.punchTimestamp ?? null, now),
           clockInCorrectionReason: clockIn?.correctionReason ?? null,
           clockOutCorrectionReason: clockOut?.correctionReason ?? null,
         };
@@ -175,32 +242,35 @@ export class AttendanceService {
   async getLocationTargetStartTime(locationId: string, actor: RequestUser) {
     this.assertManager(actor);
     this.assertLocationScope(locationId, actor);
-    const location = await this.prisma.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true } });
+    const location = await this.prisma.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true, attendanceEndTime: true } });
     if (!location) throw new NotFoundException('Location not found');
     return location;
   }
 
-  async setLocationTargetStartTime(locationId: string, startTime: string | null, actor: RequestUser) {
-    this.assertManager(actor);
+  async setLocationTargetStartTime(locationId: string, startTime: string | null | undefined, actor: RequestUser, endTime?: string | null) {
+    this.assertManager(actor, 'attendance.manage');
     this.assertLocationScope(locationId, actor);
     return this.prisma.$transaction(async (tx) => {
-      const location = await tx.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true } });
+      const location = await tx.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true, attendanceEndTime: true } });
       if (!location) throw new NotFoundException('Location not found');
-      const updated = await tx.location.update({ where: { id: locationId }, data: { attendanceStartTime: startTime }, select: { id: true, name: true, attendanceStartTime: true } });
+      const start = startTime === undefined ? location.attendanceStartTime : startTime;
+      const end = endTime === undefined ? location.attendanceEndTime : endTime;
+      if (start && end && start >= end) throw new BadRequestException('Shift end must be later than shift start on the same day');
+      const updated = await tx.location.update({ where: { id: locationId }, data: { attendanceStartTime: start, attendanceEndTime: end }, select: { id: true, name: true, attendanceStartTime: true, attendanceEndTime: true } });
       await tx.auditEvent.create({ data: {
         actorId: actor.userId,
         action: 'ATTENDANCE_START_TIME_UPDATED',
         targetEntity: 'Location',
         targetId: locationId,
-        beforeValue: JSON.stringify({ attendanceStartTime: location.attendanceStartTime }),
-        afterValue: JSON.stringify({ attendanceStartTime: startTime }),
+        beforeValue: JSON.stringify({ attendanceStartTime: location.attendanceStartTime, attendanceEndTime: location.attendanceEndTime }),
+        afterValue: JSON.stringify({ attendanceStartTime: start, attendanceEndTime: end }),
       } });
       return updated;
     });
   }
 
   async correctPunch(attendanceId: string, timestamp: string, reason: string, actor: RequestUser) {
-    this.assertManager(actor);
+    this.assertManager(actor, 'attendance.manage');
     const correctedAt = new Date(timestamp);
     if (!Number.isFinite(correctedAt.getTime()) || correctedAt > new Date()) throw new BadRequestException('Corrected attendance time must be a valid time in the past');
     return this.prisma.$transaction(async (tx) => {
@@ -210,6 +280,7 @@ export class AttendanceService {
       });
       if (!punch) throw new NotFoundException('Attendance punch not found');
       this.assertLocationScope(punch.locationId, actor);
+      await tx.$queryRaw`SELECT id FROM employees WHERE id = ${punch.employeeId} FOR UPDATE`;
       const location = await tx.location.findUnique({ where: { id: punch.locationId }, include: { company: { select: { timezone: true } } } });
       if (!location) throw new NotFoundException('Punch location not found');
       const originalLocalDate = localDateKey(punch.punchTimestamp, location.company.timezone);
@@ -219,12 +290,17 @@ export class AttendanceService {
       const range = localDayRange(punch.punchTimestamp, location.company.timezone);
       const dayPunches = await tx.attendance.findMany({
         where: { employeeId: punch.employeeId, locationId: punch.locationId, punchTimestamp: { gte: range.start, lt: range.end } },
-        select: { id: true, punchType: true, punchTimestamp: true },
+        select: { id: true, punchType: true, punchTimestamp: true, ...shiftFields },
         orderBy: { punchTimestamp: 'asc' },
       });
       const timeline = dayPunches.map((item) => ({ ...item, punchTimestamp: item.id === attendanceId ? correctedAt : item.punchTimestamp })).sort((a, b) => a.punchTimestamp.getTime() - b.punchTimestamp.getTime());
       if (timeline.length > 2 || timeline.some((item, index) => item.punchType !== (index % 2 === 0 ? 'IN' : 'OUT'))) {
         throw new ConflictException('This correction would make the daily IN/OUT order invalid');
+      }
+      const [clockIn, clockOut] = timeline;
+      if (clockIn?.breaks?.some((pause) => pause.startedAt < clockIn.punchTimestamp ||
+        (clockOut && (!pause.endedAt || pause.endedAt > clockOut.punchTimestamp)))) {
+        throw new ConflictException('The corrected shift must contain all recorded breaks');
       }
       const targetStartTime = punch.targetStartTime;
       const isLate = punch.punchType === 'IN' && targetStartTime !== null && isAfterLocalTarget(correctedAt, targetStartTime, location.company.timezone);
@@ -267,7 +343,7 @@ export class AttendanceService {
         id: true, employeeCode: true, firstName: true, lastName: true,
         attendances: {
           where: { locationId, punchTimestamp: { gte: range.start, lt: range.end } },
-          select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true },
+          select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields },
           orderBy: { punchTimestamp: 'asc' },
         },
       },
@@ -282,10 +358,8 @@ export class AttendanceService {
       const entries = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, punches]) => {
         const clockIn = punches.find((punch) => punch.punchType === 'IN') ?? null;
         const clockOut = punches.find((punch) => punch.punchType === 'OUT') ?? null;
-        const workMinutes = clockIn && clockOut && clockOut.punchTimestamp > clockIn.punchTimestamp
-          ? Math.round((clockOut.punchTimestamp.getTime() - clockIn.punchTimestamp.getTime()) / 60_000)
-          : 0;
-        return { date, clockInAt: clockIn?.punchTimestamp ?? null, clockOutAt: clockOut?.punchTimestamp ?? null, isLate: clockIn?.isLate ?? false, targetStartTime: clockIn?.targetStartTime ?? null, workMinutes };
+        const metrics = shiftMetrics(clockIn, clockOut?.punchTimestamp ?? null);
+        return { date, clockInAt: clockIn?.punchTimestamp ?? null, clockOutAt: clockOut?.punchTimestamp ?? null, isLate: clockIn?.isLate ?? false, targetStartTime: clockIn?.targetStartTime ?? null, ...metrics };
       });
       const presentDays = entries.filter((entry) => entry.clockInAt).length;
       const completedDays = entries.filter((entry) => entry.clockInAt && entry.clockOutAt).length;
@@ -293,7 +367,10 @@ export class AttendanceService {
       const workMinutes = entries.reduce((sum, entry) => sum + entry.workMinutes, 0);
       return {
         employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode },
-        presentDays, completedDays, lateDays, workMinutes, entries,
+        presentDays, completedDays, lateDays, workMinutes,
+        earlyDays: entries.filter((entry) => entry.earlyMinutes > 0).length,
+        breakMinutes: entries.reduce((sum, entry) => sum + entry.breakMinutes, 0),
+        overtimeMinutes: entries.reduce((sum, entry) => sum + entry.overtimeMinutes, 0), entries,
       };
     });
     return {
@@ -309,6 +386,9 @@ export class AttendanceService {
         completedDays: employeeReports.reduce((sum, row) => sum + row.completedDays, 0),
         lateDays: employeeReports.reduce((sum, row) => sum + row.lateDays, 0),
         workMinutes: employeeReports.reduce((sum, row) => sum + row.workMinutes, 0),
+        earlyDays: employeeReports.reduce((sum, row) => sum + row.earlyDays, 0),
+        breakMinutes: employeeReports.reduce((sum, row) => sum + row.breakMinutes, 0),
+        overtimeMinutes: employeeReports.reduce((sum, row) => sum + row.overtimeMinutes, 0),
       },
       employees: employeeReports,
     };
@@ -326,8 +406,9 @@ export class AttendanceService {
     return employee;
   }
 
-  private assertManager(actor: RequestUser) {
-    if (!MANAGERS.includes(actor.role as Role)) throw new ForbiddenException('Manager access is required for attendance management');
+  private assertManager(actor: RequestUser, key: PermissionKey = 'staff.view') {
+    if (!can(actor, key, MANAGERS.includes(actor.role as Role)) &&
+      (key !== 'staff.view' || actor.permissionOverrides?.['attendance.manage'] !== true)) throw new ForbiddenException('Manager access is required for attendance management');
   }
 
   private assertLocationScope(locationId: string, actor: RequestUser) {
@@ -381,13 +462,20 @@ function reportRange(period: 'daily' | 'weekly' | 'monthly', date: string, timez
   };
 }
 
-function localMidnightUtc(year: number, month: number, day: number, timezone: string) {
-  let candidate = new Date(Date.UTC(year, month - 1, day));
+function localScheduledTime(date: Date, time: string, timezone: string) {
+  const [year, month, day] = localDateKey(date, timezone).split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  return localMidnightUtc(year, month, day, timezone, hour, minute);
+}
+
+function localMidnightUtc(year: number, month: number, day: number, timezone: string, hour = 0, minute = 0) {
+  const target = Date.UTC(year, month - 1, day, hour, minute);
+  let candidate = new Date(target);
   for (let i = 0; i < 3; i += 1) {
     const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(candidate);
     const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
     const displayedAsUtc = Date.UTC(Number(value.year), Number(value.month) - 1, Number(value.day), Number(value.hour), Number(value.minute), Number(value.second));
-    const difference = Date.UTC(year, month - 1, day) - displayedAsUtc;
+    const difference = target - displayedAsUtc;
     if (!difference) break;
     candidate = new Date(candidate.getTime() + difference);
   }

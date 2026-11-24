@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, MinLength, MaxLength, IsOptional, Matches, IsIn, IsTimeZone } from 'class-validator';
+import { IsBoolean, IsString, IsNotEmpty, MinLength, MaxLength, IsOptional, Matches, IsIn, IsTimeZone } from 'class-validator';
 
 export class CreateCompanyDto {
   @IsString()
@@ -22,4 +22,10 @@ export class CreateCompanyDto {
   @MaxLength(10, { message: 'Invoice prefix cannot exceed 10 characters' })
   @Matches(/^[A-Z0-9]+$/, { message: 'Invoice prefix must contain only uppercase letters and numbers' })
   invoicePrefix?: string = 'INV';
+  @IsOptional()
+  @IsIn(['daily', 'weekly', 'monthly'])
+  cashSettlementFrequency?: 'daily' | 'weekly' | 'monthly';
+  @IsOptional()
+  @IsBoolean()
+  requireCheckoutDrawer?: boolean;
 }

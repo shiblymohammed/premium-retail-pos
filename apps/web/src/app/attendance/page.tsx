@@ -13,6 +13,8 @@ type Punch = {
   id: string;
   punchType: 'IN' | 'OUT';
   punchTimestamp: string;
+  scheduledEndAt?: string | null;
+  breaks?: Array<{ id: string; startedAt: string; endedAt: string | null }>;
   isLate: boolean;
   targetStartTime: string | null;
   originalTimestamp: string | null;
@@ -25,6 +27,11 @@ type Today = {
   localDate: string;
   timezone: string;
   targetStartTime: string | null;
+  targetEndTime?: string | null;
+  onBreak?: boolean;
+  breakMinutes?: number;
+  overtimeMinutes?: number;
+  earlyMinutes?: number;
   status: 'NOT_STARTED' | 'WORKING' | 'COMPLETED';
   nextAction: 'IN' | 'OUT' | null;
   punches: Punch[];
@@ -37,6 +44,9 @@ type HistoryDay = {
   clockOut: string;
   hours: string;
   workMinutes: number;
+  breakMinutes?: number;
+  overtimeMinutes?: number;
+  earlyMinutes?: number;
 };
 
 const HISTORY_LABEL: Record<HistoryDay['status'], string> = {
@@ -123,13 +133,14 @@ export default function AttendancePage() {
             const historyPayload = await historyResponse.json().catch(() => ({}));
             if (!historyResponse.ok) throw new Error(historyPayload.message || 'Attendance history is temporarily unavailable.');
             const timezone = historyPayload.data.timezone as string;
-            setHistory((historyPayload.data.days as Array<{ date: string; status: HistoryDay['status']; clockInAt: string | null; clockOutAt: string | null; workMinutes: number }>).map((day) => ({
+            setHistory((historyPayload.data.days as Array<{ date: string; status: HistoryDay['status']; clockInAt: string | null; clockOutAt: string | null; workMinutes: number; breakMinutes: number; overtimeMinutes: number; earlyMinutes: number }>).map((day) => ({
               date: day.date,
               status: day.status,
               clockIn: day.clockInAt ? formatTime(day.clockInAt, timezone) : '—',
               clockOut: day.clockOutAt ? formatTime(day.clockOutAt, timezone) : '—',
               hours: day.workMinutes ? formatWorkMinutes(day.workMinutes) : '—',
               workMinutes: day.workMinutes,
+              breakMinutes: day.breakMinutes, overtimeMinutes: day.overtimeMinutes, earlyMinutes: day.earlyMinutes,
             })));
           } catch (caught) {
             setHistory([]);
@@ -162,17 +173,24 @@ export default function AttendancePage() {
 
   const clockIn = today?.punches.find((punch) => punch.punchType === 'IN');
   const clockOut = today?.punches.find((punch) => punch.punchType === 'OUT');
-  const elapsed = clockIn && clockNow
-    ? formatDuration((clockOut ? new Date(clockOut.punchTimestamp) : clockNow).getTime() - new Date(clockIn.punchTimestamp).getTime())
-    : '00:00';
+  function netShiftMs(inPunch: Punch, until: Date) {
+    const end = until.getTime();
+    const start = new Date(inPunch.punchTimestamp).getTime();
+    const breakMs = (inPunch.breaks ?? []).reduce((sum, pause) => sum + Math.max(0,
+      Math.min(end, pause.endedAt ? new Date(pause.endedAt).getTime() : end) - Math.max(start, new Date(pause.startedAt).getTime())), 0);
+    return Math.max(0, end - start - breakMs);
+  }
 
-  function updateTodayPattern(punches: Punch[]) {
+  const elapsedEnd = clockOut ? new Date(clockOut.punchTimestamp) : clockNow;
+  const elapsed = clockIn && elapsedEnd ? formatDuration(netShiftMs(clockIn, elapsedEnd)) : '00:00:00';
+
+  function updateTodayPattern(punches: Punch[], metrics?: Today) {
     if (!today) return;
     const inPunch = punches.find((punch) => punch.punchType === 'IN');
     const outPunch = punches.find((punch) => punch.punchType === 'OUT');
     if (!inPunch) return;
     const end = outPunch ? new Date(outPunch.punchTimestamp) : new Date();
-    const workMinutes = Math.max(0, Math.floor((end.getTime() - new Date(inPunch.punchTimestamp).getTime()) / 60_000));
+    const workMinutes = Math.floor(netShiftMs(inPunch, end) / 60_000);
     const nextDay: HistoryDay = {
       date: today.localDate,
       status: inPunch.isLate ? 'late' : 'present',
@@ -180,6 +198,7 @@ export default function AttendancePage() {
       clockOut: outPunch ? formatTime(outPunch.punchTimestamp, today.timezone) : '—',
       hours: workMinutes ? formatWorkMinutes(workMinutes) : '—',
       workMinutes,
+      breakMinutes: metrics?.breakMinutes, overtimeMinutes: metrics?.overtimeMinutes, earlyMinutes: metrics?.earlyMinutes,
     };
     setHistory((days) => [...days.filter((day) => day.date !== today.localDate), nextDay].sort((a, b) => a.date.localeCompare(b.date)));
   }
@@ -193,6 +212,7 @@ export default function AttendancePage() {
       const response = await fetch(`${API_BASE}/attendance/me/punch`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: today.nextAction }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'Could not record attendance. Please try again.');
@@ -202,12 +222,13 @@ export default function AttendancePage() {
         employee: result.employee || today.employee,
         location: result.location || today.location,
         status: result.status,
+        onBreak: result.onBreak, breakMinutes: result.breakMinutes, overtimeMinutes: result.overtimeMinutes, earlyMinutes: result.earlyMinutes,
         nextAction: result.nextAction,
         punches: [...today.punches, result.punch],
       };
       setToday(next);
       setClockNow(new Date());
-      updateTodayPattern(next.punches);
+      updateTodayPattern(next.punches, next);
       setNotice(`${result.punch.punchType === 'IN' ? 'Clock-in' : 'Clock-out'} recorded at ${formatTime(result.punch.punchTimestamp, today.timezone)}${result.punch.isLate ? ` · Late after ${result.punch.targetStartTime}` : ''}.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not record attendance. Please try again.');
@@ -216,14 +237,37 @@ export default function AttendancePage() {
     }
   }
 
+  async function handleBreak() {
+    if (today?.status !== 'WORKING' || !apiToken || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const action = today.onBreak ? 'end' : 'start';
+      const response = await fetch(`${API_BASE}/attendance/me/break/${action}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${apiToken}` },
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || 'Could not record your break.');
+      const updated: Today = payload.data;
+      setToday(updated);
+      setClockNow(new Date());
+      updateTodayPattern(updated.punches, updated);
+      setNotice(action === 'start' ? 'Break started.' : 'Break ended.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not record your break.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loading) return <main className={`${styles.page} app-page`}><div className={styles.loading}>Loading your attendance…</div></main>;
   if (!today) return <main className={`${styles.page} app-page`}><div className={styles.loadError}><strong>Attendance unavailable</strong><p>{error || 'Your account does not have an employee attendance profile.'}</p><button type="button" onClick={() => window.location.reload()}>Try again</button></div></main>;
 
-  const statusLabel = today.status === 'NOT_STARTED' ? 'Not clocked in' : today.status === 'WORKING' ? 'On shift' : 'Shift complete';
+  const statusLabel = today.status === 'NOT_STARTED' ? 'Not clocked in' : today.status === 'WORKING' ? (today.onBreak ? 'On break' : 'On shift') : 'Shift complete';
   const statusClass = today.status === 'WORKING' ? styles.live : today.status === 'COMPLETED' ? styles.done : styles.waiting;
   const patternHistory = history.map((day) => {
     if (day.date !== today.localDate || today.status !== 'WORKING' || !clockIn || !clockNow) return day;
-    const workMinutes = Math.max(0, Math.floor((clockNow.getTime() - new Date(clockIn.punchTimestamp).getTime()) / 60_000));
+    const workMinutes = Math.floor(netShiftMs(clockIn, clockNow) / 60_000);
     return { ...day, workMinutes, hours: formatWorkMinutes(workMinutes) };
   });
   const historyMap = new Map(patternHistory.map((day) => [day.date, day]));
@@ -256,7 +300,7 @@ export default function AttendancePage() {
         <section className={styles.summaryGrid} aria-label="Attendance summary">
           <article className={styles.summaryCard}><span className={styles.summaryIcon}><Clock size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>SHIFT STATUS</small><strong className={statusClass}>{statusLabel}</strong></div><i className={today.status === 'WORKING' ? styles.statusIndicatorLive : ''} /></article>
           <article className={styles.summaryCard}><span className={styles.summaryIcon}><ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>TARGET START</small><strong>{today.targetStartTime || 'Not set'}</strong><em>{clockIn?.isLate ? 'Late arrival recorded' : 'Store schedule'}</em></div></article>
-          <article className={styles.summaryCard}><span className={styles.summaryIcon}><Timer size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>TIME ON SHIFT</small><strong className={styles.duration}>{today.status === 'WORKING' ? elapsed : today.status === 'COMPLETED' ? elapsed : '—'}</strong><em>{today.status === 'WORKING' ? 'Live · hours : minutes' : today.status === 'COMPLETED' ? 'Today’s total' : 'Starts after clock-in'}</em></div></article>
+          <article className={styles.summaryCard}><span className={styles.summaryIcon}><Timer size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>TIME WORKED</small><strong className={styles.duration}>{today.status === 'WORKING' ? elapsed : today.status === 'COMPLETED' ? elapsed : '—'}</strong><em>{today.status === 'WORKING' ? 'Live · hours : minutes' : today.status === 'COMPLETED' ? 'Today’s total' : 'Starts after clock-in'}</em></div></article>
           <article className={styles.summaryCard}><span className={styles.summaryIcon}><Check size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>LAST 6 MONTHS</small><strong>{historySummary.shifts} shifts</strong><em>{historySummary.late} late arrivals</em></div></article>
         </section>
 
@@ -274,16 +318,28 @@ export default function AttendancePage() {
                 </button>
               </>}
               {today.status === 'WORKING' && <>
-                <div><small>Time on shift</small><strong>{elapsed}</strong><p>Clocked in at {clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'}</p></div>
-                <button className="admin-secondary" type="button" disabled={busy} onClick={() => setConfirmOut(true)}>
-                  <ArrowDownLeft size={18} /> {busy ? 'Saving…' : 'Clock out'}
-                </button>
+                <div><small>Time worked</small><strong>{elapsed}</strong><p>Clocked in at {clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'}</p></div>
+                <div className={styles.breakActions}>
+                  <button type="button" className={today.onBreak ? 'admin-primary' : 'admin-secondary'} disabled={busy} onClick={() => void handleBreak()}>{today.onBreak ? 'End break' : 'Start break'}</button>
+                  <button className="admin-secondary" type="button" disabled={busy || today.onBreak} onClick={() => setConfirmOut(true)}>
+                    <ArrowDownLeft size={18} /> Clock out
+                  </button>
+                </div>
               </>}
               {today.status === 'COMPLETED' && <div>
-                <small>Total time</small><strong>{elapsed}</strong>
+                <small>Net time worked</small><strong>{elapsed}</strong>
                 <p>{clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'} to {clockOut ? formatTime(clockOut.punchTimestamp, today.timezone) : '—'}</p>
               </div>}
             </div>
+            {clockIn && <p className={styles.shiftMetrics}>
+              {clockIn.scheduledEndAt ? `Scheduled end ${formatTime(clockIn.scheduledEndAt, today.timezone)}` : today.targetEndTime ? `Shift end setting ${today.targetEndTime}` : 'No scheduled end recorded'}
+              {' · '}Breaks {formatWorkMinutes(today.breakMinutes ?? 0)}
+              {(today.overtimeMinutes ?? 0) > 0 && ` · Overtime ${formatWorkMinutes(today.overtimeMinutes!)}`}
+              {(today.earlyMinutes ?? 0) > 0 && ` · Clocked out ${today.earlyMinutes} min early`}
+            </p>}
+            {clockIn?.breaks?.map((pause) => <div className={styles.shiftMetrics} key={pause.id}>
+              Break {formatTime(pause.startedAt, today.timezone)} – {pause.endedAt ? formatTime(pause.endedAt, today.timezone) : 'in progress'}
+            </div>)}
             {confirmOut && <ConfirmAction title="Clock out now?" confirmLabel="Yes, clock out" cancelLabel="No, stay on shift"
               onCancel={() => setConfirmOut(false)} onConfirm={() => { setConfirmOut(false); void handlePunch(); }}>
               This records the end of today’s shift at {today.location.name}.

@@ -19,6 +19,8 @@ import { AuditsModule } from './modules/audits/audits.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { ReportsModule } from './modules/reports/reports.module';
 
+import { TradeModule } from './modules/trade/trade.module';
+
 @Module({
   imports: [
     // Load environment variables globally
@@ -45,6 +47,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     AuditsModule,
     AttendanceModule,
     ReportsModule,
+    TradeModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditLoggingInterceptor },

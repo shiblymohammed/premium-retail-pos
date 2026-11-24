@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccess } from '@/lib/permissions';
 import { Lock, Menu } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
@@ -31,6 +32,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
   const [location, setLocation] = useState('All retail locations');
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
   const [session, setSession] = useState<AuthSession | null>(null);
+  const { can: canOverride, overrides, loading: loadingOverrides } = useAccess(session?.accessToken);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [canCountStockAudits, setCanCountStockAudits] = useState(false);
   const [auditCapabilityLoaded, setAuditCapabilityLoaded] = useState(false);
@@ -287,18 +289,35 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
   const matchingLink = findMatchingLink();
   // Loans & advances were deferred by the client; keep the old route hidden as well as unlinked.
   const isDeferredRoute = pathname === '/attendance/loans' || pathname.startsWith('/attendance/loans/');
-  const hasStandardRouteRole = Boolean(matchingLink && (
-    matchingLink.roles.includes(rawRole) ||
-    matchingLink.roles.includes(userRole) ||
-    (isSuperUser && matchingLink.href !== '/')
-  ));
+  const hasDefaultRole = (roles: string[]) => roles.includes(rawRole) || roles.includes(userRole) || isSuperUser;
+  function routeAccess(href: string, roleDefault: boolean) {
+    if (isSuperUser) return true;
+    switch (href) {
+      case '/pos-terminal': return canOverride('sales.checkout', roleDefault) || canOverride('cash.drawer', roleDefault) || canOverride('sales.receipts', roleDefault);
+      case '/reports': return canOverride('sales.reports', roleDefault) || canOverride('stock.view', roleDefault) || overrides['cash.reports'] === true || overrides['products.prices'] === true;
+      case '/products': return canOverride('stock.view', roleDefault);
+      case '/operations': {
+        const manager = roleDefault && !['CASHIER', 'STAFF', 'INVENTORY'].includes(rawRole);
+        return canOverride('transfers.request', manager || rawRole === 'INVENTORY')
+          || canOverride('transfers.receive', roleDefault && rawRole !== 'INVENTORY')
+          || canOverride('transfers.approve', manager) || canOverride('transfers.dispatch', manager);
+      }
+      case '/trade': return canOverride('purchasing.orders', roleDefault) || overrides['customers.credit'] === true || overrides['purchasing.payments'] === true;
+      case '/attendance/manage': return canOverride('staff.view', roleDefault) || overrides['attendance.manage'] === true;
+      case '/staff-records': return canOverride('staff.view', roleDefault) || overrides['staff.manage'] === true ||
+        overrides['payroll.view'] === true || overrides['payroll.manage'] === true;
+      case '/audits': return canOverride('stock.auditManagement', roleDefault) || (auditCapabilityLoaded && canCountStockAudits);
+      default: return roleDefault;
+    }
+  }
+  const hasStandardRouteRole = Boolean(matchingLink && routeAccess(matchingLink.href, hasDefaultRole(matchingLink.roles)));
   const requiresStockCountPermission = ['CASHIER', 'STAFF', 'INVENTORY'].includes(rawRole);
   const isFeatureRouteAuthorized = matchingLink?.href === '/audits' && requiresStockCountPermission
-    ? auditCapabilityLoaded && canCountStockAudits
+    ? (auditCapabilityLoaded && canCountStockAudits) || overrides['stock.auditManagement'] === true
     : matchingLink?.href === '/sales-controls'
       ? saleCapabilityLoaded && (isSuperUser || canAccessSaleControls)
       : hasStandardRouteRole;
-  const isAuthorizationPending = Boolean(session && (
+  const isAuthorizationPending = Boolean(session && (loadingOverrides ||
     (matchingLink?.href === '/audits' && requiresStockCountPermission && !auditCapabilityLoaded) ||
     (matchingLink?.href === '/sales-controls' && !saleCapabilityLoaded)
   ));
@@ -312,8 +331,8 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
         .map((group) => ({
           ...group,
           links: group.links.filter(
-            (link) => (link.roles.includes(rawRole) || link.roles.includes(userRole)) &&
-              (link.href !== '/audits' || !requiresStockCountPermission || (auditCapabilityLoaded && canCountStockAudits)) &&
+            (link) => routeAccess(link.href, hasDefaultRole(link.roles)) &&
+              (link.href !== '/audits' || !requiresStockCountPermission || (auditCapabilityLoaded && canCountStockAudits) || overrides['stock.auditManagement'] === true) &&
               (link.href !== '/sales-controls' || (saleCapabilityLoaded && (isSuperUser || canAccessSaleControls)))
           ),
         }))

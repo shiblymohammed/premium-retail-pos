@@ -1,6 +1,7 @@
 'use client';
 
 import { ReasonDialog, type ReasonAction } from '@/components/admin/reason-dialog';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { Feedback } from '@/components/ui/feedback';
 import {
   Check,
@@ -83,6 +84,7 @@ type Capabilities = { canCount: boolean; canManage: boolean; canChangeThresholds
 type Threshold = {
   scopeKey: string;
   categoryId: string | null;
+  recountMeasure?: string;
   recountVariancePercent: string | number;
   recountVarianceUnits: number;
   highCountAlertQty: number | null;
@@ -161,6 +163,7 @@ export default function AuditsPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [thresholds, setThresholds] = useState<Threshold[]>([]);
   const [policyScope, setPolicyScope] = useState('default');
+  const [recountMeasure, setRecountMeasure] = useState('either');
   const [percent, setPercent] = useState('2.0');
   const [units, setUnits] = useState('5');
   const [highCount, setHighCount] = useState('');
@@ -174,6 +177,7 @@ export default function AuditsPage() {
   const [approvalReason, setApprovalReason] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [recountPrompt, setRecountPrompt] = useState<{ id: string; name: string; unit: string; expected: number; counted: number } | null>(null);
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -253,6 +257,7 @@ export default function AuditsPage() {
         setThresholds(thresholdRows);
         const global = thresholdRows.find((row) => row.scopeKey === 'default');
         if (global) {
+          setRecountMeasure(global.recountMeasure ?? 'either');
           setPercent(String(global.recountVariancePercent));
           setUnits(String(global.recountVarianceUnits));
           setHighCount(global.highCountAlertQty === null ? '' : String(global.highCountAlertQty));
@@ -313,10 +318,14 @@ export default function AuditsPage() {
     setBusy(true);
     setError('');
     try {
-      await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/items/${encodeURIComponent(item.id)}/count`, token, {
+      const saved = await auditApi<{ recountComparison?: { expected: number; counted: number } }>(`/audits/sessions/${encodeURIComponent(session.id)}/items/${encodeURIComponent(item.id)}/count`, token, {
         method: 'POST', body: JSON.stringify({ quantityBaseUnits: val }),
       });
       await refreshLocationData();
+      if (saved.recountComparison) {
+        setCounts((current) => ({ ...current, [item.id]: '' }));
+        setRecountPrompt({ id: item.id, name: item.variant.product.name, unit: item.variant.product.baseUnit, ...saved.recountComparison });
+      }
       setNotice(`Saved the ${item.requiresRecount ? 'recount' : 'count'} for ${item.variant.product.name}.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not save this count.');
@@ -423,6 +432,7 @@ export default function AuditsPage() {
         method: 'POST',
         body: JSON.stringify({
           categoryId: selectedPolicy?.categoryId ?? null,
+          recountMeasure,
           recountVariancePercent: Number(percent),
           recountVarianceUnits: Number(units),
           highCountAlertQty: highCount.trim() ? Number(highCount) : null,
@@ -613,7 +623,7 @@ export default function AuditsPage() {
                           <div className={styles.countRow}>
                           <div className={styles.counter}>
                             <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String(Math.max(0, (Number(draft) || 0) - 1)) })} aria-label="One less" disabled={!canEditCount || busy}><Minus size="1em" className="inline-icon" aria-hidden="true" /></button>
-                            <input type="number" min="0" inputMode="numeric" placeholder={item.requiresRecount ? 'Enter recount' : '0'} value={draft} disabled={!canEditCount || busy} onChange={(e) => setCounts({ ...counts, [item.id]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && draft !== '') void handleSaveCount(item); }} aria-label={`How many ${item.variant.product.name}`} />
+                            <input type="number" min="0" inputMode="numeric" placeholder={item.requiresRecount ? 'Enter recount' : '0'} value={draft} disabled={!canEditCount || busy} onChange={(e) => setCounts({ ...counts, [item.id]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && draft !== '') void handleSaveCount(item); }} id={`audit-count-${item.id}`} aria-label={`How many ${item.variant.product.name}`} />
                             <button type="button" onClick={() => setCounts({ ...counts, [item.id]: String((Number(draft) || 0) + 1) })} aria-label="One more" disabled={!canEditCount || busy}><Plus size="1em" className="inline-icon" aria-hidden="true" /></button>
                           </div>
                           <span className={styles.unit}>{unit}s</span>
@@ -766,12 +776,20 @@ export default function AuditsPage() {
                     setPolicyScope(scope);
                     const policy = thresholds.find((threshold) => threshold.scopeKey === scope);
                     if (policy) {
+                      setRecountMeasure(policy.recountMeasure ?? 'either');
                       setPercent(String(policy.recountVariancePercent));
                       setUnits(String(policy.recountVarianceUnits));
                       setHighCount(policy.highCountAlertQty === null ? '' : String(policy.highCountAlertQty));
                     }
                   }}>
                     {thresholds.map((threshold) => <option key={threshold.scopeKey} value={threshold.scopeKey}>{threshold.category?.name ?? 'Global default'}</option>)}
+                  </select>
+                </label>
+                <label className={styles.field}><span>Measure the difference by</span>
+                  <select value={recountMeasure} disabled={!capabilities.canChangeThresholds || busy} onChange={(e) => setRecountMeasure(e.target.value)}>
+                    <option value="either">Either units or percentage</option>
+                    <option value="units">Units only</option>
+                    <option value="percent">Percentage only</option>
                   </select>
                 </label>
                 <label className={styles.inline}>
@@ -796,6 +814,16 @@ export default function AuditsPage() {
               </div>
             </div>
           </details>}
+      {recountPrompt && <ConfirmAction title="Cross-check the warehouse count" confirmLabel="Enter recount" cancelLabel="Later"
+        onCancel={() => setRecountPrompt(null)} onConfirm={() => {
+          const input = document.getElementById(`audit-count-${recountPrompt.id}`);
+          setRecountPrompt(null);
+          requestAnimationFrame(() => input?.focus());
+        }}>
+        <p><strong>{recountPrompt.name}</strong></p>
+        <p>Expected {recountPrompt.expected} · Counted {recountPrompt.counted} ({recountPrompt.unit})</p>
+        <p>Count this item again before submitting the audit.</p>
+      </ConfirmAction>}
       {reasonAction && <ReasonDialog action={reasonAction} onClose={() => setReasonAction(null)} />}
 
     </div>

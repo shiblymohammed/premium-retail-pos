@@ -1,0 +1,22 @@
+.page { display: grid; gap: 18px; padding: clamp(14px, 3vw, 32px); min-width: 0; }
+.top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+.top h1, .panel h2 { margin: 0 0 6px; }
+.page p { margin: 0; }
+.muted, .page small { color: var(--retail-muted); }
+.panel { min-width: 0; display: grid; gap: 12px; align-content: start; padding: 18px; border: 1px solid var(--retail-edge); border-radius: 14px; background: var(--retail-card); }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); }
+.fields { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+.fields label { display: grid; gap: 4px; min-width: 0; font-size: 13px; }
+.fields :is(select, input) { min-height: 40px; min-width: 0; max-width: 100%; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--retail-edge-strong); background: var(--retail-card); color: var(--retail-ink); }
+.facts { display: grid; gap: 8px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.facts dt { font-size: 12px; color: var(--retail-muted); }
+.facts dd { margin: 2px 0 0; font-weight: 650; overflow-wrap: anywhere; }
+.scroll { overflow-x: auto; }
+.panel table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+.panel :is(td, th) { border-top: 1px solid var(--retail-edge); padding: 8px; white-space: nowrap; }
+@media print {
+  :global(body):has(.payslip) * { visibility: hidden; }
+  .payslip, .payslip * { visibility: visible !important; }
+  .payslip { position: fixed; inset: 0; width: 100%; color: #111; background: #fff; border: none; }
+  .payslip .printButton { display: none; }
+}

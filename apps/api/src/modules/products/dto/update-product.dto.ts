@@ -10,6 +10,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateProductDto {
@@ -41,6 +42,10 @@ export class UpdateProductDto {
   @Min(1)
   @Max(1000000)
   unitsPerCarton?: number | null;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  sellByCarton?: boolean;
 
   /** Set or clear the replenishment threshold in canonical base units. */
   @IsOptional()

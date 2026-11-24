@@ -51,6 +51,12 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
     title: 'Stock',
     links: [
       {
+        label: 'Purchasing & credit',
+        href: '/trade',
+        icon: 'products',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'INVENTORY'],
+      },
+      {
         label: 'Products',
         href: '/products',
         icon: 'products',
@@ -86,6 +92,18 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         href: '/attendance',
         icon: 'attendance',
         roles: ['CASHIER', 'STAFF', 'INVENTORY'],
+      },
+      {
+        label: 'Staff records',
+        href: '/staff-records',
+        icon: 'users',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER'],
+      },
+      {
+        label: 'My payslips',
+        href: '/my-payslips',
+        icon: 'attendance',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF', 'INVENTORY'],
       },
       {
         label: 'Users',

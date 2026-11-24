@@ -1,4 +1,5 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import type { PermissionOverrides } from './permission.decorator';
 
 /**
  * Decorator: Extract the authenticated user from the request.
@@ -22,4 +23,5 @@ export interface RequestUser {
   email: string;
   role: string;
   locationIds: string[];
+  permissionOverrides?: PermissionOverrides;
 }

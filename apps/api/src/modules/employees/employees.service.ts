@@ -1,3 +1,4 @@
+import { can, PermissionOverrides } from '../../common/decorators/permission.decorator';
 import {
   BadRequestException,
   ConflictException,
@@ -9,7 +10,7 @@ import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './dto';
 
-type EmployeeActor = { userId: string; role: string; locationIds: string[] };
+type EmployeeActor = { userId: string; role: string; locationIds: string[]; permissionOverrides?: PermissionOverrides };
 
 @Injectable()
 export class EmployeesService {
@@ -29,7 +30,7 @@ export class EmployeesService {
           include: employeeInclude,
         });
       });
-      return withLoansPlaceholder(employee);
+      return withLoansPlaceholder(employee, actor);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Employee code or user profile is already in use');
@@ -56,7 +57,7 @@ export class EmployeesService {
       include: employeeInclude,
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
     });
-    return employees.map(withLoansPlaceholder);
+    return employees.map((employee) => withLoansPlaceholder(employee, actor));
   }
 
   async findOne(id: string, actor: EmployeeActor) {
@@ -66,7 +67,7 @@ export class EmployeesService {
     });
     if (!employee) throw new NotFoundException('Employee profile not found');
     this.assertLocationScope(actor, employee.locationId);
-    return withLoansPlaceholder(employee);
+    return withLoansPlaceholder(employee, actor);
   }
 
   async update(id: string, data: UpdateEmployeeDto, actor: EmployeeActor) {
@@ -101,7 +102,7 @@ export class EmployeesService {
           include: employeeInclude,
         });
       });
-      return withLoansPlaceholder(employee);
+      return withLoansPlaceholder(employee, actor);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Employee code is already in use');
@@ -234,9 +235,11 @@ const employeeInclude = {
   reportingTo: { select: { id: true, employeeCode: true, firstName: true, lastName: true } },
 } satisfies Prisma.EmployeeInclude;
 
-function withLoansPlaceholder<T extends { [key: string]: unknown }>(employee: T) {
+function withLoansPlaceholder<T extends { [key: string]: unknown }>(employee: T, actor: EmployeeActor) {
+  const { monthlyBaseSalary, ...details } = employee;
   return {
-    ...employee,
+    ...details,
+    ...(can(actor, 'payroll.view', actor.role === Role.ADMIN) && { monthlyBaseSalary }),
     loansAdvancesSummary: {
       status: 'planned',
       message: 'Loans and advances tracking is planned for Phase 9.',

@@ -633,3 +633,141 @@ button.chip:hover { filter: brightness(0.95); }
   display: grid;
   gap: 0.35rem;
 }
+
+.productDialog {
+  inset: 0;
+  margin: auto;
+  padding: 0;
+  width: min(620px, calc(100% - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+  border: 1px solid var(--retail-edge);
+  color: var(--retail-ink);
+}
+
+.productDialog::backdrop {
+  background: rgba(17, 24, 39, 0.45);
+  backdrop-filter: blur(3px);
+}
+
+.productForm {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 26px);
+}
+
+.productForm > .modalHeader {
+  flex: none;
+  align-items: center;
+}
+
+.productFormBody {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.productFormBody .formRow {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.productFormSection {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.productFormSection legend {
+  margin-bottom: 8px;
+  padding: 0;
+  color: var(--retail-ink);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.productFormSection + .productFormSection {
+  margin-top: 2px;
+}
+
+.barcodeEntry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 6px;
+}
+
+.barcodeEntry button {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.cartonPreview {
+  display: flex;
+  flex-direction: column;
+  align-self: end;
+  justify-content: center;
+  gap: 2px;
+  min-height: 40px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--retail-accent-soft);
+  color: var(--retail-ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.cartonPreview span {
+  color: var(--retail-muted);
+}
+
+.productOptions {
+  padding-top: 12px;
+  border-top: 1px solid var(--retail-edge);
+}
+
+.productOptions summary {
+  width: fit-content;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.productOptions[open] > fieldset {
+  margin-top: 12px;
+}
+
+.productFormFooter {
+  flex: none;
+  padding: 10px 22px 14px;
+  border-top: 1px solid var(--retail-edge);
+  background: var(--retail-card);
+}
+
+.productFormFooter .modalFooter {
+  flex-wrap: wrap;
+  padding-top: 0;
+}
+
+.productDialog button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .productForm > .modalHeader,
+  .productFormBody,
+  .productFormFooter {
+    padding-inline: 14px;
+  }
+
+  .productFormBody .formRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .productFormBody :is(input, select) {
+    font-size: 16px;
+  }
+}
