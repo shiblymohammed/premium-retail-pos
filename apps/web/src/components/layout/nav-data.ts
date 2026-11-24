@@ -12,22 +12,16 @@ export interface NavGroup {
 
 export const ALL_NAV_GROUPS: NavGroup[] = [
   {
-    title: 'WORKSPACE',
+    title: 'Home',
     links: [
       {
-        label: 'Sales & POS',
-        href: '/',
-        icon: 'pos',
-        roles: ['CASHIER'],
-      },
-      {
-        label: 'Dashboard',
+        label: 'Overview',
         href: '/dashboard',
         icon: 'dashboard',
         roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
       },
       {
-        label: 'Reports & Analytics',
+        label: 'Reports',
         href: '/reports',
         icon: 'reports',
         roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER'],
@@ -35,35 +29,16 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: 'INVENTORY & AUDITS',
+    title: 'Sales',
     links: [
       {
-        label: 'Products & Stock',
-        href: '/products',
-        icon: 'products',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
+        label: 'Checkout',
+        href: '/',
+        icon: 'pos',
+        roles: ['CASHIER'],
       },
       {
-        label: 'Stock Audits',
-        href: '/audits',
-        icon: 'audits',
-        // Cashier and staff visibility is additionally gated by the server's
-        // canCountStockAudits capability in AppFrameLayout.
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
-      },
-    ],
-  },
-  {
-    title: 'LOGISTICS & OPERATIONS',
-    links: [
-      {
-        label: 'Transfers & Logistics',
-        href: '/operations',
-        icon: 'transfers',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
-      },
-      {
-        label: 'Returns & Cancellations',
+        label: 'Returns',
         href: '/sales-controls',
         icon: 'returns',
         // Visibility is gated by the signed-in user's cancellation/return
@@ -73,39 +48,58 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: 'WORKFORCE & SHIFTS',
+    title: 'Stock',
     links: [
       {
-        label: 'Attendance Oversight',
+        label: 'Products',
+        href: '/products',
+        icon: 'products',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
+      },
+      {
+        label: 'Stock Counts',
+        href: '/audits',
+        icon: 'audits',
+        // Cashier and staff visibility is additionally gated by the server's
+        // canCountStockAudits capability in AppFrameLayout.
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
+      },
+      {
+        label: 'Transfers',
+        href: '/operations',
+        icon: 'transfers',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
+      },
+    ],
+  },
+  {
+    title: 'Team',
+    links: [
+      {
+        label: 'Attendance',
         href: '/attendance/manage',
         icon: 'oversight',
         roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER'],
       },
       {
-        label: 'Staff Attendance',
+        label: 'My Attendance',
         href: '/attendance',
         icon: 'attendance',
         roles: ['CASHIER', 'STAFF'],
       },
-    ],
-  },
-  {
-    title: 'SETTINGS & PREFERENCES',
-    links: [
       {
-        label: 'My Settings',
-        href: '/settings',
-        icon: 'settings',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
-      },
-      {
-        label: 'User Directory',
+        label: 'Users',
         href: '/admin/users',
         icon: 'users',
         roles: ['SUPER_ADMIN', 'ADMIN'],
       },
+    ],
+  },
+  {
+    title: 'Admin',
+    links: [
       {
-        label: 'Company & Locations',
+        label: 'Company',
         href: '/admin/company',
         icon: 'company',
         // This screen includes company-wide profile and organizational controls.
@@ -113,16 +107,27 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         roles: ['SUPER_ADMIN'],
       },
       {
-        label: 'Discount Limits',
+        label: 'Discounts',
         href: '/admin/discount-limits',
         icon: 'discount',
         roles: ['SUPER_ADMIN', 'ADMIN'],
       },
       {
-        label: 'Sale Permissions',
+        label: 'Permissions',
         href: '/admin/sales-permissions',
         icon: 'permissions',
         roles: ['SUPER_ADMIN', 'ADMIN'],
+      },
+    ],
+  },
+  {
+    title: 'Personal',
+    links: [
+      {
+        label: 'Settings',
+        href: '/settings',
+        icon: 'settings',
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
       },
     ],
   },

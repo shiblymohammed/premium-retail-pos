@@ -11,24 +11,30 @@ import {
   LogOut,
   Monitor,
   Package,
+  PanelLeftClose,
+  PanelLeftOpen,
   Percent,
   Settings,
   ShieldCheck,
   Store,
   Undo2,
   UsersRound,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { NavGroup } from './nav-data';
+import { ThemeControl } from './theme-control';
 
 export interface SidebarProps {
-  collapsed: boolean;
   homeRoute: string;
   visibleGroups: NavGroup[];
   pathname: string;
+  onNavigate: () => void;
+  collapsed: boolean;
+  toggleSidebar: () => void;
   handleSignOut: () => void;
 }
 
@@ -59,10 +65,12 @@ export function NavIcon({ name, size = 20 }: { name: string; size?: number }) {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
-  collapsed,
   homeRoute,
   visibleGroups,
   pathname,
+  onNavigate,
+  collapsed,
+  toggleSidebar,
   handleSignOut,
 }) => {
   const router = useRouter();
@@ -72,17 +80,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
-    <aside className="drive-sidebar" aria-label="Application sidebar">
-      {/* Brand */}
-      <Link className="drive-sidebar-brand" href={homeRoute} aria-label="Premium Retail workspace">
+    <aside id="workspace-navigation" className="drive-sidebar" aria-label="Application sidebar">
+      <div className="workspace-brand-row">
+      <Link className="drive-sidebar-brand" href={homeRoute} onClick={onNavigate} aria-label="Premium Retail workspace">
         <span className="drive-sidebar-brand-icon"><NavIcon name="brand" size={22} /></span>
-        {!collapsed && <span>Premium Retail</span>}
+        <span className="workspace-brand-name">Premium Retail</span>
       </Link>
+      <button type="button" className="drive-icon-button workspace-sidebar-toggle" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!collapsed} onClick={toggleSidebar} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+        {collapsed ? <PanelLeftOpen size={19} aria-hidden="true" /> : <PanelLeftClose size={19} aria-hidden="true" />}
+      </button>
+      <button id="mobile-nav-close" className="drive-icon-button workspace-nav-close" type="button" aria-label="Close navigation" onClick={onNavigate}>
+        <X size={20} aria-hidden="true" />
+      </button>
+      </div>
 
-      {/* Navigation Links, groups separated by a thin divider like the reference */}
+      <ThemeControl />
       <nav className="drive-nav-list" aria-label="Main navigation">
         {visibleGroups.map((group) => (
           <div key={group.title} className="drive-nav-group" role="group" aria-label={group.title}>
+            <div className="workspace-nav-caption" aria-hidden="true">{group.title}</div>
             {group.links.map((link) => {
               const active = activeHref === link.href;
               return (
@@ -94,14 +110,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   prefetch={false}
                   onMouseEnter={() => router.prefetch(link.href)}
                   onFocus={() => router.prefetch(link.href)}
+                  onClick={onNavigate}
                   className={`drive-nav-item${active ? ' active' : ''}`}
                   title={link.label}
+                  aria-label={link.label}
                   aria-current={active ? 'page' : undefined}
                 >
                   <span className="drive-nav-icon">
                     <NavIcon name={link.icon} />
                   </span>
-                  {!collapsed && <span className="drive-nav-label">{link.label}</span>}
+                  <span className="drive-nav-label">{link.label}</span>
                 </Link>
               );
             })}
@@ -115,7 +133,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span className="drive-nav-icon">
             <NavIcon name="logout" />
           </span>
-          {!collapsed && <span className="drive-nav-label">Sign out</span>}
+          <span className="drive-nav-label">Sign out</span>
         </button>
       </div>
 

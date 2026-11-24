@@ -1,5 +1,7 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
+import { Feedback } from '@/components/ui/feedback';
 import {
   ArrowRight,
   Check,
@@ -462,9 +464,7 @@ export default function DiscountLimitsAdmin() {
       {!canManage && (
         <div className={styles.readOnly}><Icon name="lock" size={16} /><span>You can view limits here. Only an Admin or Super Admin can change them.</span></div>
       )}
-      {error && (
-        <div className={styles.errorNotice}><Icon name="alert" size={16} /><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="Dismiss"><Icon name="close" size={14} /></button></div>
-      )}
+      {error && <Feedback tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
 
       {/* Stat cards, same pattern as the Dashboard */}
       <section className={styles.statsGrid}>
@@ -519,7 +519,7 @@ export default function DiscountLimitsAdmin() {
 
         <div className={`${styles.statCard} ${styles.statGreen}`}>
           <div className={styles.statMain}>
-            <div className={styles.statHead}><span className={styles.statIcon}><Icon name="shield" size={16} /></span><h3>Your authority</h3></div>
+            <div className={styles.statHead}><span className={styles.statIcon}><Icon name="shield" size={16} /></span><div className="heading-with-info"><h3>Your authority</h3><InfoHint label="About your discount authority">Your role controls which limits you can assign to cashiers.</InfoHint></div></div>
             <div>
               <div className={styles.statValue}>{canManage ? (authority.unlimited ? 'No cap' : pct(maximumAuthority)) : 'View only'}</div>
               <div className={styles.statMeta}>{canManage ? <><span className={styles.deltaGreen}>up to {pct(maximumAuthority)}</span></> : 'Ask an admin to change limits'}</div>
@@ -809,7 +809,7 @@ export default function DiscountLimitsAdmin() {
         </Drawer>
       )}
 
-      {toast && <div className={styles.toast} role="status"><Icon name="check" size={15} /> {toast}</div>}
+      {toast && <Feedback toast tone="success">{toast}</Feedback>}
     </div>
   );
 }

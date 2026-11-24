@@ -1,5 +1,7 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
+import { Feedback } from '@/components/ui/feedback';
 import {
   Check,
   ChevronDown,
@@ -514,19 +516,8 @@ export default function AuditsPage() {
         />
       </header>
 
-      {error && (
-        <div className={`${styles.alert} ${styles.alertError}`} role="alert">
-          <Icon name="alert" size={16} /><span>{error}</span>
-          {!token && <a href="/login?returnUrl=%2Faudits" className={styles.link}>Sign in</a>}
-          <button type="button" onClick={() => setError('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
-        </div>
-      )}
-      {notice && !error && (
-        <div className={`${styles.alert} ${styles.alertSuccess}`} role="status">
-          <Icon name="check" size={16} /><span>{notice}</span>
-          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
-        </div>
-      )}
+      {error && <Feedback tone="error" onDismiss={() => setError('')} action={!token && <a href="/login?returnUrl=%2Faudits">Sign in</a>}>{error}</Feedback>}
+      {notice && !error && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
       {/* ---------- At-a-glance tiles ---------- */}
       <section className={styles.tiles} aria-label="Stock count overview">
@@ -761,7 +752,7 @@ export default function AuditsPage() {
             <section className={styles.card}>
               <div className={styles.cardHead}>
                 <div>
-                  <h3>Audit scope</h3>
+                  <div className="heading-with-info"><h3>Audit scope</h3><InfoHint label="About the audit scope">This identifies the location and the stock included in the selected count.</InfoHint></div>
                   <p className={styles.cardSub}>The count sheet is created from active product variants when an authorized manager starts the audit.</p>
                 </div>
                 <span className={styles.hiddenChip}><Icon name="eyeOff" size={13} /> Blind count</span>

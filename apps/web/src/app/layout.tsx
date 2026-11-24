@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './workspace.css';
+import './interface.css';
 import AppFrame from '../components/app-frame';
 
 export const metadata: Metadata = {
@@ -13,12 +15,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
+        <script dangerouslySetInnerHTML={{ __html: "try { document.documentElement.dataset.theme = localStorage.getItem('premium-retail-theme') === 'dark' ? 'dark' : 'light'; } catch {}" }} />
       </head>
       <body><AppFrame>{children}</AppFrame></body>
     </html>

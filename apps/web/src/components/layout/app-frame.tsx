@@ -1,6 +1,6 @@
 'use client';
 
-import { Lock } from 'lucide-react';
+import { Lock, Menu } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -13,8 +13,9 @@ import {
   AUTH_CHANGE_EVENT,
 } from '@/lib/auth';
 import { ALL_NAV_GROUPS, LOCATION_KEY } from './nav-data';
-import { TopBar } from './topbar';
+import { WorkspaceTools } from './workspace-tools';
 import { Sidebar } from './sidebar';
+import { ThemeControl } from './theme-control';
 
 export interface AppFrameLayoutProps {
   children: React.ReactNode;
@@ -23,7 +24,8 @@ export interface AppFrameLayoutProps {
 export function AppFrameLayout({ children }: AppFrameLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [location, setLocation] = useState('All retail locations');
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -36,7 +38,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   useEffect(() => {
-    setCollapsed(window.localStorage.getItem('premium-retail-sidebar-collapsed') === 'true');
+    setCollapsed(window.localStorage.getItem('premium-retail-navigation') !== 'expanded');
     const storedLoc = window.localStorage.getItem(LOCATION_KEY);
     if (storedLoc) setLocation(storedLoc);
     let cancelled = false;
@@ -218,9 +220,36 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
 
   const toggleSidebar = () =>
     setCollapsed((value) => {
-      window.localStorage.setItem('premium-retail-sidebar-collapsed', String(!value));
+      window.localStorage.setItem('premium-retail-navigation', value ? 'expanded' : 'compact');
       return !value;
     });
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const desktop = window.matchMedia('(min-width: 761px)');
+    const focusToggle = () => requestAnimationFrame(() => document.getElementById('mobile-nav-toggle')?.focus());
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMobileNavOpen(false);
+      focusToggle();
+    };
+    const handleResize = () => {
+      if (desktop.matches) setMobileNavOpen(false);
+    };
+    document.addEventListener('keydown', handleEscape);
+    desktop.addEventListener('change', handleResize);
+    document.getElementById('mobile-nav-close')?.focus();
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      desktop.removeEventListener('change', handleResize);
+    };
+  }, [mobileNavOpen]);
+
+  const closeMobileNavigation = () => {
+    if (!mobileNavOpen) return;
+    setMobileNavOpen(false);
+    requestAnimationFrame(() => document.getElementById('mobile-nav-toggle')?.focus());
+  };
 
   const handleSignOut = async () => {
     await clearStoredSession();
@@ -229,7 +258,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
 
   // If on login page, don't show the dashboard shell
   if (pathname === '/login') {
-    return <>{children}</>;
+    return <>{children}<div className="signin-theme"><ThemeControl /></div></>;
   }
 
   const rawRole = session?.user?.role || 'STORE_MANAGER';
@@ -288,52 +317,54 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
         .filter((group) => group.links.length > 0)
     : [];
 
-  const isLocationLocked = locationOptions.length <= 1;
-
   return (
-    <div className={`app-frame${collapsed ? ' is-collapsed' : ''}`}>
-      {/* Sidebar sits on the coloured shell; the active tab merges into the white panel */}
+    <div className={`app-frame${collapsed ? ' is-collapsed' : ''}${mobileNavOpen ? ' is-navigation-open' : ''}`}>
+      {mobileNavOpen && <button className="workspace-nav-backdrop" type="button" tabIndex={-1} aria-label="Close navigation" onClick={closeMobileNavigation} />}
       <Sidebar
-        collapsed={collapsed}
         homeRoute={homeRoute}
         visibleGroups={visibleGroups}
         pathname={pathname}
-        handleSignOut={handleSignOut}
-      />
-
-      {/* White rounded content panel: topbar + page canvas */}
-      <div className="drive-body-container">
-      <TopBar
-        homeRoute={homeRoute}
-        location={location}
-        locationOptions={locationOptions}
-        isLocationLocked={isLocationLocked}
-        isLocationOpen={isLocationOpen}
-        setIsLocationOpen={setIsLocationOpen}
-        chooseLocation={chooseLocation}
-        session={session}
-        userInitials={userInitials}
-        rawRole={rawRole}
-        isProfileOpen={isProfileOpen}
-        setIsProfileOpen={setIsProfileOpen}
+        onNavigate={closeMobileNavigation}
         handleSignOut={handleSignOut}
         collapsed={collapsed}
         toggleSidebar={toggleSidebar}
-        showSearch={!['/dashboard', '/reports', '/products', '/operations', '/sales-controls', '/attendance/manage', '/admin/discount-limits'].includes(pathname)}
       />
 
+      <div className="drive-body-container" inert={mobileNavOpen}>
+        <header className="workspace-utility-row" aria-label="Workspace utilities">
+          <button id="mobile-nav-toggle" type="button" className="drive-icon-button workspace-nav-toggle" aria-label="Open navigation" aria-controls="workspace-navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}>
+            <Menu size={21} aria-hidden="true" />
+          </button>
+          {session && (
+            <WorkspaceTools
+              key={pathname}
+              location={location}
+              locationOptions={locationOptions}
+              isLocationOpen={isLocationOpen}
+              setIsLocationOpen={setIsLocationOpen}
+              chooseLocation={chooseLocation}
+              session={session}
+              userInitials={userInitials}
+              rawRole={rawRole}
+              isProfileOpen={isProfileOpen}
+              setIsProfileOpen={setIsProfileOpen}
+              handleSignOut={handleSignOut}
+              links={visibleGroups.flatMap((group) => group.links)}
+            />
+          )}
+        </header>
         {/* Content Canvas */}
         <main className="drive-main-canvas">
           {!sessionLoaded ? (
-            <div style={{ padding: '40px 24px', color: '#64748b', fontSize: '13px', textAlign: 'center' }}>
+            <div style={{ padding: '40px 24px', color: 'var(--retail-muted)', fontSize: '13px', textAlign: 'center' }}>
               Loading your account…
             </div>
           ) : !session && pathname !== '/' && pathname !== '/operations' ? (
-            <div style={{ padding: '40px 24px', color: '#64748b', fontSize: '13px', textAlign: 'center' }} role="status">
+            <div style={{ padding: '40px 24px', color: 'var(--retail-muted)', fontSize: '13px', textAlign: 'center' }} role="status">
               Your session has expired. Returning to sign in…
             </div>
           ) : isAuthorizationPending ? (
-            <div style={{ padding: '40px 24px', color: '#64748b', fontSize: '13px', textAlign: 'center' }} role="status">
+            <div style={{ padding: '40px 24px', color: 'var(--retail-muted)', fontSize: '13px', textAlign: 'center' }} role="status">
               Checking your access…
             </div>
           ) : isAuthorized ? (
@@ -344,18 +375,18 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
                 padding: '60px 24px',
                 maxWidth: '520px',
                 margin: '60px auto',
-                background: '#ffffff',
+                background: 'var(--retail-card)',
                 borderRadius: '14px',
-                border: '1px solid #e2e8f0',
+                border: '1px solid var(--retail-edge-strong)',
                 textAlign: 'center',
                 boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
               }}
             >
               <div style={{ fontSize: '48px', marginBottom: '12px' }}><Lock size="1em" className="inline-icon" aria-hidden="true" /></div>
-              <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--retail-ink)', margin: '0 0 8px' }}>
                 Restricted Operational Zone
               </h2>
-              <p style={{ color: '#64748b', fontSize: '13.5px', lineHeight: 1.5, margin: '0 0 20px' }}>
+              <p style={{ color: 'var(--retail-muted)', fontSize: '13.5px', lineHeight: 1.5, margin: '0 0 20px' }}>
                 Your current role (<strong>{rawRole.replace('_', ' ')}</strong>) does not have access permissions for this workspace module.
               </p>
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
@@ -364,7 +395,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
                   style={{
                     padding: '9px 18px',
                     borderRadius: '8px',
-                    background: '#3e64a0',
+                    background: 'var(--retail-accent-strong)',
                     color: '#ffffff',
                     fontSize: '13px',
                     fontWeight: 700,
@@ -378,8 +409,8 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
                   style={{
                     padding: '9px 18px',
                     borderRadius: '8px',
-                    background: '#f1f5f9',
-                    color: '#334155',
+                    background: 'var(--retail-edge)',
+                    color: 'var(--retail-ink)',
                     fontSize: '13px',
                     fontWeight: 700,
                     textDecoration: 'none',

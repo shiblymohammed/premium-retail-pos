@@ -23,9 +23,9 @@ export default function Home() {
 
   if (isCashier === null) {
     return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f8fafc', color: '#64748b' }}>
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'light-dark(#f8fafc, #1c2732)', color: 'light-dark(#64748b, #c8ced7)' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ width: '32px', height: '32px', border: '3px solid #cbd5e1', borderTopColor: '#155eef', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }}></div>
+          <div style={{ width: '32px', height: '32px', border: '3px solid light-dark(#cbd5e1, #34455a)', borderTopColor: '#155eef', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }}></div>
           <small style={{ fontSize: '12px', fontWeight: 600 }}>Loading workspace…</small>
         </div>
       </div>

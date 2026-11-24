@@ -1,5 +1,7 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
+import { Feedback } from '@/components/ui/feedback';
 import {
   ArrowDownUp,
   ArrowLeftRight,
@@ -486,7 +488,7 @@ export default function OperationsPage() {
   }
 
   async function generateReplenishment() {
-    if (locationFilter === 'ALL') { setNotice('Choose a destination location in the top bar first.'); return; }
+    if (locationFilter === 'ALL') { setNotice('Choose a destination in the location selector first.'); return; }
     try {
       const request = await mutate('/transfers/replenishment/generate', 'POST', { destLocationId: locationFilter });
       setNotice(request?.id ? `Replenishment request ${request.requestNumber} created for manager review.` : 'No replenishment is needed for the selected location.');
@@ -632,12 +634,7 @@ export default function OperationsPage() {
 
       {apiError && <div className={styles.notice} role="alert"><Icon name="alert" size={16} /><span>{apiError}</span><button type="button" onClick={() => { setLoading(true); reloadOperations().then(() => setApiError('')).catch((error) => setApiError(error.message)).finally(() => setLoading(false)); }}>Retry</button></div>}
 
-      {notice && (
-        <div className={styles.notice} role="status">
-          <Icon name="check" size={16} /><span>{notice}</span>
-          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
-        </div>
-      )}
+      {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Transfer summary">
@@ -685,18 +682,6 @@ export default function OperationsPage() {
             <b className={`${styles.chip} ${styles.chipGreen}`}>{kpis.pending + kpis.inTransit}</b>
           </div>
         </div>
-      </section>
-
-      <section className={styles.tableCard} aria-labelledby="replenishment-heading">
-        <div className={styles.tableTop}><div><h2 id="replenishment-heading">Replenishment requests</h2><p>Server generated suggestions require approval by a different manager.</p></div></div>
-        {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p></div> : (
-          <ul className={styles.rows}>{replenishments.map((request) => <li className={styles.row} key={request.id}>
-            <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
-            <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
-            <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
-            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => approveReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Approve</button><button type="button" className={styles.ghostButton} onClick={() => rejectReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Reject</button></span> : <span />}
-          </li>)}</ul>
-        )}
       </section>
 
       {/* ---------- Transfers table ---------- */}
@@ -861,6 +846,18 @@ export default function OperationsPage() {
           <span>Showing <b>{filteredTransfers.length}</b> of <b>{scoped.length}</b> transfers</span>
           <span>{filteredTransfers.reduce((s, t) => s + unitsOf(t), 0).toLocaleString('en-IN')} units</span>
         </footer>
+      </section>
+
+      <section className={styles.tableCard} aria-labelledby="replenishment-heading">
+        <div className={styles.tableTop}><div><div className="heading-with-info"><h2 id="replenishment-heading">Replenishment requests</h2><InfoHint label="About replenishment requests">Review suggested transfers to restock low inventory. A different manager must approve the request.</InfoHint></div><p>Server generated suggestions require approval by a different manager.</p></div></div>
+        {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p></div> : (
+          <ul className={styles.rows}>{replenishments.map((request) => <li className={styles.row} key={request.id}>
+            <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
+            <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
+            <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
+            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => approveReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Approve</button><button type="button" className={styles.ghostButton} onClick={() => rejectReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Reject</button></span> : <span />}
+          </li>)}</ul>
+        )}
       </section>
 
       {/* ---------- API console (developer tool, collapsed) ---------- */}

@@ -1,21 +1,6 @@
 'use client';
 
-import {
-  ArrowRight,
-  ArrowUp,
-  ChartNoAxesColumn,
-  ChevronDown,
-  Eye,
-  EyeOff,
-  House,
-  LockKeyhole,
-  Mail,
-  Package,
-  Settings,
-  ShieldCheck,
-  Sparkles,
-  Tag,
-} from 'lucide-react';
+import { ArrowRight, BarChart3, Eye, EyeOff, LockKeyhole, Mail, Package, ScanLine, Store } from 'lucide-react';
 import { FormEvent, Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -188,18 +173,16 @@ function LoginForm() {
 
   return (
     <main className={styles.container}>
-      <div className={styles.backgroundWaves} aria-hidden="true"><i /><i /><i /></div>
       <div className={styles.pageLayout}>
         <section className={styles.loginCard} aria-labelledby="login-title">
           <a href="/" className={styles.brand} aria-label="Premium Retail home">
-            <span className={styles.brandBadge}>P</span>
-            <span className={styles.brandText}><strong>PremiumRetail</strong><small>Retail. Smarter.</small></span>
+            <span className={styles.brandBadge}><Store size={22} strokeWidth={1.8} aria-hidden="true" /></span>
+            <strong>Premium Retail</strong>
           </a>
 
           <div className={styles.loginContent}>
-            <div className={styles.welcomePill}><i /> Welcome back</div>
             <h1 id="login-title">Welcome back</h1>
-            <p className={styles.intro}>Sign in to continue to your retail operations workspace.</p>
+            <p className={styles.intro}>Sign in to your retail workspace.</p>
 
             <form onSubmit={handleLogin} className={styles.form} noValidate>
               {error && <div className={styles.alertError} role="alert" aria-live="assertive">{error}</div>}
@@ -239,62 +222,28 @@ function LoginForm() {
             <p className={styles.helpNote}>Need help signing in? Contact your administrator.</p>
           </div>
 
-          <footer className={styles.cardFooter}>© {new Date().getFullYear()} Premium Retail <span>Secure retail operations</span></footer>
+          <footer className={styles.cardFooter}>© {new Date().getFullYear()} Premium Retail</footer>
         </section>
 
-        <section className={styles.visualPanel} aria-label="Premium Retail workspace preview">
+        <section className={styles.visualPanel} aria-label="Premium Retail features">
           <div className={styles.visualCopy}>
-            <div className={styles.platformPill}><span><Sparkles size="1em" className="inline-icon" aria-hidden="true" /></span> Retail Management Platform</div>
-            <h2>Every part of your store,<br /><span>in one clear view.</span></h2>
-            <p>Track sales. Manage inventory. Grow your business<br className={styles.desktopBreak} /> with more clarity and less effort.</p>
+            <span className={styles.kicker}>PREMIUM RETAIL POS</span>
+            <h2>Run your store<br />from one workspace.</h2>
           </div>
-
-          <div className={styles.dashboardPreview} aria-hidden="true">
-            <div className={styles.previewHeader}>
-              <span className={styles.previewBrand}>P</span>
-              <strong>Operations overview</strong>
-              <span className={styles.previewChevron}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
-              <span className={styles.previewLive}><i /> Workspace preview</span>
+          <div className={styles.featureGrid}>
+            <div className={styles.checkoutFeature}>
+              <ScanLine size={28} strokeWidth={1.6} aria-hidden="true" />
+              <div><strong>Checkout</strong><span>Scan, bill, and take payments</span></div>
             </div>
-            <div className={styles.previewContent}>
-              <nav className={styles.previewNav}>
-                <span className={styles.navActive}><i><House size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><ChartNoAxesColumn size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><Package size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><Tag size="1em" className="inline-icon" aria-hidden="true" /></i></span><span><i><Settings size="1em" className="inline-icon" aria-hidden="true" /></i></span>
-              </nav>
-              <div className={styles.previewMain}>
-                <div className={styles.previewMainHeading}><strong>Retail store performance</strong><span>Today<ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span></div>
-                <div className={styles.metricGrid}>
-                  <div className={styles.metricCard}><span>Net sales</span><strong>₹2,48,500</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 12.5%</small><i className={styles.sparkOne}/></div>
-                  <div className={styles.metricCard}><span>Orders</span><strong>1,204</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 8.1%</small><i className={styles.sparkTwo}/></div>
-                  <div className={styles.metricCard}><span>Active stores</span><strong>25</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 0.0%</small><i className={styles.sparkThree}/></div>
-                  <div className={styles.metricCard}><span>Avg. order value</span><strong>₹2,062</strong><small><ArrowUp size="1em" className="inline-icon" aria-hidden="true" /> 6.4%</small><i className={styles.sparkFour}/></div>
-                </div>
-                <div className={styles.analyticsGrid}>
-                  <div className={styles.salesChart}>
-                    <div className={styles.chartHeading}><strong>Sales summary</strong><span>Last 7 days</span></div>
-                    <div className={styles.chartBody}>
-                      <div className={styles.axisLabels}><span>3K</span><span>2K</span><span>1K</span><span>0</span></div>
-                      <svg viewBox="0 0 440 128" preserveAspectRatio="none" fill="none">
-                        <path d="M0 18H440M0 52H440M0 86H440M0 120H440" stroke="#e8edf7" strokeWidth="1"/>
-                        <path d="M0 105C34 100 44 77 79 84S122 102 157 78 203 92 237 63 282 82 315 51 369 63 405 27 426 35 440 19V128H0V105Z" fill="url(#loginChartFill)"/>
-                        <path d="M0 105C34 100 44 77 79 84S122 102 157 78 203 92 237 63 282 82 315 51 369 63 405 27 426 35 440 19" stroke="#155eef" strokeWidth="3" strokeLinecap="round"/>
-                        <circle cx="405" cy="27" r="4" fill="#fff" stroke="#155eef" strokeWidth="2.5"/>
-                        <defs><linearGradient id="loginChartFill" x1="220" y1="19" x2="220" y2="128" gradientUnits="userSpaceOnUse"><stop stopColor="#155eef" stopOpacity=".2"/><stop offset="1" stopColor="#155eef" stopOpacity="0"/></linearGradient></defs>
-                      </svg>
-                    </div>
-                    <div className={styles.chartDays}><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
-                  </div>
-                  <div className={styles.categoryCard}>
-                    <strong>Top categories</strong>
-                    <div className={styles.categoryBody}>
-                      <div className={styles.categoryLegend}><span><i/>Electronics <b>36%</b></span><span><i/>Home & living <b>28%</b></span><span><i/>Fashion <b>20%</b></span><span><i/>Others <b>16%</b></span></div>
-                      <div className={styles.donutChart}/>
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <div className={styles.feature}>
+              <Package size={21} strokeWidth={1.7} aria-hidden="true" />
+              <strong>Stock & transfers</strong>
+            </div>
+            <div className={styles.feature}>
+              <BarChart3 size={21} strokeWidth={1.7} aria-hidden="true" />
+              <strong>Sales reports</strong>
             </div>
           </div>
-          <div className={styles.secureFoot}><span aria-hidden="true"><ShieldCheck size="1em" className="inline-icon" aria-hidden="true" /></span> Your data is secure with us</div>
         </section>
       </div>
     </main>

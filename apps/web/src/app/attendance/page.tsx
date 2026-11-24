@@ -1,5 +1,6 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
 import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronRight, Clock, Info, MapPin, Power, QrCode, Timer } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
@@ -306,7 +307,7 @@ export default function AttendancePage() {
 
         <section className={styles.mainGrid}>
           <article className={styles.actionPanel}>
-            <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><h2>Shift check-in</h2><p>Clock in when you’re ready to begin, then clock out at the end of your shift.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
+            <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><div className="heading-with-info"><h2>Shift check-in</h2><InfoHint label="About shift check-in">Attendance entries are recorded against your assigned location. Scan the store QR code when the screen asks for it.</InfoHint></div><p>Clock in when you’re ready to begin, then clock out at the end of your shift.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
 
             {!profileMissing && today.qrRequired && today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}><span className={styles.qrIcon}>{qrToken ? <Check size="1em" className="inline-icon" aria-hidden="true" /> : <QrCode size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{qrToken ? 'Store verification ready' : 'Store QR check required'}</strong><small>{qrToken ? 'The current counter code will be checked by the server.' : 'Open this page from the current attendance QR displayed at your store.'}</small></div></div>}
 

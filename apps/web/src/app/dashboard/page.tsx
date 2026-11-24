@@ -1,6 +1,7 @@
 'use client';
 
-import { ArrowRight } from 'lucide-react';
+import { InfoHint } from '@/components/ui/info-hint';
+import { ArrowRight, Boxes, IndianRupee, PackageSearch, ReceiptText } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AuthSession, getStoredSession } from '@/lib/auth';
@@ -9,6 +10,7 @@ import styles from './dashboard.module.css';
 type SalesSummary = {
   totals: { netSales: string | number; completedInvoices: number; cancelledInvoices: number };
   daily: Array<{ date: string; netSales: string | number; invoices: number }>;
+  invoices?: Array<{ id: string; invoiceNumber: string; locationName: string; netTotal: string | number; status: string; createdAt: string }>;
 };
 type StockRow = { available: number; inTransit: number; reserved: number; quarantined: number; lowStock: boolean; negativeStock: boolean };
 type DashboardData = {
@@ -21,6 +23,7 @@ type SetupCounts = { companies: number | null; locations: number; users: number 
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 const REPORT_ROLES = ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'STORE_MANAGER'];
+const SHORT_DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
 const CURRENCY = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
 async function getData<T>(path: string, token: string): Promise<T> {
@@ -129,39 +132,69 @@ export default function DashboardPage() {
   const pendingTransfers = (data?.transfers ?? []).filter((item) => ['PENDING_APPROVAL', 'APPROVED'].includes(item.status)).length;
   const inTransitTransfers = (data?.transfers ?? []).filter((item) => ['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(item.status)).length;
   const cards = [
-    { label: 'Net sales · last 30 days', value: totals ? CURRENCY.format(asNumber(totals.netSales)) : '—', detail: 'Finalized invoices in your authorized scope', href: '/reports' },
-    { label: 'Completed invoices', value: totals?.completedInvoices ?? '—', detail: `${totals?.cancelledInvoices ?? 0} cancelled in the same period`, href: '/reports' },
-    { label: 'Low stock variants', value: data?.stock.totals.lowStockVariants ?? '—', detail: 'At or below configured reorder level', href: '/products' },
-    { label: 'Negative stock warnings', value: data?.stock.totals.negativeStockVariants ?? '—', detail: 'Available balance below zero', href: '/products' },
+    { label: 'Net sales · last 30 days', icon: IndianRupee, value: totals ? CURRENCY.format(asNumber(totals.netSales)) : '—', detail: 'Finalized invoices in your authorized scope', href: '/reports' },
+    { label: 'Completed invoices', icon: ReceiptText, value: totals?.completedInvoices ?? '—', detail: `${totals?.cancelledInvoices ?? 0} cancelled in the same period`, href: '/reports' },
+    { label: 'Low stock variants', icon: PackageSearch, value: data?.stock.totals.lowStockVariants ?? '—', detail: 'At or below configured reorder level', href: '/products' },
+    { label: 'Negative stock warnings', icon: Boxes, value: data?.stock.totals.negativeStockVariants ?? '—', detail: 'Available balance below zero', href: '/products' },
   ];
 
   return <main className={styles.page}>
-    <header className={styles.heading}>
-      <div><span className={styles.eyebrow}>RETAIL OPERATIONS</span><h1>Operations overview</h1><p>Live sales, stock health, and transfer activity for your authorized locations.</p></div>
-      <Link href="/reports" className={styles.secondaryLink}>Open reports <span aria-hidden="true"><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></Link>
+    <header className={styles.overviewTitle}>
+      <div><h1>Operations overview</h1><p>Sales, stock and transfers across your authorized locations.</p></div>
+      <Link href="/reports" className={styles.secondaryLink}>Open reports <ArrowRight size={15} aria-hidden="true" /></Link>
     </header>
 
     {error && <div className={styles.error} role="alert"><span>{error}</span><button type="button" onClick={() => window.location.reload()}>Retry</button></div>}
 
-    <section className={styles.kpiGrid} aria-label="Key performance indicators">
-      {cards.map((card) => <Link href={card.href} key={card.label} className={styles.kpiCard}>
-        <span>{card.label}</span><strong>{loading ? '…' : card.value}</strong><small>{card.detail}</small>
-      </Link>)}
-    </section>
+    <div className={styles.overviewGrid}>
+      <section className={`${styles.panel} ${styles.metricsPanel}`} aria-labelledby="performance-title">
+        <div className={styles.panelHead}><div><div className="heading-with-info"><h2 id="performance-title">Key figures</h2><InfoHint label="About key figures">Sales figures cover the last 30 days. Stock figures reflect the current balances you can access.</InfoHint></div><p>Last 30 days for sales · current stock</p></div></div>
+        <div className={styles.kpiGrid}>
+          {cards.map((card) => <Link href={card.href} key={card.label} className={styles.kpiCard}>
+            <div className={styles.kpiTop}><span>{card.label}</span><span className={styles.kpiIcon}><card.icon size={17} strokeWidth={1.8} aria-hidden="true" /></span></div>
+            <strong>{loading ? '…' : card.value}</strong><small>{card.detail}</small>
+          </Link>)}
+        </div>
+      </section>
 
-    <section className={styles.contentGrid}>
-      <article className={styles.panel}>
-        <div className={styles.panelHead}><div><span className={styles.eyebrow}>SALES</span><h2>Daily sales</h2><p>Last seven days · finalized invoices</p></div><Link href="/reports">View details <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></Link></div>
-        {loading ? <div className={styles.panelMessage}>Loading sales activity…</div> : daily.length ? <div className={styles.chart}>
-          {daily.map((day) => <div className={styles.chartColumn} key={day.date} title={`${day.date}: ${CURRENCY.format(asNumber(day.netSales))}`}>
-            <span className={styles.barValue}>{CURRENCY.format(asNumber(day.netSales))}</span><div className={styles.barTrack}><i style={{ height: `${Math.max(5, (asNumber(day.netSales) / peak) * 100)}%` }} /></div>
-            <span className={styles.barLabel}>{new Date(`${day.date}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'short' })}</span>
-          </div>)}
-        </div> : <div className={styles.panelMessage}>No finalized sales in this period.</div>}
-      </article>
+      <section className={`${styles.panel} ${styles.salesPanel}`} aria-labelledby="daily-sales-title">
+        <div className={styles.panelHead}>
+          <div><div className="heading-with-info"><h2 id="daily-sales-title">Daily sales</h2><InfoHint label="About daily sales">Each bar shows net sales from finalized invoices on that day.</InfoHint></div><p>Last seven trading days</p></div>
+          <Link href="/reports">View report <ArrowRight size={13} aria-hidden="true" /></Link>
+        </div>
+        <div className={styles.chartInset}>
+          <div className={styles.chartLegend}><i /> Net sales</div>
+          {daily.length ? <div className={styles.plot}>
+            <div className={styles.chartAxis} aria-hidden="true">{[1, .75, .5, .25, 0].map((level) => <span key={level}>{CURRENCY.format(peak * level)}</span>)}</div>
+            <div className={styles.chart} style={{ gridTemplateColumns: `repeat(${daily.length}, minmax(0, 1fr))` }}>
+              {daily.map((day) => <div className={styles.chartColumn} key={day.date} aria-label={`${day.date}: ${CURRENCY.format(asNumber(day.netSales))}`} title={`${day.date}: ${CURRENCY.format(asNumber(day.netSales))}`}>
+                <div className={styles.barTrack}><i style={{ height: `${Math.max(0, (asNumber(day.netSales) / peak) * 100)}%` }} /></div>
+                <span className={styles.barLabel}>{SHORT_DATE.format(new Date(`${day.date}T12:00:00`))}</span>
+              </div>)}
+            </div>
+          </div> : <div className={styles.chartEmpty}><span>{loading ? 'Loading sales activity…' : 'No finalized sales in this period.'}</span></div>}
+        </div>
+      </section>
+    </div>
 
+    <div className={styles.contentGrid}>
+      <section className={styles.panel} aria-labelledby="recent-invoices-title">
+        <div className={styles.panelHead}><div><h2 id="recent-invoices-title">Recent invoices</h2><p>Most recent activity in your scope</p></div><Link href="/reports?tab=salesDetails">View invoices <ArrowRight size={13} aria-hidden="true" /></Link></div>
+        <div className={styles.invoiceTable} role="region" aria-label="Recent invoices" tabIndex={0}>
+          <table>
+            <thead><tr><th>Invoice</th><th>Location</th><th>Status</th><th>Date</th><th>Total</th></tr></thead>
+            <tbody>{(data?.sales.invoices ?? []).slice(0, 5).map((invoice) => <tr key={invoice.id}>
+              <td>{invoice.invoiceNumber}</td><td>{invoice.locationName}</td>
+              <td><span className={invoice.status === 'CANCELLED' ? styles.invoiceCancelled : styles.invoiceComplete}>{invoice.status === 'CANCELLED' ? 'Cancelled' : 'Finalized'}</span></td>
+              <td>{SHORT_DATE.format(new Date(invoice.createdAt))}</td><td>{CURRENCY.format(asNumber(invoice.netTotal))}</td>
+            </tr>)}
+            {!data?.sales.invoices?.length && <tr><td colSpan={5}>{loading ? 'Loading invoices…' : 'No invoices to show.'}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
       <article className={styles.panel}>
-        <div className={styles.panelHead}><div><span className={styles.eyebrow}>INVENTORY</span><h2>Stock by state</h2><p>{data?.stock.totals.variants ?? 0} variants in scope</p></div><Link href="/products">Open inventory <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></Link></div>
+        <div className={styles.panelHead}><div><span className={styles.eyebrow}>INVENTORY</span><div className="heading-with-info"><h2>Stock by state</h2><InfoHint label="About stock states">Units are split by whether they are available, in transit, reserved for a transfer, or quarantined.</InfoHint></div><p>{data?.stock.totals.variants ?? 0} variants in scope</p></div><Link href="/products">Open inventory <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></Link></div>
         <div className={styles.stockRows}>
           {([
             ['Available', states.available, 'available'],
@@ -194,6 +227,6 @@ export default function DashboardPage() {
         </div>
         {setup && setup.companies === 0 && <p className={styles.setupHint}>Start by configuring the company, then locations, staff accounts, catalogue, and opening stock.</p>}
       </article>
-    </section>
+    </div>
   </main>;
 }

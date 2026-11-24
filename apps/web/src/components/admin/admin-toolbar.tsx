@@ -75,10 +75,10 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
               width: '100%',
               padding: '7px 14px 7px 32px',
               borderRadius: '18px',
-              border: '1px solid #cbd5e1',
+              border: '1px solid light-dark(#cbd5e1, #34455a)',
               fontSize: '12px',
-              color: '#1e293b',
-              background: '#ffffff',
+              color: 'var(--retail-ink)',
+              background: 'var(--retail-card)',
               outline: 'none',
               boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
             }}
@@ -106,9 +106,9 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
                   gap: '6px',
                   padding: '6px 14px',
                   borderRadius: '20px',
-                  border: isFiltered ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                  background: isFiltered ? '#eff6ff' : '#ffffff',
-                  color: isFiltered ? '#1a62ea' : '#475569',
+                  border: isFiltered ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
+                  background: isFiltered ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                  color: isFiltered ? 'var(--retail-accent)' : 'var(--retail-muted)',
                   fontSize: '12px',
                   fontWeight: isFiltered ? 750 : 600,
                   cursor: 'pointer',
@@ -117,7 +117,7 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
                 }}
               >
                 <span>{buttonLabel}</span>
-                <span style={{ fontSize: '8px', color: isFiltered ? '#1a62ea' : '#94a3b8' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <span style={{ fontSize: '8px', color: isFiltered ? 'var(--retail-accent)' : '#94a3b8' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {isOpen && (
@@ -127,9 +127,9 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
                     top: 'calc(100% + 6px)',
                     left: 0,
                     minWidth: '200px',
-                    background: '#ffffff',
+                    background: 'var(--retail-card)',
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid var(--retail-edge-strong)',
                     boxShadow: '0 12px 28px rgba(0,0,0,0.12)',
                     padding: '6px',
                     zIndex: 100,
@@ -151,8 +151,8 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
                           padding: '7px 10px',
                           borderRadius: '7px',
                           border: 'none',
-                          background: isSelected ? '#eff6ff' : 'transparent',
-                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -162,14 +162,14 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
                         }}
                       >
                         <span>{opt.label}</span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -187,7 +187,7 @@ export const AdminToolbar: React.FC<AdminToolbarProps> = ({
             style={{
               background: 'none',
               border: 'none',
-              color: '#1a62ea',
+              color: 'var(--retail-accent)',
               fontSize: '12px',
               fontWeight: 700,
               cursor: 'pointer',

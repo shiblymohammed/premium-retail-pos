@@ -1,5 +1,6 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
 import {
   ArrowRight,
   Coffee,
@@ -20,6 +21,7 @@ import {
   Wheat,
   X,
 } from 'lucide-react';
+import { Feedback } from '@/components/ui/feedback';
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearStoredSession, decodeJwt, getStoredSession, setStoredSession } from '@/lib/auth';
 
@@ -1043,13 +1045,13 @@ export default function PosTerminal() {
             <input id="email" autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="cashier@premiumretail.com" required />
             <label htmlFor="password">Password</label>
             <input id="password" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••••••" required />
-            {error && <div className="alert error">{error}</div>}
+            {error && <Feedback tone="error">{error}</Feedback>}
             <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Opening Terminal…' : 'Unlock POS Terminal'} <span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
           </form>
           <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <a
               href="/login?returnUrl=/"
-              style={{ textAlign: 'center', fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 600, padding: '6px' }}
+              style={{ textAlign: 'center', fontSize: '12px', color: 'light-dark(#2563eb, #a7bff4)', textDecoration: 'none', fontWeight: 600, padding: '6px' }}
             >
               Open Unified Login Gateway <ArrowRight size="1em" className="inline-icon" aria-hidden="true" />
             </a>
@@ -1082,7 +1084,7 @@ export default function PosTerminal() {
             <div className="scanner-status"><span className="status-dot" /> Ready to scan · Enter a barcode or search</div>
           </div>
 
-          {error && <div className="alert error inline-alert">{error}</div>}
+          {error && <Feedback tone="error">{error}</Feedback>}
           {notice && !error && <div className="notice-line">{notice}</div>}
           {saleRetryPending && <div className="alert stock-error">The checkout response was interrupted. Retry the same sale to safely confirm its result; keep this terminal open.</div>}
           {stockError && <div className="alert stock-error">Stock refresh failed: {stockError}</div>}
@@ -1090,7 +1092,7 @@ export default function PosTerminal() {
           <section className="catalog-browser">
             <div className="catalog-heading">
               <div><div className="eyebrow">SALES FLOOR</div><h1>Products <span>({results.length})</span></h1></div>
-              <div className="catalog-controls"><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
+              <div className="catalog-controls"><a className="pos-basket-jump" href="#pos-basket"><ShoppingCart size={16} aria-hidden="true" /> Basket ({cart.reduce((sum, line) => sum + line.quantity, 0)})</a><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
             </div>
             <div className="category-chips" aria-label="Product categories">
               <button className={selectedCategory === 'All categories' ? 'active' : ''} onClick={() => setSelectedCategory('All categories')}>All categories</button>
@@ -1124,7 +1126,7 @@ export default function PosTerminal() {
           </section>
         </section>
 
-        <aside className="basket-panel">
+        <aside className="basket-panel" id="pos-basket" aria-label="Current basket" tabIndex={-1}>
           <div className="basket-heading"><div><div className="eyebrow">CURRENT SALE</div><h2>Current basket</h2><small>{terminal.location.name}</small></div><div className="basket-heading-actions"><span className="item-count">{cart.reduce((sum, line) => sum + line.quantity, 0)} items</span><button className="clear-basket-button" disabled={!cart.length || busy || saleRetryPending} onClick={() => void clearBasket()}>Clear basket</button></div></div>
           {cart.length ? (
             <div className="basket-lines">
@@ -1171,8 +1173,8 @@ export default function PosTerminal() {
             <div className="eyebrow">SALE CONTROLS</div><h3>Returns & cancellations</h3>
             <p>Enter the original invoice number. Returns have no time limit. Refunds are recorded manually; this app does not send money.</p>
             <div className="invoice-search"><input aria-label="Invoice number" value={invoiceSearch} onChange={(event) => setInvoiceSearch(event.target.value)} placeholder="Invoice number" disabled={saleControlRetryPending} /><button className="small-action-button" disabled={controlBusy || saleControlRetryPending || !invoiceSearch.trim()} onClick={() => void loadSaleControl()}>{controlBusy ? 'Loading…' : 'Find'}</button></div>
-            {controlError && <div className="alert error">{controlError}</div>}
-            {controlNotice && <div className="alert success">{controlNotice}</div>}
+            {controlError && <Feedback tone="error">{controlError}</Feedback>}
+            {controlNotice && <Feedback tone="success">{controlNotice}</Feedback>}
             {saleControl && <div className="invoice-control-card">
               <div className="invoice-control-heading"><strong>{saleControl.invoiceNumber}</strong><span>{saleControl.status} · {saleControl.location.name}</span></div>
               {saleControl.cancellationReason && <p className="field-hint">Cancelled {saleControl.cancelledAt ? `on ${new Date(saleControl.cancelledAt).toLocaleString()}` : ''}: {saleControl.cancellationReason}</p>}
@@ -1202,11 +1204,11 @@ export default function PosTerminal() {
       </div>
       {checkoutOpen && <div className="checkout-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setCheckoutOpen(false); }}>
         <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
-          <header><div><div className="eyebrow">PAYMENT</div><h2 id="checkout-title">Complete sale</h2><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout"><X size={16} className="inline-icon" aria-hidden="true" /></button></header>
+          <header><div><div className="eyebrow">PAYMENT</div><div className="heading-with-info"><h2 id="checkout-title">Complete sale</h2><InfoHint label="About checkout">Choose the payment method. For cash, enter the amount received to calculate change.</InfoHint></div><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout"><X size={16} className="inline-icon" aria-hidden="true" /></button></header>
           <div className="checkout-due"><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
           <label className="payment-select">Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
           {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{[100, 200, 500, 2000].map((amount) => <button key={amount} onClick={() => setCashTendered(String(amount))}>₹{amount}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
-          {error && <div className="alert error">{error}</div>}
+          {error && <Feedback tone="error">{error}</Feedback>}
           <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
         </section>
       </div>}

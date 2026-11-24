@@ -54,13 +54,13 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           width: '100%',
           maxWidth,
           maxHeight: '90vh',
-          background: '#ffffff',
+          background: 'var(--retail-card)',
           borderRadius: '16px',
           boxShadow: '0 20px 60px rgba(0, 0, 0, 0.22)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          border: '1px solid #e2e8f0',
+          border: '1px solid var(--retail-edge-strong)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -68,11 +68,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         <div
           style={{
             padding: '20px 24px',
-            borderBottom: '1px solid #f1f5f9',
+            borderBottom: '1px solid var(--retail-edge)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            background: '#ffffff',
+            background: 'var(--retail-card)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -81,8 +81,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 width: '36px',
                 height: '36px',
                 borderRadius: '10px',
-                background: '#eff6ff',
-                color: '#1a62ea',
+                background: 'light-dark(#eff6ff, #1d2733)',
+                color: 'var(--retail-accent)',
                 display: 'grid',
                 placeItems: 'center',
                 fontSize: '18px',
@@ -92,9 +92,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {badgeIcon}
             </div>
             <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: '#0f172a' }}>{title}</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>{title}</h3>
               {subtitle && (
-                <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: '#64748b' }}>
+                <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: 'var(--retail-muted)' }}>
                   {subtitle}
                 </p>
               )}
@@ -109,8 +109,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               height: '32px',
               borderRadius: '8px',
               border: 'none',
-              background: '#f8fafc',
-              color: '#64748b',
+              background: 'var(--retail-raised)',
+              color: 'var(--retail-muted)',
               fontSize: '14px',
               cursor: 'pointer',
               display: 'grid',
@@ -131,8 +131,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           <div
             style={{
               padding: '16px 24px',
-              background: '#f8fafc',
-              borderTop: '1px solid #eef2f6',
+              background: 'var(--retail-raised)',
+              borderTop: '1px solid var(--retail-edge)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'flex-end',

@@ -17,7 +17,7 @@ export default function GlobalLoading() {
             width: '38px',
             height: '38px',
             borderRadius: '10px',
-            background: '#e2e8f0',
+            background: 'var(--retail-edge-strong)',
             animation: 'pulse 1.5s infinite ease-in-out',
           }}
         />
@@ -27,7 +27,7 @@ export default function GlobalLoading() {
               width: '220px',
               height: '24px',
               borderRadius: '6px',
-              background: '#e2e8f0',
+              background: 'var(--retail-edge-strong)',
               animation: 'pulse 1.5s infinite ease-in-out',
             }}
           />
@@ -36,7 +36,7 @@ export default function GlobalLoading() {
               width: '340px',
               height: '14px',
               borderRadius: '4px',
-              background: '#f1f5f9',
+              background: 'var(--retail-edge)',
               animation: 'pulse 1.5s infinite ease-in-out',
             }}
           />
@@ -57,17 +57,17 @@ export default function GlobalLoading() {
             style={{
               height: '110px',
               borderRadius: '12px',
-              background: '#ffffff',
-              border: '1px solid #e2e8f0',
+              background: 'var(--retail-card)',
+              border: '1px solid var(--retail-edge-strong)',
               padding: '16px',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
             }}
           >
-            <div style={{ width: '40%', height: '12px', background: '#f1f5f9', borderRadius: '4px' }} />
-            <div style={{ width: '70%', height: '18px', background: '#e2e8f0', borderRadius: '4px' }} />
-            <div style={{ width: '50%', height: '12px', background: '#f8fafc', borderRadius: '4px' }} />
+            <div style={{ width: '40%', height: '12px', background: 'var(--retail-edge)', borderRadius: '4px' }} />
+            <div style={{ width: '70%', height: '18px', background: 'var(--retail-edge-strong)', borderRadius: '4px' }} />
+            <div style={{ width: '50%', height: '12px', background: 'var(--retail-raised)', borderRadius: '4px' }} />
           </div>
         ))}
       </div>
@@ -77,15 +77,15 @@ export default function GlobalLoading() {
         style={{
           height: '340px',
           borderRadius: '14px',
-          background: '#ffffff',
-          border: '1px solid #eef2f6',
+          background: 'var(--retail-card)',
+          border: '1px solid var(--retail-edge)',
           padding: '24px',
         }}
       >
-        <div style={{ width: '30%', height: '16px', background: '#f1f5f9', borderRadius: '4px', marginBottom: '20px' }} />
+        <div style={{ width: '30%', height: '16px', background: 'var(--retail-edge)', borderRadius: '4px', marginBottom: '20px' }} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {[1, 2, 3, 4, 5].map((row) => (
-            <div key={row} style={{ width: '100%', height: '36px', background: '#f8fafc', borderRadius: '6px' }} />
+            <div key={row} style={{ width: '100%', height: '36px', background: 'var(--retail-raised)', borderRadius: '6px' }} />
           ))}
         </div>
       </div>

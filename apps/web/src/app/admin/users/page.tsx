@@ -1,5 +1,6 @@
 'use client';
 
+import { Feedback } from '@/components/ui/feedback';
 import {
   ChartNoAxesColumn,
   Check,
@@ -306,20 +307,20 @@ export default function UserManagementPage() {
   const getRoleBadgeStyle = (role: ManagedUser['role']) => {
     switch (role) {
       case 'SUPER_ADMIN':
-        return { background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe' };
+        return { background: 'light-dark(#f5f3ff, #201c32)', color: 'light-dark(#7c3aed, #c2a5f3)', border: '1px solid light-dark(#ddd6fe, #332b56)' };
       case 'ADMIN':
-        return { background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' };
+        return { background: 'light-dark(#eff6ff, #1d2733)', color: 'var(--retail-accent)', border: '1px solid light-dark(#bfdbfe, #2e425b)' };
       case 'STORE_MANAGER':
-        return { background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' };
+        return { background: 'light-dark(#ecfdf5, #1e352a)', color: 'light-dark(#059669, #b5f5e1)', border: '1px solid light-dark(#a7f3d0, #31624b)' };
       case 'CENTRAL_MANAGER':
-        return { background: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' };
+        return { background: 'light-dark(#eef2ff, #1d2233)', color: '#4f46e5', border: '1px solid light-dark(#c7d2fe, #2d3659)' };
       case 'SUB_WAREHOUSE_MANAGER':
-        return { background: '#f0fdfa', color: '#0d9488', border: '1px solid #99f6e4' };
+        return { background: 'light-dark(#f0fdfa, #1d332e)', color: 'light-dark(#0d9488, #b4f5f0)', border: '1px solid light-dark(#99f6e4, #32645a)' };
       case 'CASHIER':
-        return { background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a' };
+        return { background: 'light-dark(#fffbeb, #34301d)', color: 'light-dark(#d97706, #f4d3ad)', border: '1px solid light-dark(#fde68a, #665b33)' };
       case 'STAFF':
       default:
-        return { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' };
+        return { background: 'var(--retail-edge)', color: 'var(--retail-muted)', border: '1px solid light-dark(#cbd5e1, #34455a)' };
     }
   };
 
@@ -335,77 +336,51 @@ export default function UserManagementPage() {
       case 'ADMIN':
         return {
           icon: <FileText size={13} aria-hidden="true" />,
-          bg: '#e8f0fe',
-          color: '#1a62ea',
-          border: '#d2e3fc',
+          bg: 'var(--retail-accent-soft)',
+          color: 'var(--retail-accent)',
+          border: 'var(--retail-accent-line)',
         };
       case 'STORE_MANAGER':
         return {
           icon: <ChartNoAxesColumn size={13} aria-hidden="true" />,
           bg: '#e6f4ea',
-          color: '#137333',
-          border: '#ceead6',
+          color: 'light-dark(#137333, #baf4cd)',
+          border: 'light-dark(#ceead6, #2e5c3b)',
         };
       case 'CASHIER':
         return {
           icon: <CreditCard size={13} aria-hidden="true" />,
           bg: '#fef7e0',
-          color: '#b06000',
-          border: '#feefc3',
+          color: 'light-dark(#b06000, #f5d7b3)',
+          border: 'light-dark(#feefc3, #5a4f2d)',
         };
       case 'CENTRAL_MANAGER':
       case 'SUB_WAREHOUSE_MANAGER':
         return {
           icon: <Package size={13} aria-hidden="true" />,
           bg: '#f3e8fd',
-          color: '#8430ce',
-          border: '#e9d2fd',
+          color: 'light-dark(#8430ce, #d1b1ed)',
+          border: 'light-dark(#e9d2fd, #432c57)',
         };
       case 'STAFF':
       default:
         return {
           icon: <UserRound size={13} aria-hidden="true" />,
-          bg: '#f1f3f4',
-          color: '#5f6368',
-          border: '#dadce0',
+          bg: 'var(--retail-edge)',
+          color: 'light-dark(#5f6368, #d0d2d4)',
+          border: 'var(--retail-edge-strong)',
         };
     }
   };
 
   return (
-    <div className="app-page" style={{ color: '#1e293b' }}>
-      {notice && (
-        <div
-          style={{
-            padding: '12px 18px',
-            borderRadius: '10px',
-            background: '#ecfdf5',
-            border: '1px solid #a7f3d0',
-            color: '#065f46',
-            fontSize: '13px',
-            marginBottom: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 2px 8px rgba(16, 185, 129, 0.1)',
-          }}
-        >
-          <span style={{ fontWeight: 600 }}><Check size="1em" className="inline-icon" aria-hidden="true" /> {notice}</span>
-          <button
-            type="button"
-            aria-label="Dismiss notice"
-            onClick={() => setNotice('')}
-            style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
-          >
-            <X size="1em" className="inline-icon" aria-hidden="true" />
-          </button>
-        </div>
-      )}
+    <div className="app-page admin-workspace">
+      {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
       {/* Header: User Directory with Blue Folder Badge + View Switchers */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '28px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
             User Directory
             <span
               style={{
@@ -414,7 +389,7 @@ export default function UserManagementPage() {
                 width: '34px',
                 height: '34px',
                 borderRadius: '9px',
-                background: '#1a62ea',
+                background: 'var(--retail-accent)',
                 color: '#ffffff',
                 fontSize: '18px',
                 boxShadow: '0 3px 8px rgba(26, 98, 234, 0.25)',
@@ -428,14 +403,14 @@ export default function UserManagementPage() {
 
         {/* Right side: View Mode Toggles, Info, and Provision User Button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'inline-flex', background: 'var(--retail-edge)', padding: '3px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
             <button
               type="button"
               onClick={() => setViewMode('list')}
               style={{
                 border: 'none',
-                background: viewMode === 'list' ? '#ffffff' : 'transparent',
-                color: viewMode === 'list' ? '#1a62ea' : '#64748b',
+                background: viewMode === 'list' ? 'var(--retail-card)' : 'transparent',
+                color: viewMode === 'list' ? 'var(--retail-accent)' : 'var(--retail-muted)',
                 padding: '6px 10px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -452,8 +427,8 @@ export default function UserManagementPage() {
               onClick={() => setViewMode('grid')}
               style={{
                 border: 'none',
-                background: viewMode === 'grid' ? '#ffffff' : 'transparent',
-                color: viewMode === 'grid' ? '#1a62ea' : '#64748b',
+                background: viewMode === 'grid' ? 'var(--retail-card)' : 'transparent',
+                color: viewMode === 'grid' ? 'var(--retail-accent)' : 'var(--retail-muted)',
                 padding: '6px 10px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -474,9 +449,9 @@ export default function UserManagementPage() {
               width: '36px',
               height: '36px',
               borderRadius: '8px',
-              border: '1px solid #e2e8f0',
-              background: '#ffffff',
-              color: '#64748b',
+              border: '1px solid var(--retail-edge-strong)',
+              background: 'var(--retail-card)',
+              color: 'var(--retail-muted)',
               fontSize: '16px',
               display: 'grid',
               placeItems: 'center',
@@ -496,7 +471,7 @@ export default function UserManagementPage() {
               gap: '8px',
               padding: '10px 18px',
               borderRadius: '8px',
-              background: '#1a62ea',
+              background: 'var(--retail-accent)',
               color: '#ffffff',
               border: 'none',
               fontWeight: 700,
@@ -511,10 +486,8 @@ export default function UserManagementPage() {
       </div>
 
       {/* SECTION 1: QUICK ACCESS (Row of 4 Folder-Tabbed Cards matching the reference image) */}
-      <div style={{ marginBottom: '34px' }}>
-        <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: '0 0 14px' }}>
-          QUICK ACCESS
-        </h2>
+      <details className="admin-shortcuts">
+        <summary>Role shortcuts <ChevronDown size={15} aria-hidden="true" /></summary>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
           {/* Folder Card 1: Store Managers (Deep royal blue when active) */}
@@ -525,7 +498,7 @@ export default function UserManagementPage() {
             avatars={[
               { text: 'AP', bg: '#059669' },
               { text: 'RD', bg: '#0d9488' },
-              { text: 'SM', bg: '#2563eb' },
+              { text: 'SM', bg: 'var(--retail-accent)' },
             ]}
             heading="Store Managers"
             subheading={`${kpis.managers} Active Supervisors · Storefloor`}
@@ -563,19 +536,19 @@ export default function UserManagementPage() {
             className={`drive-folder-card${roleFilter === 'SUPER_ADMIN' || roleFilter === 'ADMIN' ? ' active-folder' : ''}`}
             onClick={() => setRoleFilter(roleFilter === 'SUPER_ADMIN' ? 'ALL' : 'SUPER_ADMIN')}
             title="Filter by Executive Admins"
-            style={{ borderLeft: '4px solid #1a62ea' }}
+            style={{ borderLeft: '4px solid var(--retail-accent)' }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: '#1a62ea' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
-                <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>Executive Admins</strong>
+                <span style={{ fontSize: '18px', color: 'var(--retail-accent)' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <strong style={{ fontSize: '13.5px', color: 'var(--retail-ink)' }}>Executive Admins</strong>
               </div>
               <div
                 style={{
                   width: '26px',
                   height: '26px',
                   borderRadius: '50%',
-                  background: '#1a62ea',
+                  background: 'var(--retail-accent)',
                   color: '#fff',
                   fontSize: '11px',
                   fontWeight: 750,
@@ -587,21 +560,21 @@ export default function UserManagementPage() {
               </div>
             </div>
             <div style={{ marginTop: '16px' }}>
-              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', textTransform: 'uppercase', display: 'block' }}>
+              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', display: 'block' }}>
                 GOVERNANCE
               </small>
-              <span style={{ fontSize: '12px', fontWeight: 650, color: '#334155', display: 'block', marginTop: '2px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--retail-ink)', display: 'block', marginTop: '2px' }}>
                 Enterprise RBAC & Security Invariants
               </span>
             </div>
           </div>
         </div>
-      </div>
+      </details>
 
       {/* SECTION 2: ALL USERS (Matching ALL FILES in the reference image) */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-          <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: 0 }}>
+          <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', margin: 0 }}>
             ALL USERS ({filteredUsers.length})
           </h2>
 
@@ -615,10 +588,10 @@ export default function UserManagementPage() {
               style={{
                 padding: '7px 14px',
                 borderRadius: '18px',
-                border: '1px solid #cbd5e1',
+                border: '1px solid light-dark(#cbd5e1, #34455a)',
                 fontSize: '12.5px',
                 outline: 'none',
-                background: '#f8fafc',
+                background: 'var(--retail-raised)',
                 minWidth: '220px',
               }}
             />
@@ -634,9 +607,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: roleFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                  background: roleFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                  color: roleFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                  border: roleFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
+                  background: roleFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                  color: roleFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -656,9 +629,9 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '210px',
-                    background: '#ffffff',
+                    background: 'var(--retail-card)',
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid var(--retail-edge-strong)',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
@@ -682,8 +655,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? '#eff6ff' : 'transparent',
-                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -693,14 +666,14 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
                         }}
                       >
                         <span>{opt.label}</span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -719,9 +692,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: locationFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                  background: locationFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                  color: locationFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                  border: locationFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
+                  background: locationFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                  color: locationFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -741,9 +714,9 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '230px',
-                    background: '#ffffff',
+                    background: 'var(--retail-card)',
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid var(--retail-edge-strong)',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
@@ -763,8 +736,8 @@ export default function UserManagementPage() {
                       padding: '7px 10px',
                       borderRadius: '8px',
                       border: 'none',
-                      background: locationFilter === 'ALL' ? '#eff6ff' : 'transparent',
-                      color: locationFilter === 'ALL' ? '#1a62ea' : '#1e293b',
+                      background: locationFilter === 'ALL' ? 'var(--retail-accent-soft)' : 'transparent',
+                      color: locationFilter === 'ALL' ? 'var(--retail-accent)' : 'var(--retail-ink)',
                       fontSize: '12px',
                       fontWeight: locationFilter === 'ALL' ? 700 : 500,
                       textAlign: 'left',
@@ -774,14 +747,14 @@ export default function UserManagementPage() {
                       cursor: 'pointer',
                     }}
                     onMouseEnter={(e) => {
-                      if (locationFilter !== 'ALL') e.currentTarget.style.background = '#f8fafc';
+                      if (locationFilter !== 'ALL') e.currentTarget.style.background = 'var(--retail-raised)';
                     }}
                     onMouseLeave={(e) => {
                       if (locationFilter !== 'ALL') e.currentTarget.style.background = 'transparent';
                     }}
                   >
                     <span>All Store Locations</span>
-                    {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                    {locationFilter === 'ALL' && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                   </button>
                   {availableLocations.map((location) => {
                     const loc = location.name;
@@ -799,8 +772,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? '#eff6ff' : 'transparent',
-                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -810,17 +783,17 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
                         }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ color: '#1a62ea' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
+                          <span style={{ color: 'var(--retail-accent)' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                           {loc}
                         </span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -839,9 +812,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: statusFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                  background: statusFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                  color: statusFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                  border: statusFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
+                  background: statusFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                  color: statusFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -849,7 +822,7 @@ export default function UserManagementPage() {
                   boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                 }}
               >
-                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : '#64748b' }}></span>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : 'var(--retail-muted)' }}></span>
                 <span>{statusFilter === 'ALL' ? 'All Statuses' : statusFilter === 'ACTIVE' ? 'Active Only' : 'Inactive Only'}</span>
                 <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
@@ -861,9 +834,9 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '180px',
-                    background: '#ffffff',
+                    background: 'var(--retail-card)',
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid var(--retail-edge-strong)',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
@@ -873,7 +846,7 @@ export default function UserManagementPage() {
                     ACCOUNT STATUS
                   </div>
                   {[
-                    { value: 'ALL', label: 'All Statuses', dot: '#64748b' },
+                    { value: 'ALL', label: 'All Statuses', dot: 'var(--retail-muted)' },
                     { value: 'ACTIVE', label: 'Active Only', dot: '#16a34a' },
                     { value: 'INACTIVE', label: 'Inactive Only', dot: '#94a3b8' },
                   ].map((st) => {
@@ -891,8 +864,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? '#eff6ff' : 'transparent',
-                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -902,7 +875,7 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
@@ -912,7 +885,7 @@ export default function UserManagementPage() {
                           <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: st.dot }}></span>
                           {st.label}
                         </span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -932,7 +905,7 @@ export default function UserManagementPage() {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#1a62ea',
+                  color: 'var(--retail-accent)',
                   fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -948,21 +921,21 @@ export default function UserManagementPage() {
         {/* File Table / User Directory Table */}
         <div
           style={{
-            background: '#ffffff',
-            border: '1px solid #eef2f6',
+            background: 'var(--retail-card)',
+            border: '1px solid var(--retail-edge)',
             borderRadius: '14px',
             overflow: 'hidden',
             boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
           }}
         >
-          <div style={{ overflowX: 'auto' }}>
+          <div className="admin-table-scroll" role="region" aria-label="Scrollable records" tabIndex={0}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr
                   style={{
-                    borderBottom: '1px solid #edf2f7',
-                    background: '#ffffff',
-                    color: '#64748b',
+                    borderBottom: '1px solid var(--retail-edge)',
+                    background: 'var(--retail-card)',
+                    color: 'var(--retail-muted)',
                     fontSize: '11px',
                     fontWeight: 750,
                     letterSpacing: '0.06em',
@@ -978,7 +951,7 @@ export default function UserManagementPage() {
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
+                    <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}><FolderOpen size="1em" className="inline-icon" aria-hidden="true" /></div>
                       <strong>No accounts matching the active filters</strong>
                       <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new user.</p>
@@ -995,17 +968,17 @@ export default function UserManagementPage() {
                         key={u.id}
                         onClick={() => setSelectedUserId(u.id)}
                         style={{
-                          borderBottom: '1px solid #f1f5f9',
-                          background: isSelected ? '#edf4fe' : '#ffffff',
+                          borderBottom: '1px solid var(--retail-edge)',
+                          background: isSelected ? 'var(--retail-raised)' : 'var(--retail-card)',
                           cursor: 'pointer',
                           transition: 'background 0.12s ease',
                           opacity: u.isActive ? 1 : 0.65,
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafd';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#ffffff';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-card)';
                         }}
                       >
                         {/* Column 1: NAME (Colored Role/Document Icon + User Name + Subtitle) */}
@@ -1028,17 +1001,17 @@ export default function UserManagementPage() {
                               {badge.icon}
                             </div>
                             <div style={{ minWidth: 0 }}>
-                              <strong style={{ color: '#0f172a', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
+                              <strong style={{ color: 'var(--retail-ink)', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
                                 {u.name}
                               </strong>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
-                                <span style={{ color: '#64748b', fontSize: '11.5px' }}>{u.email}</span>
+                                <span style={{ color: 'var(--retail-muted)', fontSize: '11.5px' }}>{u.email}</span>
                                 <span
                                   style={{
                                     padding: '1px 5px',
                                     borderRadius: '4px',
-                                    background: '#f1f5f9',
-                                    color: '#475569',
+                                    background: 'var(--retail-edge)',
+                                    color: 'var(--retail-muted)',
                                     fontSize: '11px',
                                     fontFamily: 'monospace',
                                     fontWeight: 600,
@@ -1065,7 +1038,7 @@ export default function UserManagementPage() {
                                 placeItems: 'center',
                                 fontWeight: 800,
                                 fontSize: '10.5px',
-                                border: '1.5px solid #ffffff',
+                                border: '1.5px solid light-dark(#ffffff, #3f3636)',
                                 boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                               }}
                             >
@@ -1075,12 +1048,12 @@ export default function UserManagementPage() {
                               <span
                                 style={{
                                   fontSize: '11.5px',
-                                  color: '#334155',
+                                  color: 'var(--retail-ink)',
                                   fontWeight: 600,
-                                  background: '#f8fafc',
+                                  background: 'var(--retail-raised)',
                                   padding: '2px 7px',
                                   borderRadius: '5px',
-                                  border: '1px solid #e2e8f0',
+                                  border: '1px solid var(--retail-edge-strong)',
                                 }}
                               >
                                 {u.assignedLocations[0] || 'Unassigned'}
@@ -1091,7 +1064,7 @@ export default function UserManagementPage() {
                         </td>
 
                         {/* Column 3: JOINED DATE */}
-                        <td style={{ padding: '13px 16px', color: '#64748b', fontSize: '12.5px', whiteSpace: 'nowrap' }}>
+                        <td style={{ padding: '13px 16px', color: 'var(--retail-muted)', fontSize: '12.5px', whiteSpace: 'nowrap' }}>
                           Joined {u.joinedDate}
                         </td>
 
@@ -1102,8 +1075,8 @@ export default function UserManagementPage() {
                               style={{
                                 padding: '3px 8px',
                                 borderRadius: '12px',
-                                background: u.discountLimitPercent > 0 ? '#eff6ff' : '#f1f5f9',
-                                color: u.discountLimitPercent > 0 ? '#1d4ed8' : '#475569',
+                                background: u.discountLimitPercent > 0 ? 'var(--retail-accent-soft)' : 'var(--retail-edge)',
+                                color: u.discountLimitPercent > 0 ? 'var(--retail-accent-strong)' : 'var(--retail-muted)',
                                 border: u.discountLimitPercent > 0 ? '1px solid #bfdbfe' : '1px solid #cbd5e1',
                                 fontSize: '11.5px',
                                 fontWeight: 700,
@@ -1113,17 +1086,17 @@ export default function UserManagementPage() {
                             </span>
                             <div style={{ display: 'inline-flex', gap: '3px' }}>
                               {u.canCancelSales && (
-                                <span title="Can void and cancel sales" style={{ padding: '2px 5px', borderRadius: '4px', background: '#fee2e2', color: '#dc2626', fontSize: '10.5px', fontWeight: 700 }}>
+                                <span title="Can void and cancel sales" style={{ padding: '2px 5px', borderRadius: '4px', background: 'light-dark(#fee2e2, #371f1f)', color: 'light-dark(#dc2626, #f2abab)', fontSize: '10.5px', fontWeight: 700 }}>
                                   Void
                                 </span>
                               )}
                               {u.canProcessReturns && (
-                                <span title="Can process returns" style={{ padding: '2px 5px', borderRadius: '4px', background: '#fef3c7', color: '#b45309', fontSize: '10.5px', fontWeight: 700 }}>
+                                <span title="Can process returns" style={{ padding: '2px 5px', borderRadius: '4px', background: 'light-dark(#fef3c7, #3e3923)', color: 'light-dark(#b45309, #f5ceb1)', fontSize: '10.5px', fontWeight: 700 }}>
                                   Return
                                 </span>
                               )}
                               {u.canCountStockAudits && (
-                                <span title="Can record stock audit counts" style={{ padding: '2px 5px', borderRadius: '4px', background: '#dcfce7', color: '#15803d', fontSize: '10.5px', fontWeight: 700 }}>
+                                <span title="Can record stock audit counts" style={{ padding: '2px 5px', borderRadius: '4px', background: 'light-dark(#dcfce7, #203929)', color: 'light-dark(#15803d, #b8f3ce)', fontSize: '10.5px', fontWeight: 700 }}>
                                   Audit
                                 </span>
                               )}
@@ -1151,7 +1124,7 @@ export default function UserManagementPage() {
                                 borderRadius: '6px',
                                 border: 'none',
                                 background: 'transparent',
-                                color: '#64748b',
+                                color: 'var(--retail-muted)',
                                 fontSize: '15px',
                                 cursor: 'pointer',
                                 display: 'grid',
@@ -1175,7 +1148,7 @@ export default function UserManagementPage() {
                                   borderRadius: '6px',
                                   border: 'none',
                                   background: 'transparent',
-                                  color: '#64748b',
+                                  color: 'var(--retail-muted)',
                                   fontSize: '18px',
                                   fontWeight: 900,
                                   cursor: 'pointer',
@@ -1195,9 +1168,9 @@ export default function UserManagementPage() {
                                     position: 'absolute',
                                     right: 0,
                                     top: '34px',
-                                    background: '#ffffff',
+                                    background: 'var(--retail-card)',
                                     borderRadius: '10px',
-                                    border: '1px solid #e2e8f0',
+                                    border: '1px solid var(--retail-edge-strong)',
                                     boxShadow: '0 10px 25px rgba(0, 0, 0, 0.12)',
                                     zIndex: 50,
                                     width: '180px',
@@ -1217,7 +1190,7 @@ export default function UserManagementPage() {
                                       borderRadius: '6px',
                                       border: 'none',
                                       background: 'transparent',
-                                      color: '#1e293b',
+                                      color: 'var(--retail-ink)',
                                       fontSize: '12.5px',
                                       fontWeight: 600,
                                       cursor: 'pointer',
@@ -1269,6 +1242,7 @@ export default function UserManagementPage() {
       {/* CREATE / EDIT USER MODAL */}
       {isModalOpen && (
         <div
+          className="admin-dialog-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1282,7 +1256,7 @@ export default function UserManagementPage() {
         >
           <div
             style={{
-              background: '#ffffff',
+              background: 'var(--retail-card)',
               borderRadius: '16px',
               maxWidth: '560px',
               width: '100%',
@@ -1294,10 +1268,10 @@ export default function UserManagementPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>
                   {editingUser ? 'Edit User Credentials & Access' : 'Provision New Enterprise Account'}
                 </h2>
-                <small style={{ color: '#64748b' }}>
+                <small style={{ color: 'var(--retail-muted)' }}>
                   Enforces dual-axis physical store binding and RBAC controls.
                 </small>
               </div>
@@ -1305,7 +1279,7 @@ export default function UserManagementPage() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsModalOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: 'var(--retail-muted)', cursor: 'pointer' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
@@ -1315,7 +1289,7 @@ export default function UserManagementPage() {
               {formRole !== 'SUPER_ADMIN' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Full Name *
                   </label>
                   <input
@@ -1324,11 +1298,11 @@ export default function UserManagementPage() {
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="e.g. Ramesh Verma"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Employee Code *
                   </label>
                   <input
@@ -1337,7 +1311,7 @@ export default function UserManagementPage() {
                     value={formEmployeeCode}
                     onChange={(e) => setFormEmployeeCode(e.target.value)}
                     placeholder="EMP-0845"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
                   />
                 </div>
               </div>
@@ -1345,7 +1319,7 @@ export default function UserManagementPage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Email Address *
                   </label>
                   <input
@@ -1354,17 +1328,17 @@ export default function UserManagementPage() {
                     value={formEmail}
                     onChange={(e) => setFormEmail(e.target.value)}
                     placeholder="r.verma@premiumretail.com"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Operational Role *
                   </label>
                   <select
                     value={formRole}
                     onChange={(e) => setFormRole(e.target.value as any)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
                   >
                     <option value="CASHIER">CASHIER (POS Lane)</option>
                     <option value="STAFF">STAFF (Floor Operations)</option>
@@ -1383,7 +1357,7 @@ export default function UserManagementPage() {
 
               {!editingUser && (
                 <div style={{ marginBottom: '14px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Initial Password
                   </label>
                   <input
@@ -1393,15 +1367,15 @@ export default function UserManagementPage() {
                     placeholder="At least 12 characters"
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
                   />
                 </div>
               )}
 
               {/* Physical Location Binding */}
               {formRole !== 'SUPER_ADMIN' && (
-              <div style={{ marginBottom: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
+              <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--retail-raised)', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '8px' }}>
                   Authorized Physical Store Locations (Dual-Axis Invariant) *
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
@@ -1416,7 +1390,7 @@ export default function UserManagementPage() {
                           alignItems: 'center',
                           gap: '8px',
                           fontSize: '12px',
-                          color: '#334155',
+                          color: 'var(--retail-ink)',
                           cursor: 'pointer',
                         }}
                       >
@@ -1440,9 +1414,9 @@ export default function UserManagementPage() {
                   style={{
                     padding: '9px 16px',
                     borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    background: '#ffffff',
-                    color: '#475569',
+                    border: '1px solid light-dark(#cbd5e1, #34455a)',
+                    background: 'var(--retail-card)',
+                    color: 'var(--retail-muted)',
                     fontSize: '13px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -1455,7 +1429,7 @@ export default function UserManagementPage() {
                   style={{
                     padding: '9px 20px',
                     borderRadius: '8px',
-                    background: '#155eef',
+                    background: 'var(--retail-accent)',
                     color: '#ffffff',
                     border: 'none',
                     fontSize: '13px',

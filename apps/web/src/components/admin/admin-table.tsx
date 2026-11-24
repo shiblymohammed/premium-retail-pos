@@ -12,9 +12,9 @@ export const AdminTable: React.FC<AdminTableProps> = ({ children, footer, style 
   return (
     <div
       style={{
-        background: '#ffffff',
+        background: 'var(--retail-card)',
         borderRadius: '14px',
-        border: '1px solid #eef2f6',
+        border: '1px solid var(--retail-edge)',
         boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
         overflow: 'hidden',
         ...style,
@@ -29,13 +29,13 @@ export const AdminTable: React.FC<AdminTableProps> = ({ children, footer, style 
         <div
           style={{
             padding: '12px 20px',
-            borderTop: '1px solid #f1f5f9',
-            background: '#fafbfc',
+            borderTop: '1px solid var(--retail-edge)',
+            background: 'var(--retail-raised)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             fontSize: '11.5px',
-            color: '#64748b',
+            color: 'var(--retail-muted)',
           }}
         >
           {footer}
@@ -48,7 +48,7 @@ export const AdminTable: React.FC<AdminTableProps> = ({ children, footer, style 
 export const AdminTableHeader: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
     <thead>
-      <tr style={{ background: '#f8fafc', borderBottom: '1px solid #eef2f6' }}>
+      <tr style={{ background: 'var(--retail-raised)', borderBottom: '1px solid var(--retail-edge)' }}>
         {children}
       </tr>
     </thead>
@@ -66,7 +66,7 @@ export const AdminTableTh: React.FC<{
         padding: '13px 20px',
         fontSize: '11px',
         fontWeight: 750,
-        color: '#64748b',
+        color: 'var(--retail-muted)',
         letterSpacing: '0.06em',
         textTransform: 'uppercase',
         textAlign: align,
@@ -88,17 +88,17 @@ export const AdminTableRow: React.FC<{
     <tr
       onClick={onClick}
       style={{
-        borderBottom: '1px solid #f8fafc',
-        background: isSelected ? '#eff6ff' : '#ffffff',
+        borderBottom: '1px solid var(--retail-raised)',
+        background: isSelected ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
         cursor: onClick ? 'pointer' : 'default',
         transition: 'background 0.1s ease',
         ...style,
       }}
       onMouseEnter={(e) => {
-        if (!isSelected) e.currentTarget.style.background = '#f8fafd';
+        if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
       }}
       onMouseLeave={(e) => {
-        if (!isSelected) e.currentTarget.style.background = '#ffffff';
+        if (!isSelected) e.currentTarget.style.background = 'var(--retail-card)';
       }}
     >
       {children}
@@ -116,7 +116,7 @@ export const AdminTableTd: React.FC<{
       style={{
         padding: '14px 20px',
         fontSize: '12.5px',
-        color: '#1e293b',
+        color: 'var(--retail-ink)',
         textAlign: align,
         verticalAlign: 'middle',
         ...style,

@@ -53,7 +53,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                   <span
                     key={idx}
                     className="drive-avatar-bubble"
-                    style={{ background: av.bg || '#2563eb' }}
+                    style={{ background: av.bg || 'var(--retail-accent)' }}
                   >
                     {av.text}
                   </span>

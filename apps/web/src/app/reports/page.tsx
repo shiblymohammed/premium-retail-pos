@@ -1,5 +1,7 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
+import { Feedback } from '@/components/ui/feedback';
 import { ArrowRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
@@ -59,6 +61,13 @@ const REPORT_TABS: Array<{ key: ReportKind; label: string }> = [
   { key: 'priceChanges', label: 'Price history' },
   { key: 'cancellations', label: 'Voided sales' },
   { key: 'itemDeletions', label: 'Deletions' },
+];
+
+const REPORT_GROUPS: Array<{ label: string; keys: ReportKind[] }> = [
+  { label: 'Overview', keys: ['overview'] },
+  { label: 'Sales', keys: ['sales', 'salesDetails', 'cancellations', 'itemDeletions'] },
+  { label: 'Inventory', keys: ['stock', 'lowStock', 'ledger', 'priceChanges'] },
+  { label: 'Operations', keys: ['transferDiscrepancies', 'auditVariances'] },
 ];
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
@@ -141,6 +150,8 @@ export default function ReportsPage() {
   const [notifications, setNotifications] = useState<Notifications | null>(null);
 
   const [showNotifications, setShowNotifications] = useState(false);
+  const [alertError, setAlertError] = useState('');
+  const [alertRetry, setAlertRetry] = useState(0);
   const [tableData, setTableData] = useState<TableData | null>(null);
 
   const [notice, setNotice] = useState('');
@@ -180,13 +191,38 @@ export default function ReportsPage() {
 
   // Deep link: /reports?tab=stock opens that tab; switching tabs keeps the URL in sync.
   useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get('tab');
+    const routeParams = new URLSearchParams(window.location.search);
+    const requested = routeParams.get('tab');
+    if (routeParams.get('alerts') === '1') setShowNotifications(true);
     if (!requested || !REPORT_TABS.some((t) => t.key === requested)) return;
     const requestedTab = requested as ReportKind;
     if (requestedTab === 'priceChanges' && role !== 'SUPER_ADMIN') return;
     if (requestedTab === 'itemDeletions' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
     setReport(requestedTab);
   }, [role]);
+
+  useEffect(() => {
+    if (!showNotifications || !token || notifications) return;
+    const controller = new AbortController();
+
+    async function loadAlerts() {
+      setAlertError('');
+      try {
+        const response = await fetch(`${API}/reports/notifications`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('Alerts unavailable');
+        const { data } = await response.json() as { data: Omit<Notifications, 'unread'> & { unread?: number } };
+        setNotifications({ ...data, unread: data.unread ?? data.items.filter((item) => !item.readAt).length });
+      } catch {
+        if (!controller.signal.aborted) setAlertError('Could not load operational alerts.');
+      }
+    }
+
+    void loadAlerts();
+    return () => controller.abort();
+  }, [showNotifications, token, notifications, alertRetry]);
 
   const visibleReportTabs = REPORT_TABS.filter((tab) => {
     if (tab.key === 'priceChanges') return role === 'SUPER_ADMIN';
@@ -324,6 +360,8 @@ export default function ReportsPage() {
   const rangePreset: RangePreset = to === isoDate(new Date()) && (rangeDays === 7 || rangeDays === 30) ? (rangeDays === 7 ? 'last7' : 'last30') : 'custom';
   const rangeLabel = `${formatDay(from)} – ${formatDay(to)}`;
   const reportLabel = visibleReportTabs.find((t) => t.key === report)?.label ?? 'Overview';
+  const reportGroup = REPORT_GROUPS.find((group) => group.keys.includes(report)) ?? REPORT_GROUPS[0];
+  const groupTabs = visibleReportTabs.filter((tab) => reportGroup.keys.includes(tab.key));
 
   return (
     <div className={`${styles.page} app-page`}>
@@ -331,7 +369,7 @@ export default function ReportsPage() {
       <header className={styles.header}>
         <div>
           <h1>Reports</h1>
-          <p>{rangeLabel} · {scopeName} · {reportLabel}</p>
+          <p>{scopeName}</p>
         </div>
         <div className={styles.headerActions}>
           <label className={styles.search}>
@@ -366,10 +404,10 @@ export default function ReportsPage() {
 
       {/* ---------- Tabs + filters ---------- */}
       <div className={styles.toolbar}>
-        <div className={styles.tabs} role="tablist" aria-label="Report type">
-          {visibleReportTabs.map((tab) => (
-            <button key={tab.key} type="button" role="tab" aria-selected={report === tab.key} className={report === tab.key ? styles.tabActive : ''} onClick={() => setReport(tab.key)}>
-              {tab.label}
+        <div className={styles.reportGroups} role="group" aria-label="Report category">
+          {REPORT_GROUPS.map((group) => (
+            <button key={group.label} type="button" aria-pressed={group === reportGroup} onClick={() => { if (group !== reportGroup) setReport(group.keys[0]); }}>
+              {group.label}
             </button>
           ))}
         </div>
@@ -408,21 +446,33 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {groupTabs.length > 1 && (
+        <div className={styles.reportSubtabs} role="group" aria-label="Report type">
+          {groupTabs.map((tab) => (
+            <button key={tab.key} type="button" aria-pressed={report === tab.key} onClick={() => setReport(tab.key)}>{tab.label}</button>
+          ))}
+        </div>
+      )}
+
       {/* ---------- Alerts drawer ---------- */}
-      {showNotifications && notifications && (
+      {showNotifications && (
         <section className={`${styles.card} ${styles.alerts}`}>
           <div className={styles.cardHead}>
             <div>
               <h2>Operational alerts</h2>
-              <p>Inventory alerts, transfer discrepancies and audit lock events</p>
+              <p>Replenishment requests, transfer discrepancies and audit alerts</p>
             </div>
             <div className={styles.cardHeadActions}>
-              {notifications.unread > 0 && <button type="button" onClick={markAllRead} className={styles.textButton}>Mark all as read</button>}
+              {Boolean(notifications?.unread) && <button type="button" onClick={markAllRead} className={styles.textButton}>Mark all as read</button>}
               <button type="button" onClick={() => setShowNotifications(false)} className={styles.iconButton} aria-label="Close alerts"><Icon name="x" size={16} /></button>
             </div>
           </div>
           <div className={styles.alertList}>
-            {notifications.items.map((item) => (
+            {alertError && <Feedback tone="error">{alertError}</Feedback>}
+            {alertError && <button type="button" className={styles.textButton} onClick={() => setAlertRetry((retry) => retry + 1)}>Retry</button>}
+            {!notifications && !alertError && <p role="status">Loading alerts…</p>}
+            {notifications?.items.length === 0 && <p>No operational alerts.</p>}
+            {notifications?.items.map((item) => (
               <div key={item.id} className={`${styles.alertItem} ${item.readAt ? styles.alertRead : ''}`}>
                 <span className={`${styles.alertIcon} ${item.type === 'NEGATIVE_STOCK' ? styles.toneRed : item.type === 'LOW_STOCK' ? styles.toneAmber : styles.toneBlue}`}><Icon name="alert" size={15} /></span>
                 <div className={styles.alertBody}>
@@ -439,13 +489,7 @@ export default function ReportsPage() {
         </section>
       )}
 
-      {notice && (
-        <div className={styles.notice} role="status">
-          <Icon name="check" size={16} />
-          <span>{notice}</span>
-          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
-        </div>
-      )}
+      {notice && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
       {/* ---------- OVERVIEW ---------- */}
       {report === 'overview' && (
@@ -482,86 +526,12 @@ export default function ReportsPage() {
             <article className={styles.card}>
               <div className={styles.cardHead}>
                 <div>
-                  <h2>Revenue by store</h2>
-                  <p>{topStore && netRevenue ? `${topStore.locationName} drives ${Math.round((Number(topStore.netSales) / netRevenue) * 100)}% of net sales in scope` : 'No retail sales recorded for this location'}</p>
-                </div>
-                <button type="button" className={styles.iconButton} onClick={() => setReport('sales')} aria-label="Open sales report" title="Open sales report"><Icon name="arrow" size={15} /></button>
-              </div>
-              <div className={styles.barList}>
-                {scopedStores.filter((s) => matches(s.locationName)).map((store) => {
-                  const value = Number(store.netSales);
-                  const share = networkRevenue ? Math.round((value / networkRevenue) * 100) : 0;
-                  return (
-                    <div className={styles.barRow} key={store.locationId}>
-                      <span className={styles.rowIcon}><Icon name="store" size={15} /></span>
-                      <span className={styles.rowLabel}><strong>{store.locationName}</strong><small>{store.invoices} invoices · {formatInr(store.invoices ? value / store.invoices : 0)} avg</small></span>
-                      <span className={styles.track}><i style={{ width: `${(value / maxStoreRevenue) * 100}%` }} /></span>
-                      <b className={styles.rowValue}>{formatCompactInr(value)}</b>
-                      <span className={`${styles.chip} ${styles.chipGood}`}>{share}%</span>
-                    </div>
-                  );
-                })}
-                {!scopedStores.length && <div className={styles.empty}>Warehouses do not record POS sales.</div>}
-              </div>
-              {scopedStores.length > 0 && netRevenue > 0 && (
-                <div className={styles.shareBlock}>
-                  <small className={styles.shareCaption}>Share of net sales</small>
-                  <div className={styles.shareBar} role="img" aria-label={scopedStores.map((s) => `${s.locationName} ${Math.round((Number(s.netSales) / netRevenue) * 100)}%`).join(', ')}>
-                    {scopedStores.map((s, i) => <i key={s.locationId} style={{ width: `${(Number(s.netSales) / netRevenue) * 100}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }} title={`${s.locationName}: ${formatInr(Number(s.netSales))}`} />)}
-                  </div>
-                  <div className={styles.shareLegend}>
-                    {scopedStores.map((s, i) => <span key={s.locationId}><i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />{s.locationName}<b>{formatCompactInr(Number(s.netSales))}</b></span>)}
-                  </div>
-                </div>
-              )}
-              {avgSpread && (
-                <button type="button" className={styles.insight} onClick={() => setReport('sales')}>
-                  <Icon name="spark" size={14} />
-                  <span>{avgSpread.low.locationName} averages {formatInr(avgSpread.lowAvg)} per bill, {formatInr(avgSpread.highAvg - avgSpread.lowAvg)} below {avgSpread.high.locationName}.</span>
-                  <Icon name="arrow" size={13} />
-                </button>
-              )}            </article>
-
-            <article className={styles.card}>
-              <div className={styles.cardHead}>
-                <div>
-                  <h2>Stock cover vs. reorder level</h2>
-                  <p>Available units ÷ reorder level · lowest cover first</p>
-                </div>
-              </div>
-              <div className={styles.barList}>
-                {coverRows.slice(0, 5).map((row) => (
-                  <div className={styles.coverRow} key={`${row.locationName}-${row.sku}`}>
-                    <span className={`${styles.skuBadge} ${row.negativeStock ? styles.toneRed : row.lowStock ? styles.toneAmber : styles.toneTeal}`}>{row.productName.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span>
-                    <span className={styles.rowLabel}><strong>{row.productName}</strong><small>{row.locationName} · {row.available} / {row.reorderLevelBase} {row.baseUnit}s</small></span>
-                    <span className={styles.track}><i className={row.negativeStock ? styles.fillRed : row.lowStock ? styles.fillAmber : ''} style={{ width: `${Math.max(0, Math.min(100, row.cover / 3))}%` }} /></span>
-                    <b className={styles.rowValue}>{Math.round(row.cover)}%</b>
-                  </div>
-                ))}
-                {!coverRows.length && <div className={styles.empty}>No tracked variants for this location.</div>}
-              </div>
-              {worstRow && (
-                <button type="button" className={styles.insight} onClick={() => setReport('lowStock')}>
-                  <Icon name="spark" size={14} />
-                  <span>{worstRow.negativeStock
-                    ? `${worstRow.productName} at ${worstRow.locationName} is at ${worstRow.available} ${worstRow.baseUnit}s. Reconcile the ledger before the next transfer.`
-                    : `${worstRow.productName} at ${worstRow.locationName} is below its reorder level. Raise a replenishment transfer.`}</span>
-                  <Icon name="arrow" size={13} />
-                </button>
-              )}
-            </article>
-          </section>
-
-          <section className={styles.rowGrid}>
-            <article className={styles.card}>
-              <div className={styles.cardHead}>
-                <div>
-                  <h2>Daily turnover</h2>
-                  <p>Network net sales for the last {daily.length} trading days</p>
+                  <div className="heading-with-info"><h2>Daily turnover</h2><InfoHint label="About daily turnover">Bars show daily net sales for the selected date range and location.</InfoHint></div>
+                  <p>{daily.length ? `Net sales over ${daily.length} trading days` : 'Net sales for the selected period'}</p>
                 </div>
                 {bestDay && <span className={styles.highlightPill}>Best day: {formatDay(bestDay.date)} · {formatCompactInr(Number(bestDay.netSales))}</span>}
               </div>
-              <div className={styles.columns}>
+              {daily.length ? <div className={styles.columns} role="region" aria-label="Daily turnover chart" tabIndex={0}>
                 {daily.map((day) => {
                   const value = Number(day.netSales);
                   const isBest = day.date === bestDay?.date;
@@ -574,7 +544,7 @@ export default function ReportsPage() {
                     </div>
                   );
                 })}
-              </div>
+              </div> : <div className={styles.empty}>No finalized sales in the selected period.</div>}
             </article>
 
             <article className={styles.card}>
@@ -602,6 +572,82 @@ export default function ReportsPage() {
               <div className={styles.heatLegend}><span>Low</span>{[0, 1, 2, 3, 4].map((l) => <i key={l} className={styles[`heat${l}`]} />)}<span>High</span></div>
             </article>
           </section>
+
+          <section className={styles.rowGrid}>
+            <article className={styles.card}>
+              <div className={styles.cardHead}>
+                <div>
+                  <h2>Revenue by store</h2>
+                  <p>{topStore && netRevenue ? `${topStore.locationName} drives ${Math.round((Number(topStore.netSales) / netRevenue) * 100)}% of net sales in scope` : 'No retail sales recorded for this location'}</p>
+                </div>
+                <button type="button" className={styles.iconButton} onClick={() => setReport('sales')} aria-label="Open sales report" title="Open sales report"><Icon name="arrow" size={15} /></button>
+              </div>
+              <div className={styles.barList}>
+                {scopedStores.filter((s) => matches(s.locationName)).map((store) => {
+                  const value = Number(store.netSales);
+                  const share = networkRevenue ? Math.round((value / networkRevenue) * 100) : 0;
+                  return (
+                    <div className={styles.barRow} key={store.locationId}>
+                      <span className={styles.rowIcon}><Icon name="store" size={15} /></span>
+                      <span className={styles.rowLabel}><strong>{store.locationName}</strong><small>{store.invoices} invoices · {formatInr(store.invoices ? value / store.invoices : 0)} avg</small></span>
+                      <span className={styles.track}><i style={{ width: `${(value / maxStoreRevenue) * 100}%` }} /></span>
+                      <b className={styles.rowValue}>{formatCompactInr(value)}</b>
+                      <span className={`${styles.chip} ${styles.chipGood}`}>{share}%</span>
+                    </div>
+                  );
+                })}
+                {!scopedStores.length && <div className={styles.empty}>No store sales in the selected period.</div>}
+              </div>
+              {scopedStores.length > 0 && netRevenue > 0 && (
+                <div className={styles.shareBlock}>
+                  <small className={styles.shareCaption}>Share of net sales</small>
+                  <div className={styles.shareBar} role="img" aria-label={scopedStores.map((s) => `${s.locationName} ${Math.round((Number(s.netSales) / netRevenue) * 100)}%`).join(', ')}>
+                    {scopedStores.map((s, i) => <i key={s.locationId} style={{ width: `${(Number(s.netSales) / netRevenue) * 100}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }} title={`${s.locationName}: ${formatInr(Number(s.netSales))}`} />)}
+                  </div>
+                  <div className={styles.shareLegend}>
+                    {scopedStores.map((s, i) => <span key={s.locationId}><i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />{s.locationName}<b>{formatCompactInr(Number(s.netSales))}</b></span>)}
+                  </div>
+                </div>
+              )}
+              {avgSpread && (
+                <button type="button" className={styles.insight} onClick={() => setReport('sales')}>
+                  <Icon name="spark" size={14} />
+                  <span>{avgSpread.low.locationName} averages {formatInr(avgSpread.lowAvg)} per bill, {formatInr(avgSpread.highAvg - avgSpread.lowAvg)} below {avgSpread.high.locationName}.</span>
+                  <Icon name="arrow" size={13} />
+                </button>
+              )}            </article>
+
+            <article className={styles.card}>
+              <div className={styles.cardHead}>
+                <div>
+                  <div className="heading-with-info"><h2>Stock cover vs. reorder level</h2><InfoHint label="About stock cover">100% means available stock equals the reorder level. Lower percentages identify variants closer to running out.</InfoHint></div>
+                  <p>Available units ÷ reorder level · lowest cover first</p>
+                </div>
+              </div>
+              <div className={styles.barList}>
+                {coverRows.slice(0, 5).map((row) => (
+                  <div className={styles.coverRow} key={`${row.locationName}-${row.sku}`}>
+                    <span className={`${styles.skuBadge} ${row.negativeStock ? styles.toneRed : row.lowStock ? styles.toneAmber : styles.toneTeal}`}>{row.productName.split(' ').map((w) => w[0]).slice(0, 2).join('')}</span>
+                    <span className={styles.rowLabel}><strong>{row.productName}</strong><small>{row.locationName} · {row.available} / {row.reorderLevelBase} {row.baseUnit}s</small></span>
+                    <span className={styles.track}><i className={row.negativeStock ? styles.fillRed : row.lowStock ? styles.fillAmber : ''} style={{ width: `${Math.max(0, Math.min(100, row.cover / 3))}%` }} /></span>
+                    <b className={styles.rowValue}>{Math.round(row.cover)}%</b>
+                  </div>
+                ))}
+                {!coverRows.length && <div className={styles.empty}>No tracked variants for this location.</div>}
+              </div>
+              {worstRow && (
+                <button type="button" className={styles.insight} onClick={() => setReport('lowStock')}>
+                  <Icon name="spark" size={14} />
+                  <span>{worstRow.negativeStock
+                    ? `${worstRow.productName} at ${worstRow.locationName} is at ${worstRow.available} ${worstRow.baseUnit}s. Reconcile the ledger before the next transfer.`
+                    : `${worstRow.productName} at ${worstRow.locationName} is below its reorder level. Raise a replenishment transfer.`}</span>
+                  <Icon name="arrow" size={13} />
+                </button>
+              )}
+            </article>
+          </section>
+
+
         </>
       )}
 

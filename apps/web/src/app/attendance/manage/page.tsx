@@ -1,5 +1,7 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
+import { Feedback } from '@/components/ui/feedback';
 import {
   CalendarDays,
   Check,
@@ -362,6 +364,23 @@ export default function AttendanceManagerPage() {
     return Array.from({ length: 14 }, (_, i) => addDays(end, i - 13)).map((d) => recs.find((r) => r.date === d) ?? { date: d, status: 'future' as DayStatus, inMin: null, outMin: null, workMin: 0, lateBy: 0 });
   };
 
+  if (!location) {
+    return (
+      <div className={`${styles.page} app-page`}>
+        <header className={styles.header}>
+          <div className={styles.headerTitle}><h1>Attendance Oversight</h1></div>
+        </header>
+        <section className={styles.tableCard}>
+          <div className={styles.empty} role="status">
+            <Icon name="users" size={24} />
+            <strong>Attendance data unavailable</strong>
+            <p>No location data is available in this view.</p>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className={`${styles.page} app-page`}>
       {/* ---------- Header ---------- */}
@@ -393,9 +412,7 @@ export default function AttendanceManagerPage() {
         </div>
       </header>
 
-      {notice && (
-        <div className={styles.notice} role="status"><Icon name="check" size={16} /><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><Icon name="x" size={14} /></button></div>
-      )}
+      {notice && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Attendance summary">
@@ -528,7 +545,7 @@ export default function AttendanceManagerPage() {
       {/* ---------- Report ---------- */}
       <section className={styles.reportCard}>
         <div className={styles.reportHead}>
-          <div><h2>Attendance report</h2><p>{location.name} · {prettyDate(reportRange.start, { day: 'numeric', month: 'short' })} – {prettyDate(reportRange.end, { day: 'numeric', month: 'short', year: 'numeric' })}</p></div>
+          <div><div className="heading-with-info"><h2>Attendance report</h2><InfoHint label="About the attendance report">Review staff attendance for the selected location and date range.</InfoHint></div><p>{location.name} · {prettyDate(reportRange.start, { day: 'numeric', month: 'short' })} – {prettyDate(reportRange.end, { day: 'numeric', month: 'short', year: 'numeric' })}</p></div>
           <div className={styles.reportTools}>
             <div className={styles.segmented} role="group" aria-label="Report period">
               {(['daily', 'weekly', 'monthly'] as ReportPeriod[]).map((p) => <button key={p} type="button" className={reportPeriod === p ? styles.segOn : ''} onClick={() => setReportPeriod(p)}>{p[0].toUpperCase() + p.slice(1)}</button>)}

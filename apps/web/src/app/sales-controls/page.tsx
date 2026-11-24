@@ -1,5 +1,7 @@
 'use client';
 
+import { InfoHint } from '@/components/ui/info-hint';
+import { Feedback } from '@/components/ui/feedback';
 import {
   Ban,
   Banknote,
@@ -422,18 +424,8 @@ export default function SalesControlsPage() {
         </div>
       </header>
 
-      {error && (
-        <div className={`${styles.alert} ${styles.alertError}`} role="alert">
-          <Icon name="alert" size={16} /><span>{error}</span>
-          <button type="button" onClick={() => setError('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
-        </div>
-      )}
-      {notice && (
-        <div className={`${styles.alert} ${styles.alertSuccess}`} role="status">
-          <Icon name="check" size={16} /><span>{notice}</span>
-          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss"><Icon name="x" size={14} /></button>
-        </div>
-      )}
+      {error && <Feedback tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
+      {notice && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Returns and cancellations summary">
@@ -512,7 +504,7 @@ export default function SalesControlsPage() {
         </div>
 
         <div className={`${styles.card} ${styles.explainer}`}>
-          <div className={styles.cardHead}><div><h2>Return or cancel?</h2><p>Pick the one that matches what happened.</p></div></div>
+          <div className={styles.cardHead}><div><div className="heading-with-info"><h2>Return or cancel?</h2><InfoHint label="When to return or cancel">Use a return for items the customer brings back. Use cancellation to void the whole bill.</InfoHint></div><p>Pick the one that matches what happened.</p></div></div>
           <div className={styles.explainItem}>
             <span className={styles.toneBlue}><Icon name="return" size={16} /></span>
             <div><strong>Return items</strong><p>The customer brings back <b>some</b> items. You refund only those items.</p></div>

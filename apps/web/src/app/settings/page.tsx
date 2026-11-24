@@ -1,5 +1,6 @@
 'use client';
 
+import { Feedback } from '@/components/ui/feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { getStoredSession, AuthSession } from '@/lib/auth';
@@ -161,11 +162,7 @@ export default function SettingsPage() {
         </SettingsDrawer>
       )}
 
-      {toast && (
-        <div className={styles.toast} role="status">
-          <Icon name="check" size={15} /> {toast}
-        </div>
-      )}
+      {toast && <Feedback toast tone="success">{toast}</Feedback>}
     </div>
   );
 }

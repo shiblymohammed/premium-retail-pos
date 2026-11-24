@@ -1,5 +1,6 @@
 'use client';
 
+import { Feedback } from '@/components/ui/feedback';
 import {
   ArrowDown,
   ArrowDownUp,
@@ -476,13 +477,7 @@ export default function ProductsPage() {
   return (
     <div className={styles.appWrapper}>
       <div className={`${styles.page} app-page`}>
-        {notification && (
-          <div className={`${styles.toastNotification} ${styles[notification.type]}`} role="status">
-            <Icon name="check" size={16} />
-            <span>{notification.message}</span>
-            <button onClick={() => setNotification(null)} className={styles.toastCloseBtn} aria-label="Dismiss"><Icon name="x" size={14} /></button>
-          </div>
-        )}
+        {notification && <Feedback toast tone={notification.type} onDismiss={() => setNotification(null)}>{notification.message}</Feedback>}
 
         {/* ---------- Header ---------- */}
         <header className={styles.header}>
@@ -850,7 +845,7 @@ export default function ProductsPage() {
           <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <div className={styles.modalTitleGroup}>
-                <div className={styles.modalIconWrap} style={{ background: '#e0f2fe', color: '#0369a1' }}>
+                <div className={styles.modalIconWrap} style={{ background: 'light-dark(#e0f2fe, #1f2e38)', color: 'light-dark(#0369a1, #b4def5)' }}>
                   <Icon name="package" size={20} />
                 </div>
                 <div>

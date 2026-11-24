@@ -1,5 +1,6 @@
 'use client';
 
+import { Feedback } from '@/components/ui/feedback';
 import {
   Ban,
   Check,
@@ -411,65 +412,13 @@ export default function SalesPermissionsAdmin() {
   };
 
   return (
-    <div className="app-page" style={{ color: '#1e293b' }}>
+    <div className="app-page admin-workspace">
       {/* Alert Notice (Matching users, company, discount-limits) */}
-      {notice && (
-        <div
-          style={{
-            padding: '12px 18px',
-            borderRadius: '10px',
-            background: '#ecfdf5',
-            border: '1px solid #a7f3d0',
-            color: '#065f46',
-            fontSize: '13px',
-            marginBottom: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 2px 8px rgba(16, 185, 129, 0.1)',
-          }}
-        >
-          <span style={{ fontWeight: 600 }}><Check size="1em" className="inline-icon" aria-hidden="true" /> {notice}</span>
-          <button
-            type="button"
-            aria-label="Dismiss notice"
-            onClick={() => setNotice('')}
-            style={{ background: 'none', border: 'none', color: '#065f46', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
-          >
-            <X size="1em" className="inline-icon" aria-hidden="true" />
-          </button>
-        </div>
-      )}
+      {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
-      {error && (
-        <div
-          style={{
-            padding: '12px 18px',
-            borderRadius: '10px',
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            color: '#991b1b',
-            fontSize: '13px',
-            marginBottom: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 2px 8px rgba(239, 68, 68, 0.1)',
-          }}
-        >
-          <span style={{ fontWeight: 600 }}><TriangleAlert size="1em" className="inline-icon" aria-hidden="true" /> {error}</span>
-          <button
-            type="button"
-            aria-label="Dismiss error"
-            onClick={() => setError('')}
-            style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', fontWeight: 800, fontSize: '14px' }}
-          >
-            <X size="1em" className="inline-icon" aria-hidden="true" />
-          </button>
-        </div>
-      )}
+      {error && <Feedback tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
       {loading && (
-        <div role="status" style={{ padding: '12px 16px', marginBottom: '16px', borderRadius: '9px', background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', fontSize: '13px' }}>
+        <div role="status" style={{ padding: '12px 16px', marginBottom: '16px', borderRadius: '9px', background: 'light-dark(#eff6ff, #1d2733)', border: '1px solid light-dark(#bfdbfe, #2e425b)', color: 'var(--retail-accent-strong)', fontSize: '13px' }}>
           Loading current permissions from the server…
         </div>
       )}
@@ -477,7 +426,7 @@ export default function SalesPermissionsAdmin() {
       {/* Header: Title with Blue Badge, Section View Toggles, Info, and Primary Action Button */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '28px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
             Sales Permissions & Overrides
             <span
               style={{
@@ -486,7 +435,7 @@ export default function SalesPermissionsAdmin() {
                 width: '34px',
                 height: '34px',
                 borderRadius: '9px',
-                background: '#1a62ea',
+                background: 'var(--retail-accent)',
                 color: '#ffffff',
                 fontSize: '18px',
                 boxShadow: '0 3px 8px rgba(26, 98, 234, 0.25)',
@@ -498,16 +447,15 @@ export default function SalesPermissionsAdmin() {
           </h1>
         </div>
 
-        {/* Right side: View Tabs, Info button, and Primary Action Button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <div className="admin-heading-actions">
+          <div style={{ display: 'inline-flex', background: 'var(--retail-edge)', padding: '3px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
             <button
               type="button"
               onClick={() => setActiveTab('MATRIX')}
               style={{
                 border: 'none',
-                background: activeTab === 'MATRIX' ? '#ffffff' : 'transparent',
-                color: activeTab === 'MATRIX' ? '#1a62ea' : '#64748b',
+                background: activeTab === 'MATRIX' ? 'var(--retail-card)' : 'transparent',
+                color: activeTab === 'MATRIX' ? 'var(--retail-accent)' : 'var(--retail-muted)',
                 padding: '6px 14px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -524,8 +472,8 @@ export default function SalesPermissionsAdmin() {
               onClick={() => setActiveTab('TEMPLATES')}
               style={{
                 border: 'none',
-                background: activeTab === 'TEMPLATES' ? '#ffffff' : 'transparent',
-                color: activeTab === 'TEMPLATES' ? '#1a62ea' : '#64748b',
+                background: activeTab === 'TEMPLATES' ? 'var(--retail-card)' : 'transparent',
+                color: activeTab === 'TEMPLATES' ? 'var(--retail-accent)' : 'var(--retail-muted)',
                 padding: '6px 14px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -547,9 +495,9 @@ export default function SalesPermissionsAdmin() {
               width: '36px',
               height: '36px',
               borderRadius: '8px',
-              border: '1px solid #e2e8f0',
-              background: '#ffffff',
-              color: '#64748b',
+              border: '1px solid var(--retail-edge-strong)',
+              background: 'var(--retail-card)',
+              color: 'var(--retail-muted)',
               fontSize: '16px',
               display: 'grid',
               placeItems: 'center',
@@ -571,7 +519,7 @@ export default function SalesPermissionsAdmin() {
               gap: '8px',
               padding: '10px 18px',
               borderRadius: '8px',
-              background: '#1a62ea',
+              background: 'var(--retail-accent)',
               color: '#ffffff',
               border: 'none',
               fontWeight: 700,
@@ -587,10 +535,8 @@ export default function SalesPermissionsAdmin() {
       </div>
 
       {/* SECTION 1: QUICK ACCESS (4 Folder-Tabbed Cards) */}
-      <div style={{ marginBottom: '34px' }}>
-        <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: '0 0 14px' }}>
-          QUICK ACCESS
-        </h2>
+      <details className="admin-shortcuts">
+        <summary>Permission shortcuts <ChevronDown size={15} aria-hidden="true" /></summary>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
           {/* Card 1: Store Managers */}
@@ -599,7 +545,7 @@ export default function SalesPermissionsAdmin() {
             onClick={() => setRoleFilter(roleFilter === 'STORE_MANAGER' ? 'ALL' : 'STORE_MANAGER')}
             title="Filter by Store Managers"
             avatars={[
-              { text: 'AP', bg: '#059669' },
+              { text: 'AP', bg: 'light-dark(#047857, #8be0ad)' },
               { text: 'SM', bg: '#0d9488' },
             ]}
             heading="Store Managers"
@@ -626,7 +572,7 @@ export default function SalesPermissionsAdmin() {
             onClick={() => setRoleFilter(roleFilter === 'CENTRAL_MANAGER' ? 'ALL' : 'CENTRAL_MANAGER')}
             title="Filter by Warehouse Logistics"
             avatars={[
-              { text: 'VS', bg: '#4f46e5' },
+              { text: 'VS', bg: 'light-dark(#4f46e5, #bdb6ff)' },
               { text: 'RK', bg: '#6366f1' },
             ]}
             heading="Warehouse Logistics"
@@ -638,19 +584,19 @@ export default function SalesPermissionsAdmin() {
             className="drive-folder-card"
             onClick={() => setIsAuditModalOpen(true)}
             title="View Security Invariant OD-08 Architecture"
-            style={{ borderLeft: '4px solid #1a62ea' }}
+            style={{ borderLeft: '4px solid var(--retail-accent)' }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: '#1a62ea' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
-                <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>OD-08 Invariant</strong>
+                <span style={{ fontSize: '18px', color: 'var(--retail-accent)' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <strong style={{ fontSize: '13.5px', color: 'var(--retail-ink)' }}>OD-08 Invariant</strong>
               </div>
               <div
                 style={{
                   width: '26px',
                   height: '26px',
                   borderRadius: '50%',
-                  background: '#1a62ea',
+                  background: 'var(--retail-accent)',
                   color: '#fff',
                   fontSize: '11px',
                   fontWeight: 750,
@@ -662,23 +608,23 @@ export default function SalesPermissionsAdmin() {
               </div>
             </div>
             <div style={{ marginTop: '16px' }}>
-              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', textTransform: 'uppercase', display: 'block' }}>
+              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', display: 'block' }}>
                 GOVERNANCE
               </small>
-              <span style={{ fontSize: '12px', fontWeight: 650, color: '#334155', display: 'block', marginTop: '2px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--retail-ink)', display: 'block', marginTop: '2px' }}>
                 Void Reason Logging · Immutable Records
               </span>
             </div>
           </div>
         </div>
-      </div>
+      </details>
 
       {/* VIEW TAB 1: PERMISSIONS MATRIX */}
       {activeTab === 'MATRIX' && (
         <div>
           {/* Section 2 Toolbar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-            <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: 0 }}>
+            <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', margin: 0 }}>
               SALES PERMISSION DIRECTORY ({filteredUsers.length})
             </h2>
 
@@ -692,10 +638,10 @@ export default function SalesPermissionsAdmin() {
                 style={{
                   padding: '7px 14px',
                   borderRadius: '18px',
-                  border: '1px solid #cbd5e1',
+                  border: '1px solid light-dark(#cbd5e1, #34455a)',
                   fontSize: '12.5px',
                   outline: 'none',
-                  background: '#f8fafc',
+                  background: 'var(--retail-raised)',
                   minWidth: '220px',
                 }}
               />
@@ -711,9 +657,9 @@ export default function SalesPermissionsAdmin() {
                     gap: '6px',
                     padding: '7px 14px',
                     borderRadius: '20px',
-                    border: roleFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                    background: roleFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                    color: roleFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                    border: roleFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
+                    background: roleFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                    color: roleFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
                     fontSize: '12.5px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -733,9 +679,9 @@ export default function SalesPermissionsAdmin() {
                       top: 'calc(100% + 6px)',
                       left: 0,
                       width: '210px',
-                      background: '#ffffff',
+                      background: 'var(--retail-card)',
                       borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
+                      border: '1px solid var(--retail-edge-strong)',
                       boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                       padding: '6px',
                       zIndex: 60,
@@ -759,8 +705,8 @@ export default function SalesPermissionsAdmin() {
                             padding: '7px 10px',
                             borderRadius: '8px',
                             border: 'none',
-                            background: isSelected ? '#eff6ff' : 'transparent',
-                            color: isSelected ? '#1a62ea' : '#1e293b',
+                            background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                            color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                             fontSize: '12px',
                             fontWeight: isSelected ? 700 : 500,
                             textAlign: 'left',
@@ -770,14 +716,14 @@ export default function SalesPermissionsAdmin() {
                             cursor: 'pointer',
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                           }}
                           onMouseLeave={(e) => {
                             if (!isSelected) e.currentTarget.style.background = 'transparent';
                           }}
                         >
                           <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                          {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -796,9 +742,9 @@ export default function SalesPermissionsAdmin() {
                     gap: '6px',
                     padding: '7px 14px',
                     borderRadius: '20px',
-                    border: locationFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                    background: locationFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                    color: locationFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                    border: locationFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
+                    background: locationFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                    color: locationFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
                     fontSize: '12.5px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -818,9 +764,9 @@ export default function SalesPermissionsAdmin() {
                       top: 'calc(100% + 6px)',
                       left: 0,
                       width: '230px',
-                      background: '#ffffff',
+                      background: 'var(--retail-card)',
                       borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
+                      border: '1px solid var(--retail-edge-strong)',
                       boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                       padding: '6px',
                       zIndex: 60,
@@ -840,8 +786,8 @@ export default function SalesPermissionsAdmin() {
                         padding: '7px 10px',
                         borderRadius: '8px',
                         border: 'none',
-                        background: locationFilter === 'ALL' ? '#eff6ff' : 'transparent',
-                        color: locationFilter === 'ALL' ? '#1a62ea' : '#1e293b',
+                        background: locationFilter === 'ALL' ? 'var(--retail-accent-soft)' : 'transparent',
+                        color: locationFilter === 'ALL' ? 'var(--retail-accent)' : 'var(--retail-ink)',
                         fontSize: '12px',
                         fontWeight: locationFilter === 'ALL' ? 700 : 500,
                         textAlign: 'left',
@@ -852,7 +798,7 @@ export default function SalesPermissionsAdmin() {
                       }}
                     >
                       <span>All Locations</span>
-                      {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                      {locationFilter === 'ALL' && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                     </button>
                     {locations.map((loc) => (
                       <button
@@ -867,8 +813,8 @@ export default function SalesPermissionsAdmin() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: locationFilter === loc.id ? '#eff6ff' : 'transparent',
-                          color: locationFilter === loc.id ? '#1a62ea' : '#1e293b',
+                          background: locationFilter === loc.id ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: locationFilter === loc.id ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: locationFilter === loc.id ? 700 : 500,
                           textAlign: 'left',
@@ -879,7 +825,7 @@ export default function SalesPermissionsAdmin() {
                         }}
                       >
                         <span>{loc.name}</span>
-                        {locationFilter === loc.id && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {locationFilter === loc.id && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     ))}
                   </div>
@@ -897,9 +843,9 @@ export default function SalesPermissionsAdmin() {
                     gap: '6px',
                     padding: '7px 14px',
                     borderRadius: '20px',
-                    border: capabilityFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                    background: capabilityFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                    color: capabilityFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                    border: capabilityFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
+                    background: capabilityFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                    color: capabilityFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
                     fontSize: '12.5px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -919,9 +865,9 @@ export default function SalesPermissionsAdmin() {
                       top: 'calc(100% + 6px)',
                       left: 0,
                       width: '230px',
-                      background: '#ffffff',
+                      background: 'var(--retail-card)',
                       borderRadius: '12px',
-                      border: '1px solid #e2e8f0',
+                      border: '1px solid var(--retail-edge-strong)',
                       boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                       padding: '6px',
                       zIndex: 60,
@@ -945,8 +891,8 @@ export default function SalesPermissionsAdmin() {
                             padding: '7px 10px',
                             borderRadius: '8px',
                             border: 'none',
-                            background: isSelected ? '#eff6ff' : 'transparent',
-                            color: isSelected ? '#1a62ea' : '#1e293b',
+                            background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                            color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                             fontSize: '12px',
                             fontWeight: isSelected ? 700 : 500,
                             textAlign: 'left',
@@ -957,7 +903,7 @@ export default function SalesPermissionsAdmin() {
                           }}
                         >
                           <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                          {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -973,7 +919,7 @@ export default function SalesPermissionsAdmin() {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#1a62ea',
+                    color: 'var(--retail-accent)',
                     fontSize: '12px',
                     fontWeight: 700,
                     cursor: 'pointer',
@@ -989,21 +935,21 @@ export default function SalesPermissionsAdmin() {
           {/* Structured File Table matching /admin/users & /admin/company */}
           <div
             style={{
-              background: '#ffffff',
-              border: '1px solid #eef2f6',
+              background: 'var(--retail-card)',
+              border: '1px solid var(--retail-edge)',
               borderRadius: '14px',
               overflow: 'hidden',
               boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
             }}
           >
-            <div style={{ overflowX: 'auto' }}>
+            <div className="admin-table-scroll" role="region" aria-label="Scrollable records" tabIndex={0}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr
                     style={{
-                      borderBottom: '1px solid #edf2f7',
-                      background: '#ffffff',
-                      color: '#64748b',
+                      borderBottom: '1px solid var(--retail-edge)',
+                      background: 'var(--retail-card)',
+                      color: 'var(--retail-muted)',
                       fontSize: '11px',
                       fontWeight: 750,
                       letterSpacing: '0.06em',
@@ -1021,7 +967,7 @@ export default function SalesPermissionsAdmin() {
                 <tbody>
                   {filteredUsers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
+                      <td colSpan={7} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
                         <div style={{ fontSize: '32px', marginBottom: '8px' }}><KeyRound size="1em" className="inline-icon" aria-hidden="true" /></div>
                         <strong>No staff accounts match your active filter</strong>
                         <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new user override.</p>
@@ -1045,16 +991,16 @@ export default function SalesPermissionsAdmin() {
                           key={user.id}
                           onClick={() => setSelectedUserId(user.id)}
                           style={{
-                            borderBottom: '1px solid #f1f5f9',
-                            background: isSelected ? '#edf4fe' : '#ffffff',
+                            borderBottom: '1px solid var(--retail-edge)',
+                            background: isSelected ? 'var(--retail-raised)' : 'var(--retail-card)',
                             cursor: 'pointer',
                             transition: 'background 0.12s ease',
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = '#f8fafd';
+                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                           }}
                           onMouseLeave={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = '#ffffff';
+                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-card)';
                           }}
                         >
                           {/* Col 1: Staff Account */}
@@ -1065,8 +1011,8 @@ export default function SalesPermissionsAdmin() {
                                   width: '32px',
                                   height: '32px',
                                   borderRadius: '50%',
-                                  background: user.role === 'STORE_MANAGER' ? '#ecfdf5' : user.role === 'CASHIER' ? '#eff6ff' : '#f1f5f9',
-                                  color: user.role === 'STORE_MANAGER' ? '#059669' : user.role === 'CASHIER' ? '#1a62ea' : '#475569',
+                                  background: user.role === 'STORE_MANAGER' ? 'light-dark(#ecfdf5, #1d352c)' : user.role === 'CASHIER' ? 'var(--retail-accent-soft)' : 'var(--retail-edge)',
+                                  color: user.role === 'STORE_MANAGER' ? 'light-dark(#047857, #8be0ad)' : user.role === 'CASHIER' ? 'var(--retail-accent)' : 'var(--retail-muted)',
                                   display: 'grid',
                                   placeItems: 'center',
                                   fontWeight: 800,
@@ -1079,7 +1025,7 @@ export default function SalesPermissionsAdmin() {
                               </div>
                               <div style={{ minWidth: 0 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontSize: '13px', fontWeight: 750, color: '#1e293b' }}>
+                                  <span style={{ fontSize: '13px', fontWeight: 750, color: 'var(--retail-ink)' }}>
                                     {user.name || user.email.split('@')[0]}
                                   </span>
                                   <span
@@ -1093,7 +1039,7 @@ export default function SalesPermissionsAdmin() {
                                     title={user.isActive ? 'Active Staff' : 'Inactive'}
                                   />
                                 </div>
-                                <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '1px' }}>
+                                <div style={{ fontSize: '12px', color: 'var(--retail-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '1px' }}>
                                   <span>{user.email}</span>
                                   <span>·</span>
                                   <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{user.employeeCode || user.id.slice(0, 8)}</span>
@@ -1115,20 +1061,20 @@ export default function SalesPermissionsAdmin() {
                                 fontWeight: 700,
                                 background:
                                   user.role === 'STORE_MANAGER'
-                                    ? '#ecfdf5'
+                                    ? 'light-dark(#ecfdf5, #1d352c)'
                                     : user.role === 'CASHIER'
-                                    ? '#eff6ff'
+                                    ? 'var(--retail-accent-soft)'
                                     : user.role.includes('WAREHOUSE')
-                                    ? '#eef2ff'
-                                    : '#f1f5f9',
+                                    ? 'light-dark(#eef2ff, #272541)'
+                                    : 'var(--retail-edge)',
                                 color:
                                   user.role === 'STORE_MANAGER'
-                                    ? '#059669'
+                                    ? 'light-dark(#047857, #8be0ad)'
                                     : user.role === 'CASHIER'
-                                    ? '#1a62ea'
+                                    ? 'var(--retail-accent)'
                                     : user.role.includes('WAREHOUSE')
-                                    ? '#4f46e5'
-                                    : '#475569',
+                                    ? 'light-dark(#4f46e5, #bdb6ff)'
+                                    : 'var(--retail-muted)',
                                 border: `1px solid ${
                                   user.role === 'STORE_MANAGER'
                                     ? '#a7f3d0'
@@ -1136,7 +1082,7 @@ export default function SalesPermissionsAdmin() {
                                     ? '#bfdbfe'
                                     : user.role.includes('WAREHOUSE')
                                     ? '#c7d2fe'
-                                    : '#e2e8f0'
+                                    : 'var(--retail-edge-strong)'
                                 }`,
                               }}
                             >
@@ -1147,11 +1093,11 @@ export default function SalesPermissionsAdmin() {
 
                           {/* Col 3: Assigned Store */}
                           <td style={{ padding: '13px 16px' }}>
-                            <div style={{ fontSize: '12.5px', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
-                              <span style={{ color: '#1a62ea', fontSize: '13px' }}><Store size="1em" className="inline-icon" aria-hidden="true" /></span>
+                            <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                              <span style={{ color: 'var(--retail-accent)', fontSize: '13px' }}><Store size="1em" className="inline-icon" aria-hidden="true" /></span>
                               <span>{scopes.length ? scopes[0] : 'All Branches'}</span>
                               {scopes.length > 1 && (
-                                <span style={{ fontSize: '10.5px', padding: '1px 5px', borderRadius: '4px', background: '#e2e8f0', color: '#475569', fontWeight: 750 }}>
+                                <span style={{ fontSize: '10.5px', padding: '1px 5px', borderRadius: '4px', background: 'var(--retail-edge-strong)', color: 'var(--retail-muted)', fontWeight: 750 }}>
                                   +{scopes.length - 1}
                                 </span>
                               )}
@@ -1169,9 +1115,9 @@ export default function SalesPermissionsAdmin() {
                                 borderRadius: '6px',
                                 fontSize: '11.5px',
                                 fontWeight: 750,
-                                background: user.canCancelSales ? '#ecfdf5' : '#f8fafc',
-                                color: user.canCancelSales ? '#059669' : '#94a3b8',
-                                border: `1px solid ${user.canCancelSales ? '#a7f3d0' : '#e2e8f0'}`,
+                                background: user.canCancelSales ? 'light-dark(#ecfdf5, #1d352c)' : 'var(--retail-raised)',
+                                color: user.canCancelSales ? 'light-dark(#047857, #8be0ad)' : '#94a3b8',
+                                border: `1px solid ${user.canCancelSales ? '#a7f3d0' : 'var(--retail-edge-strong)'}`,
                               }}
                             >
                               <span>{user.canCancelSales ? <><Check size="1em" className="inline-icon" aria-hidden="true" /> Authorized</> : <><X size="1em" className="inline-icon" aria-hidden="true" /> Blocked</>}</span>
@@ -1189,9 +1135,9 @@ export default function SalesPermissionsAdmin() {
                                 borderRadius: '6px',
                                 fontSize: '11.5px',
                                 fontWeight: 750,
-                                background: user.canProcessReturns ? '#ecfdf5' : '#f8fafc',
-                                color: user.canProcessReturns ? '#059669' : '#94a3b8',
-                                border: `1px solid ${user.canProcessReturns ? '#a7f3d0' : '#e2e8f0'}`,
+                                background: user.canProcessReturns ? 'light-dark(#ecfdf5, #1d352c)' : 'var(--retail-raised)',
+                                color: user.canProcessReturns ? 'light-dark(#047857, #8be0ad)' : '#94a3b8',
+                                border: `1px solid ${user.canProcessReturns ? '#a7f3d0' : 'var(--retail-edge-strong)'}`,
                               }}
                             >
                               <span>{user.canProcessReturns ? <><Check size="1em" className="inline-icon" aria-hidden="true" /> Authorized</> : <><X size="1em" className="inline-icon" aria-hidden="true" /> Blocked</>}</span>
@@ -1209,9 +1155,9 @@ export default function SalesPermissionsAdmin() {
                                 borderRadius: '6px',
                                 fontSize: '11.5px',
                                 fontWeight: 750,
-                                background: user.canCountStockAudits ? '#eff6ff' : '#f8fafc',
-                                color: user.canCountStockAudits ? '#1a62ea' : '#94a3b8',
-                                border: `1px solid ${user.canCountStockAudits ? '#bfdbfe' : '#e2e8f0'}`,
+                                background: user.canCountStockAudits ? 'var(--retail-accent-soft)' : 'var(--retail-raised)',
+                                color: user.canCountStockAudits ? 'var(--retail-accent)' : '#94a3b8',
+                                border: `1px solid ${user.canCountStockAudits ? '#bfdbfe' : 'var(--retail-edge-strong)'}`,
                               }}
                             >
                               <span>{user.canCountStockAudits ? <><Check size="1em" className="inline-icon" aria-hidden="true" /> Counter</> : <><X size="1em" className="inline-icon" aria-hidden="true" /> None</>}</span>
@@ -1228,9 +1174,9 @@ export default function SalesPermissionsAdmin() {
                                 style={{
                                   padding: '4px 10px',
                                   borderRadius: '6px',
-                                  background: '#eff6ff',
-                                  border: '1px solid #bfdbfe',
-                                  color: '#1a62ea',
+                                  background: 'light-dark(#eff6ff, #1d2733)',
+                                  border: '1px solid light-dark(#bfdbfe, #2e425b)',
+                                  color: 'var(--retail-accent)',
                                   fontSize: '12px',
                                   fontWeight: 700,
                                   cursor: 'pointer',
@@ -1248,7 +1194,7 @@ export default function SalesPermissionsAdmin() {
                                 style={{
                                   border: 'none',
                                   background: 'transparent',
-                                  color: '#64748b',
+                                  color: 'var(--retail-muted)',
                                   width: '28px',
                                   height: '28px',
                                   borderRadius: '6px',
@@ -1270,7 +1216,7 @@ export default function SalesPermissionsAdmin() {
                                   style={{
                                     border: 'none',
                                     background: 'transparent',
-                                    color: '#64748b',
+                                    color: 'var(--retail-muted)',
                                     width: '28px',
                                     height: '28px',
                                     borderRadius: '6px',
@@ -1292,9 +1238,9 @@ export default function SalesPermissionsAdmin() {
                                       top: 'calc(100% + 4px)',
                                       right: 0,
                                       zIndex: 60,
-                                      background: '#ffffff',
+                                      background: 'var(--retail-card)',
                                       borderRadius: '10px',
-                                      border: '1px solid #cbd5e1',
+                                      border: '1px solid light-dark(#cbd5e1, #34455a)',
                                       boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                                       minWidth: '200px',
                                       padding: '5px',
@@ -1303,31 +1249,31 @@ export default function SalesPermissionsAdmin() {
                                   >
                                     <div
                                       onClick={() => openEditModal(user)}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 650, color: '#1a62ea', cursor: 'pointer', borderRadius: '6px' }}
+                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 650, color: 'var(--retail-accent)', cursor: 'pointer', borderRadius: '6px' }}
                                     >
                                       <Pencil size="1em" className="inline-icon" aria-hidden="true" /> Configure Permissions...
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, true, true, false, 'Full POS Access')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#059669', cursor: 'pointer', borderRadius: '6px' }}
+                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'light-dark(#059669, #b5f5e1)', cursor: 'pointer', borderRadius: '6px' }}
                                     >
                                       <Zap size="1em" className="inline-icon" aria-hidden="true" /> Grant Voids & Returns
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, false, true, false, 'Returns Only')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#334155', cursor: 'pointer', borderRadius: '6px' }}
+                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'var(--retail-ink)', cursor: 'pointer', borderRadius: '6px' }}
                                     >
                                       <Zap size="1em" className="inline-icon" aria-hidden="true" /> Grant Returns Desk Only
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, false, false, true, 'Stock Auditor')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#4f46e5', cursor: 'pointer', borderRadius: '6px' }}
+                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'light-dark(#4f46e5, #bdb6ff)', cursor: 'pointer', borderRadius: '6px' }}
                                     >
                                       <Package size="1em" className="inline-icon" aria-hidden="true" /> Grant Stock Audit Count
                                     </div>
                                     <div
                                       onClick={() => void applyQuickPreset(user, false, false, false, 'Standard Sales (Revoked)')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#dc2626', cursor: 'pointer', borderRadius: '6px' }}
+                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'light-dark(#dc2626, #f2abab)', cursor: 'pointer', borderRadius: '6px' }}
                                     >
                                       <Ban size="1em" className="inline-icon" aria-hidden="true" /> Revoke All Overrides
                                     </div>
@@ -1337,7 +1283,7 @@ export default function SalesPermissionsAdmin() {
                                         setNotice(`Copied ${user.email} to clipboard.`);
                                         setActiveActionMenuId(null);
                                       }}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: '#64748b', cursor: 'pointer', borderRadius: '6px', borderTop: '1px solid #f1f5f9' }}
+                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'var(--retail-muted)', cursor: 'pointer', borderRadius: '6px', borderTop: '1px solid var(--retail-edge)' }}
                                     >
                                       <Clipboard size="1em" className="inline-icon" aria-hidden="true" /> Copy Email Address
                                     </div>
@@ -1361,10 +1307,10 @@ export default function SalesPermissionsAdmin() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '13px 20px',
-                background: '#ffffff',
-                borderTop: '1px solid #edf2f7',
+                background: 'var(--retail-card)',
+                borderTop: '1px solid var(--retail-edge)',
                 fontSize: '12px',
-                color: '#64748b',
+                color: 'var(--retail-muted)',
               }}
             >
               <span>
@@ -1381,58 +1327,58 @@ export default function SalesPermissionsAdmin() {
       {/* VIEW TAB 2: ROLE STANDARDS */}
       {activeTab === 'TEMPLATES' && (
         <div>
-          <div style={{ marginBottom: '18px', fontSize: '12.5px', fontWeight: 850, color: '#334155', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          <div style={{ marginBottom: '18px', fontSize: '12.5px', fontWeight: 850, color: 'var(--retail-ink)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             ORGANIZATIONAL ROLE PERMISSION STANDARDS
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px', marginBottom: '30px' }}>
             {/* Store Managers Standard */}
-            <div style={{ background: '#ffffff', borderRadius: '14px', border: '1px solid #eef2f6', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+            <div style={{ background: 'var(--retail-card)', borderRadius: '14px', border: '1px solid var(--retail-edge)', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#059669', background: '#ecfdf5', padding: '4px 10px', borderRadius: '20px', border: '1px solid #a7f3d0' }}>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: 'light-dark(#059669, #b5f5e1)', background: 'light-dark(#ecfdf5, #1e352a)', padding: '4px 10px', borderRadius: '20px', border: '1px solid light-dark(#a7f3d0, #31624b)' }}>
                   MANAGEMENT TIER
                 </span>
-                <span style={{ fontSize: '18px', fontWeight: 850, color: '#059669' }}>Full Privilege</span>
+                <span style={{ fontSize: '18px', fontWeight: 850, color: 'light-dark(#059669, #b5f5e1)' }}>Full Privilege</span>
               </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: '#0f172a' }}>Store Managers</h3>
-              <p style={{ fontSize: '13.5px', color: '#475569', lineHeight: 1.5, margin: '0 0 16px' }}>
+              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: 'var(--retail-ink)' }}>Store Managers</h3>
+              <p style={{ fontSize: '13.5px', color: 'var(--retail-muted)', lineHeight: 1.5, margin: '0 0 16px' }}>
                 Store supervisors have full operational authority to void mistake sales, authorize returns with refund voucher generation, and conduct stock audits.
               </p>
-              <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
+              <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
                 <strong>Authorized:</strong> Sales Cancellation <Check size="1em" className="inline-icon" aria-hidden="true" /> · Customer Returns <Check size="1em" className="inline-icon" aria-hidden="true" /> · Stock Audits <Check size="1em" className="inline-icon" aria-hidden="true" />
               </div>
             </div>
 
             {/* Cashiers Standard */}
-            <div style={{ background: '#ffffff', borderRadius: '14px', border: '1px solid #eef2f6', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+            <div style={{ background: 'var(--retail-card)', borderRadius: '14px', border: '1px solid var(--retail-edge)', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#1a62ea', background: '#eff6ff', padding: '4px 10px', borderRadius: '20px', border: '1px solid #bfdbfe' }}>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--retail-accent)', background: 'light-dark(#eff6ff, #1d2733)', padding: '4px 10px', borderRadius: '20px', border: '1px solid light-dark(#bfdbfe, #2e425b)' }}>
                   OPERATIONAL TIER
                 </span>
-                <span style={{ fontSize: '18px', fontWeight: 850, color: '#1a62ea' }}>Role Controlled</span>
+                <span style={{ fontSize: '18px', fontWeight: 850, color: 'var(--retail-accent)' }}>Role Controlled</span>
               </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: '#0f172a' }}>Cashier Terminal Stations</h3>
-              <p style={{ fontSize: '13.5px', color: '#475569', lineHeight: 1.5, margin: '0 0 16px' }}>
+              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: 'var(--retail-ink)' }}>Cashier Terminal Stations</h3>
+              <p style={{ fontSize: '13.5px', color: 'var(--retail-muted)', lineHeight: 1.5, margin: '0 0 16px' }}>
                 Standard cashiers can execute checkouts. Senior cashiers or returns desk staff can be provisioned with returns handling privileges as needed.
               </p>
-              <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
+              <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
                 <strong>Authorized:</strong> Sales Cancellation (Discretionary) · Customer Returns (Configurable)
               </div>
             </div>
 
             {/* Warehouse Standard */}
-            <div style={{ background: '#ffffff', borderRadius: '14px', border: '1px solid #eef2f6', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+            <div style={{ background: 'var(--retail-card)', borderRadius: '14px', border: '1px solid var(--retail-edge)', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#4f46e5', background: '#eef2ff', padding: '4px 10px', borderRadius: '20px', border: '1px solid #c7d2fe' }}>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: 'light-dark(#4f46e5, #bdb6ff)', background: 'light-dark(#eef2ff, #1d2233)', padding: '4px 10px', borderRadius: '20px', border: '1px solid light-dark(#c7d2fe, #2d3659)' }}>
                   LOGISTICS TIER
                 </span>
-                <span style={{ fontSize: '18px', fontWeight: 850, color: '#4f46e5' }}>Stock Auditor</span>
+                <span style={{ fontSize: '18px', fontWeight: 850, color: 'light-dark(#4f46e5, #bdb6ff)' }}>Stock Auditor</span>
               </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: '#0f172a' }}>Warehouse Logistics</h3>
-              <p style={{ fontSize: '13.5px', color: '#475569', lineHeight: 1.5, margin: '0 0 16px' }}>
+              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: 'var(--retail-ink)' }}>Warehouse Logistics</h3>
+              <p style={{ fontSize: '13.5px', color: 'var(--retail-muted)', lineHeight: 1.5, margin: '0 0 16px' }}>
                 Warehouse and depot managers hold physical inventory counting authority. They cannot execute POS sales cancellations or register refunds.
               </p>
-              <div style={{ fontSize: '12.5px', color: '#334155', background: '#f8fafc', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 550 }}>
+              <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
                 <strong>Authorized:</strong> Stock Audit Count <Check size="1em" className="inline-icon" aria-hidden="true" /> · Sales POS (Restricted <X size="1em" className="inline-icon" aria-hidden="true" />)
               </div>
             </div>
@@ -1441,30 +1387,30 @@ export default function SalesPermissionsAdmin() {
           {/* Deep Invariant Architecture Callout */}
           <div
             style={{
-              background: '#ffffff',
+              background: 'var(--retail-card)',
               borderRadius: '14px',
-              border: '1px solid #eef2f6',
+              border: '1px solid var(--retail-edge)',
               padding: '24px',
               boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
               <span style={{ fontSize: '22px' }}><ShieldCheck size="1em" className="inline-icon" aria-hidden="true" /></span>
-              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
                 OD-08 Security Invariant Architecture
               </h2>
             </div>
-            <div style={{ fontSize: '13.5px', color: '#334155', lineHeight: 1.6, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginTop: '14px' }}>
+            <div style={{ fontSize: '13.5px', color: 'var(--retail-ink)', lineHeight: 1.6, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginTop: '14px' }}>
               <div>
-                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px', fontSize: '14px' }}>1. Scoped POS Enforcement</strong>
+                <strong style={{ color: 'var(--retail-ink)', display: 'block', marginBottom: '4px', fontSize: '14px' }}>1. Scoped POS Enforcement</strong>
                 Permissions are validated cryptographically against JWT tokens and store location scopes upon invoice cancellation or return initiation.
               </div>
               <div>
-                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px', fontSize: '14px' }}>2. Mandatory Cancellation Reason</strong>
+                <strong style={{ color: 'var(--retail-ink)', display: 'block', marginBottom: '4px', fontSize: '14px' }}>2. Mandatory Cancellation Reason</strong>
                 Every invoice void requires selecting a business cancellation code and entering an audit justification note recorded in the immutable ledger.
               </div>
               <div>
-                <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px', fontSize: '14px' }}>3. Segregation of Stock Auditing</strong>
+                <strong style={{ color: 'var(--retail-ink)', display: 'block', marginBottom: '4px', fontSize: '14px' }}>3. Segregation of Stock Auditing</strong>
                 Stock audit count permissions remain strictly decoupled from cashier sales checkout, preventing unmonitored inventory adjustments.
               </div>
             </div>
@@ -1475,6 +1421,7 @@ export default function SalesPermissionsAdmin() {
       {/* MODAL: EDIT USER PERMISSIONS (Matching modal style of /admin/users, /admin/company, /admin/discount-limits) */}
       {editingUser && (
         <div
+          className="admin-dialog-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1491,7 +1438,7 @@ export default function SalesPermissionsAdmin() {
         >
           <div
             style={{
-              background: '#ffffff',
+              background: 'var(--retail-card)',
               borderRadius: '16px',
               width: 'min(520px, 100%)',
               boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
@@ -1500,10 +1447,10 @@ export default function SalesPermissionsAdmin() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
                   Configure Staff Sales Permissions
                 </h2>
-                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>
+                <div style={{ fontSize: '12.5px', color: 'var(--retail-muted)', marginTop: '2px' }}>
                   {editingUser.name || editingUser.email} · {roleLabels[editingUser.role] || editingUser.role}
                 </div>
               </div>
@@ -1511,7 +1458,7 @@ export default function SalesPermissionsAdmin() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setEditingUser(null)}
-                style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '14px', color: '#64748b' }}
+                style={{ border: 'none', background: 'var(--retail-edge)', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '14px', color: 'var(--retail-muted)' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
@@ -1519,57 +1466,57 @@ export default function SalesPermissionsAdmin() {
 
             <form onSubmit={handleSaveModal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {/* Permission Toggles List */}
-              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ background: 'var(--retail-raised)', padding: '16px', borderRadius: '12px', border: '1px solid var(--retail-edge-strong)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {/* Toggle 1: Cancel Sales */}
                 <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <div>
-                    <strong style={{ fontSize: '13px', color: '#1e293b', display: 'block' }}>Void & Cancel Finalized Sales Invoices</strong>
-                    <span style={{ fontSize: '11.5px', color: '#64748b' }}>Permits cancelling receipts on POS terminals (Requires justification)</span>
+                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Void & Cancel Finalized Sales Invoices</strong>
+                    <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits cancelling receipts on POS terminals (Requires justification)</span>
                   </div>
                   <input
                     type="checkbox"
                     checked={modalCanCancel}
                     onChange={(e) => setModalCanCancel(e.target.checked)}
-                    style={{ width: '18px', height: '18px', accentColor: '#1a62ea', cursor: 'pointer' }}
+                    style={{ width: '18px', height: '18px', accentColor: 'var(--retail-accent)', cursor: 'pointer' }}
                   />
                 </label>
 
-                <div style={{ height: '1px', background: '#eef2f6' }} />
+                <div style={{ height: '1px', background: 'var(--retail-edge)' }} />
 
                 {/* Toggle 2: Process Returns */}
                 <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <div>
-                    <strong style={{ fontSize: '13px', color: '#1e293b', display: 'block' }}>Process Customer Returns & Refunds</strong>
-                    <span style={{ fontSize: '11.5px', color: '#64748b' }}>Permits accepting returned items and issuing credit vouchers</span>
+                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Process Customer Returns & Refunds</strong>
+                    <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits accepting returned items and issuing credit vouchers</span>
                   </div>
                   <input
                     type="checkbox"
                     checked={modalCanReturn}
                     onChange={(e) => setModalCanReturn(e.target.checked)}
-                    style={{ width: '18px', height: '18px', accentColor: '#1a62ea', cursor: 'pointer' }}
+                    style={{ width: '18px', height: '18px', accentColor: 'var(--retail-accent)', cursor: 'pointer' }}
                   />
                 </label>
 
-                <div style={{ height: '1px', background: '#eef2f6' }} />
+                <div style={{ height: '1px', background: 'var(--retail-edge)' }} />
 
                 {/* Toggle 3: Stock Audits */}
                 <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <div>
-                    <strong style={{ fontSize: '13px', color: '#1e293b', display: 'block' }}>Conduct Physical Stock Count Audits</strong>
-                    <span style={{ fontSize: '11.5px', color: '#64748b' }}>Permits counting inventory on /audits during stock reconciliation</span>
+                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Conduct Physical Stock Count Audits</strong>
+                    <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits counting inventory on /audits during stock reconciliation</span>
                   </div>
                   <input
                     type="checkbox"
                     checked={modalCanAudit}
                     onChange={(e) => setModalCanAudit(e.target.checked)}
-                    style={{ width: '18px', height: '18px', accentColor: '#1a62ea', cursor: 'pointer' }}
+                    style={{ width: '18px', height: '18px', accentColor: 'var(--retail-accent)', cursor: 'pointer' }}
                   />
                 </label>
               </div>
 
               {/* Justification Reason Field */}
               <div>
-                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 750, color: '#334155', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 750, color: 'var(--retail-ink)', marginBottom: '6px' }}>
                   Audit Justification Reason (Required by Invariant OD-08)
                 </label>
                 <textarea
@@ -1581,10 +1528,10 @@ export default function SalesPermissionsAdmin() {
                     width: '100%',
                     padding: '10px 12px',
                     borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
+                    border: '1px solid light-dark(#cbd5e1, #34455a)',
                     fontSize: '13px',
                     fontFamily: 'inherit',
-                    color: '#0f172a',
+                    color: 'var(--retail-ink)',
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
@@ -1597,7 +1544,7 @@ export default function SalesPermissionsAdmin() {
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', background: '#f1f5f9', border: 'none', color: '#475569', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
+                  style={{ padding: '9px 16px', borderRadius: '8px', background: 'var(--retail-edge)', border: 'none', color: 'var(--retail-muted)', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
                 >
                   Cancel
                 </button>
@@ -1607,7 +1554,7 @@ export default function SalesPermissionsAdmin() {
                   style={{
                     padding: '9px 20px',
                     borderRadius: '8px',
-                    background: '#1a62ea',
+                    background: 'var(--retail-accent)',
                     border: 'none',
                     color: '#ffffff',
                     fontSize: '13px',
@@ -1627,6 +1574,7 @@ export default function SalesPermissionsAdmin() {
       {/* MODAL: AUDIT TRAIL LOGS */}
       {isAuditModalOpen && (
         <div
+          className="admin-dialog-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1643,7 +1591,7 @@ export default function SalesPermissionsAdmin() {
         >
           <div
             style={{
-              background: '#ffffff',
+              background: 'var(--retail-card)',
               borderRadius: '16px',
               width: 'min(720px, 100%)',
               maxHeight: '85vh',
@@ -1657,10 +1605,10 @@ export default function SalesPermissionsAdmin() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ fontSize: '22px' }}><ClipboardCheck size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <div>
-                  <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
+                  <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
                     Sales Permission Audit Trail (OD-08)
                   </h2>
-                  <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--retail-muted)' }}>
                     Immutable historical ledger of sales void and return authorizations
                   </span>
                 </div>
@@ -1669,19 +1617,19 @@ export default function SalesPermissionsAdmin() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsAuditModalOpen(false)}
-                style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '15px', fontWeight: 800, color: '#64748b' }}
+                style={{ border: 'none', background: 'var(--retail-edge)', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '15px', fontWeight: 800, color: 'var(--retail-muted)' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 
-            <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '12px 14px', border: '1px solid #e2e8f0', marginBottom: '16px', fontSize: '12.5px', color: '#334155', lineHeight: 1.5 }}>
+            <div style={{ background: 'var(--retail-raised)', borderRadius: '10px', padding: '12px 14px', border: '1px solid var(--retail-edge-strong)', marginBottom: '16px', fontSize: '12.5px', color: 'var(--retail-ink)', lineHeight: 1.5 }}>
               Each time an administrator updates sales permissions, the system immutably logs the <strong>target account</strong>, <strong>administrator account ID</strong>, <strong>timestamp</strong>, and <strong>mandatory business reason</strong>.
             </div>
 
             {/* Audit Log Entries Table */}
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden', marginBottom: '18px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 150px 110px 1fr', padding: '9px 12px', background: '#f1f5f9', fontSize: '10.5px', fontWeight: 800, color: '#334155', textTransform: 'uppercase' }}>
+            <div style={{ border: '1px solid var(--retail-edge-strong)', borderRadius: '10px', overflow: 'hidden', marginBottom: '18px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 150px 110px 1fr', padding: '9px 12px', background: 'var(--retail-edge)', fontSize: '10.5px', fontWeight: 800, color: 'var(--retail-ink)', textTransform: 'uppercase' }}>
                 <div>Timestamp</div>
                 <div>Target Account</div>
                 <div>Privilege Delta</div>
@@ -1695,23 +1643,23 @@ export default function SalesPermissionsAdmin() {
                     display: 'grid',
                     gridTemplateColumns: '120px 150px 110px 1fr',
                     padding: '11px 12px',
-                    borderTop: '1px solid #f1f5f9',
+                    borderTop: '1px solid var(--retail-edge)',
                     fontSize: '12px',
-                    color: '#1e293b',
+                    color: 'var(--retail-ink)',
                     alignItems: 'center',
                   }}
                 >
-                  <div style={{ color: '#64748b', fontSize: '11.5px' }}>{entry.time}</div>
+                  <div style={{ color: 'var(--retail-muted)', fontSize: '11.5px' }}>{entry.time}</div>
                   <div style={{ fontWeight: 700 }}>{entry.target.split('@')[0]}</div>
                   <div>
-                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: '#eff6ff', color: '#1a62ea', fontWeight: 750, fontSize: '11px' }}>
+                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'light-dark(#eff6ff, #1d2733)', color: 'var(--retail-accent)', fontWeight: 750, fontSize: '11px' }}>
                       {entry.delta}
                     </span>
                   </div>
-                  <div style={{ color: '#475569', fontSize: '11.5px' }}>{entry.reason}</div>
+                  <div style={{ color: 'var(--retail-muted)', fontSize: '11.5px' }}>{entry.reason}</div>
                 </div>
               ))}
-              <p style={{ margin: 0, padding: 18, color: '#64748b', fontSize: 13 }}>No permission changes have been recorded yet.</p>
+              <p style={{ margin: 0, padding: 18, color: 'var(--retail-muted)', fontSize: 13 }}>No permission changes have been recorded yet.</p>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -1721,7 +1669,7 @@ export default function SalesPermissionsAdmin() {
                 style={{
                   padding: '8px 18px',
                   borderRadius: '8px',
-                  background: '#1a62ea',
+                  background: 'var(--retail-accent)',
                   color: '#ffffff',
                   border: 'none',
                   fontSize: '12.5px',
@@ -1739,6 +1687,7 @@ export default function SalesPermissionsAdmin() {
       {/* MODAL: BULK PRESET POLICY */}
       {isBulkModalOpen && (
         <div
+          className="admin-dialog-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1755,7 +1704,7 @@ export default function SalesPermissionsAdmin() {
         >
           <div
             style={{
-              background: '#ffffff',
+              background: 'var(--retail-card)',
               borderRadius: '16px',
               width: 'min(480px, 100%)',
               boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
@@ -1763,14 +1712,14 @@ export default function SalesPermissionsAdmin() {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: '#0f172a' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
                 Bulk Permissions Preset
               </h2>
               <button
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsBulkModalOpen(false)}
-                style={{ border: 'none', background: '#f1f5f9', borderRadius: '8px', width: '28px', height: '28px', cursor: 'pointer', fontSize: '14px', color: '#64748b' }}
+                style={{ border: 'none', background: 'var(--retail-edge)', borderRadius: '8px', width: '28px', height: '28px', cursor: 'pointer', fontSize: '14px', color: 'var(--retail-muted)' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
@@ -1778,13 +1727,13 @@ export default function SalesPermissionsAdmin() {
 
             <form onSubmit={handleApplyBulk} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: '#334155', marginBottom: '5px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                   Target Role
                 </label>
                 <select
                   value={bulkRole}
                   onChange={(e) => setBulkRole(e.target.value as any)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', fontWeight: 600, color: '#0f172a' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '12.5px', fontWeight: 600, color: 'var(--retail-ink)' }}
                 >
                   <option value="CASHIER">All Cashier Stations</option>
                   <option value="STORE_MANAGER">All Store Managers</option>
@@ -1792,38 +1741,38 @@ export default function SalesPermissionsAdmin() {
                 </select>
               </div>
 
-              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: '#1e293b', cursor: 'pointer' }}>
+              <div style={{ background: 'var(--retail-raised)', padding: '12px', borderRadius: '10px', border: '1px solid var(--retail-edge-strong)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--retail-ink)', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={bulkCanCancel}
                     onChange={(e) => setBulkCanCancel(e.target.checked)}
-                    style={{ accentColor: '#1a62ea' }}
+                    style={{ accentColor: 'var(--retail-accent)' }}
                   />
                   <span>Allow Voiding / Cancelling Sales</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: '#1e293b', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--retail-ink)', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={bulkCanReturn}
                     onChange={(e) => setBulkCanReturn(e.target.checked)}
-                    style={{ accentColor: '#1a62ea' }}
+                    style={{ accentColor: 'var(--retail-accent)' }}
                   />
                   <span>Allow Processing Customer Returns</span>
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: '#1e293b', cursor: 'pointer' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--retail-ink)', cursor: 'pointer' }}>
                   <input
                     type="checkbox"
                     checked={bulkCanAudit}
                     onChange={(e) => setBulkCanAudit(e.target.checked)}
-                    style={{ accentColor: '#1a62ea' }}
+                    style={{ accentColor: 'var(--retail-accent)' }}
                   />
                   <span>Allow Conducting Stock Audits</span>
                 </label>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: '#334155', marginBottom: '5px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                   Audit Justification Reason
                 </label>
                 <input
@@ -1831,7 +1780,7 @@ export default function SalesPermissionsAdmin() {
                   value={bulkReason}
                   onChange={(e) => setBulkReason(e.target.value)}
                   placeholder="Reason for role-wide update..."
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '12.5px', fontWeight: 550, color: '#0f172a' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '12.5px', fontWeight: 550, color: 'var(--retail-ink)' }}
                   required
                 />
               </div>
@@ -1840,13 +1789,13 @@ export default function SalesPermissionsAdmin() {
                 <button
                   type="button"
                   onClick={() => setIsBulkModalOpen(false)}
-                  style={{ padding: '8px 14px', borderRadius: '8px', background: '#f1f5f9', border: 'none', color: '#475569', fontSize: '12.5px', fontWeight: 650, cursor: 'pointer' }}
+                  style={{ padding: '8px 14px', borderRadius: '8px', background: 'var(--retail-edge)', border: 'none', color: 'var(--retail-muted)', fontSize: '12.5px', fontWeight: 650, cursor: 'pointer' }}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  style={{ padding: '8px 18px', borderRadius: '8px', background: '#1a62ea', border: 'none', color: '#ffffff', fontSize: '12.5px', fontWeight: 750, cursor: 'pointer', boxShadow: '0 2px 6px rgba(26, 98, 234, 0.28)' }}
+                  style={{ padding: '8px 18px', borderRadius: '8px', background: 'var(--retail-accent)', border: 'none', color: '#ffffff', fontSize: '12.5px', fontWeight: 750, cursor: 'pointer', boxShadow: '0 2px 6px rgba(26, 98, 234, 0.28)' }}
                 >
                   Apply to All {roleLabels[bulkRole]}s
                 </button>

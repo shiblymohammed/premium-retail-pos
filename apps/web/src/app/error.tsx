@@ -21,9 +21,9 @@ export default function GlobalError({
         padding: '60px 24px',
         maxWidth: '560px',
         margin: '80px auto',
-        background: '#ffffff',
+        background: 'var(--retail-card)',
         borderRadius: '16px',
-        border: '1px solid #fee2e2',
+        border: '1px solid light-dark(#fee2e2, #542a2a)',
         boxShadow: '0 8px 30px rgba(220, 38, 38, 0.08)',
         textAlign: 'center',
       }}
@@ -33,8 +33,8 @@ export default function GlobalError({
           width: '54px',
           height: '54px',
           borderRadius: '50%',
-          background: '#fef2f2',
-          color: '#dc2626',
+          background: 'light-dark(#fef2f2, #331d1d)',
+          color: 'light-dark(#dc2626, #f2abab)',
           fontSize: '26px',
           display: 'grid',
           placeItems: 'center',
@@ -44,10 +44,10 @@ export default function GlobalError({
         <TriangleAlert size="1em" className="inline-icon" aria-hidden="true" />
       </div>
 
-      <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>
+      <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--retail-ink)', margin: '0 0 8px' }}>
         Operational View Unavailable
       </h2>
-      <p style={{ color: '#64748b', fontSize: '13px', lineHeight: 1.5, margin: '0 0 24px' }}>
+      <p style={{ color: 'var(--retail-muted)', fontSize: '13px', lineHeight: 1.5, margin: '0 0 24px' }}>
         An unexpected error occurred while loading this workspace view ({error.message || 'Unknown network error'}).
       </p>
 
@@ -58,7 +58,7 @@ export default function GlobalError({
           style={{
             padding: '10px 20px',
             borderRadius: '8px',
-            background: '#1a62ea',
+            background: 'var(--retail-accent)',
             color: '#ffffff',
             border: 'none',
             fontSize: '13px',
@@ -74,9 +74,9 @@ export default function GlobalError({
           style={{
             padding: '10px 20px',
             borderRadius: '8px',
-            background: '#f1f5f9',
-            color: '#334155',
-            border: '1px solid #cbd5e1',
+            background: 'var(--retail-edge)',
+            color: 'var(--retail-ink)',
+            border: '1px solid light-dark(#cbd5e1, #34455a)',
             fontSize: '13px',
             fontWeight: 700,
             cursor: 'pointer',
