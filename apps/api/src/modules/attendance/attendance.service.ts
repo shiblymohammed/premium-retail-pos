@@ -1,5 +1,4 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { Prisma, Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
@@ -12,21 +11,21 @@ type EmployeeContext = {
   isActive: boolean;
   locationId: string;
   user: { isActive: boolean };
-  location: { id: string; name: string; isActive: boolean; attendanceStartTime: string | null; attendanceQrRequired: boolean; company: { timezone: string } };
+  location: { id: string; name: string; isActive: boolean; attendanceStartTime: string | null; company: { timezone: string } };
 };
 
 const MANAGERS: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER];
 
 @Injectable()
 export class AttendanceService {
-  constructor(private readonly prisma: PrismaService, private readonly jwt: JwtService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async getToday(actor: RequestUser) {
     const employee = await this.employeeFor(actor);
     const { start, end } = localDayRange(new Date(), employee.location.company.timezone);
     const punches = await this.prisma.attendance.findMany({
       where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
-      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, qrVerified: true, originalTimestamp: true, correctionReason: true },
+      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
       orderBy: { punchTimestamp: 'asc' },
     });
     const last = punches.at(-1);
@@ -37,7 +36,6 @@ export class AttendanceService {
       localDate: new Intl.DateTimeFormat('en-CA', { timeZone: employee.location.company.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()),
       timezone: employee.location.company.timezone,
       targetStartTime: employee.location.attendanceStartTime,
-      qrRequired: employee.location.attendanceQrRequired,
       status,
       nextAction: status === 'WORKING' ? 'OUT' : status === 'NOT_STARTED' ? 'IN' : null,
       punches,
@@ -59,7 +57,7 @@ export class AttendanceService {
     const end = localMidnightUtc(endYear, endMonth, endDay, employee.location.company.timezone);
     const punches = await this.prisma.attendance.findMany({
       where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
-      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, qrVerified: true, originalTimestamp: true, correctionReason: true },
+      select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
       orderBy: { punchTimestamp: 'asc' },
     });
     const byDay = new Map<string, typeof punches>();
@@ -87,7 +85,7 @@ export class AttendanceService {
     return { employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode }, location: { id: employee.location.id, name: employee.location.name }, timezone: employee.location.company.timezone, days };
   }
 
-  async punch(actor: RequestUser, qrToken?: string) {
+  async punch(actor: RequestUser) {
     return this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT "id" FROM "employees" WHERE "user_id" = ${actor.userId} FOR UPDATE
@@ -100,14 +98,12 @@ export class AttendanceService {
       if (!employee || !employee.isActive || !employee.user.isActive) throw new ForbiddenException('This employee profile is inactive');
       if (!employee.location.isActive) throw new ForbiddenException('The assigned workplace is inactive');
       if (actor.role !== Role.SUPER_ADMIN && !actor.locationIds.includes(employee.locationId)) throw new ForbiddenException('You are not authorized to mark attendance for this workplace');
-      if (employee.location.attendanceQrRequired && !qrToken) throw new ConflictException('Scan the current workplace attendance QR code before marking attendance');
-      const qrVerified = qrToken ? await this.verifyLocationQr(qrToken, employee.locationId) : false;
 
       const now = new Date();
       const { start, end } = localDayRange(now, employee.location.company.timezone);
       const punches = await tx.attendance.findMany({
         where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
-        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, qrVerified: true, originalTimestamp: true, correctionReason: true },
+        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
         orderBy: { punchTimestamp: 'asc' },
       });
       const last = punches.at(-1);
@@ -116,8 +112,8 @@ export class AttendanceService {
       const targetStartTime = punchType === 'IN' ? employee.location.attendanceStartTime ?? null : null;
       const isLate = punchType === 'IN' && targetStartTime !== null && isAfterLocalTarget(now, targetStartTime, employee.location.company.timezone);
       const punch = await tx.attendance.create({
-        data: { employeeId: employee.id, locationId: employee.locationId, punchType, punchTimestamp: now, isLate, targetStartTime, qrVerified },
-        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, qrVerified: true },
+        data: { employeeId: employee.id, locationId: employee.locationId, punchType, punchTimestamp: now, isLate, targetStartTime },
+        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true },
       });
       return {
         employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode },
@@ -145,7 +141,7 @@ export class AttendanceService {
         id: true, employeeCode: true, firstName: true, lastName: true,
         attendances: {
           where: { punchTimestamp: { gte: start, lt: end } },
-          select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, qrVerified: true, originalTimestamp: true, correctionReason: true },
+          select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, originalTimestamp: true, correctionReason: true },
           orderBy: { punchTimestamp: 'asc' },
         },
       },
@@ -157,7 +153,6 @@ export class AttendanceService {
       localDate,
       timezone: location.company.timezone,
       targetStartTime: location.attendanceStartTime,
-      qrRequired: location.attendanceQrRequired,
       employees: employees.map((employee) => {
         const clockIn = employee.attendances.find((punch) => punch.punchType === 'IN') ?? null;
         const clockOut = employee.attendances.find((punch) => punch.punchType === 'OUT') ?? null;
@@ -170,7 +165,6 @@ export class AttendanceService {
           clockOutAt: clockOut?.punchTimestamp ?? null,
           isLate: clockIn?.isLate ?? false,
           targetStartTime: clockIn?.targetStartTime ?? location.attendanceStartTime,
-          qrVerified: clockIn?.qrVerified ?? false,
           clockInCorrectionReason: clockIn?.correctionReason ?? null,
           clockOutCorrectionReason: clockOut?.correctionReason ?? null,
         };
@@ -181,7 +175,7 @@ export class AttendanceService {
   async getLocationTargetStartTime(locationId: string, actor: RequestUser) {
     this.assertManager(actor);
     this.assertLocationScope(locationId, actor);
-    const location = await this.prisma.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true, attendanceQrRequired: true } });
+    const location = await this.prisma.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true } });
     if (!location) throw new NotFoundException('Location not found');
     return location;
   }
@@ -190,9 +184,9 @@ export class AttendanceService {
     this.assertManager(actor);
     this.assertLocationScope(locationId, actor);
     return this.prisma.$transaction(async (tx) => {
-      const location = await tx.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true, attendanceQrRequired: true } });
+      const location = await tx.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceStartTime: true } });
       if (!location) throw new NotFoundException('Location not found');
-      const updated = await tx.location.update({ where: { id: locationId }, data: { attendanceStartTime: startTime }, select: { id: true, name: true, attendanceStartTime: true, attendanceQrRequired: true } });
+      const updated = await tx.location.update({ where: { id: locationId }, data: { attendanceStartTime: startTime }, select: { id: true, name: true, attendanceStartTime: true } });
       await tx.auditEvent.create({ data: {
         actorId: actor.userId,
         action: 'ATTENDANCE_START_TIME_UPDATED',
@@ -200,38 +194,6 @@ export class AttendanceService {
         targetId: locationId,
         beforeValue: JSON.stringify({ attendanceStartTime: location.attendanceStartTime }),
         afterValue: JSON.stringify({ attendanceStartTime: startTime }),
-      } });
-      return updated;
-    });
-  }
-
-  async issueLocationQr(locationId: string, actor: RequestUser) {
-    this.assertManager(actor);
-    this.assertLocationScope(locationId, actor);
-    const location = await this.prisma.location.findUnique({ where: { id: locationId }, select: { id: true, name: true } });
-    if (!location) throw new NotFoundException('Location not found');
-    const token = await this.jwt.signAsync(
-      { purpose: 'attendance-check-in', locationId },
-      { expiresIn: 60, audience: 'attendance-qr', issuer: 'premium-retail-pos' },
-    );
-    const claims = this.jwt.decode(token) as { exp: number };
-    return { location, token, expiresAt: new Date(claims.exp * 1000).toISOString(), rotationSeconds: 60 };
-  }
-
-  async setLocationQrRequirement(locationId: string, required: boolean, actor: RequestUser) {
-    this.assertManager(actor);
-    this.assertLocationScope(locationId, actor);
-    return this.prisma.$transaction(async (tx) => {
-      const location = await tx.location.findUnique({ where: { id: locationId }, select: { id: true, name: true, attendanceQrRequired: true } });
-      if (!location) throw new NotFoundException('Location not found');
-      const updated = await tx.location.update({ where: { id: locationId }, data: { attendanceQrRequired: required }, select: { id: true, name: true, attendanceQrRequired: true } });
-      await tx.auditEvent.create({ data: {
-        actorId: actor.userId,
-        action: 'ATTENDANCE_QR_REQUIREMENT_UPDATED',
-        targetEntity: 'Location',
-        targetId: locationId,
-        beforeValue: JSON.stringify({ attendanceQrRequired: location.attendanceQrRequired }),
-        afterValue: JSON.stringify({ attendanceQrRequired: required }),
       } });
       return updated;
     });
@@ -350,16 +312,6 @@ export class AttendanceService {
       },
       employees: employeeReports,
     };
-  }
-
-  private async verifyLocationQr(token: string, locationId: string) {
-    try {
-      const claims = await this.jwt.verifyAsync<{ purpose: string; locationId: string }>(token, { audience: 'attendance-qr', issuer: 'premium-retail-pos', algorithms: ['HS256'] });
-      if (claims.purpose !== 'attendance-check-in' || claims.locationId !== locationId) throw new Error('QR scope mismatch');
-      return true;
-    } catch {
-      throw new ForbiddenException('The workplace QR code is invalid, expired, or belongs to another location');
-    }
   }
 
   private async employeeFor(actor: RequestUser): Promise<EmployeeContext> {

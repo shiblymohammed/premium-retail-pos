@@ -606,3 +606,30 @@ button.chip:hover { filter: brightness(0.95); }
 
 .productImage { display: block; object-fit: cover; background: var(--retail-edge); }
 .imagePreview { display: block; width: 88px; height: 88px; margin-top: 10px; border: 1px solid var(--retail-edge-strong); border-radius: 12px; object-fit: cover; background: var(--retail-card); }
+
+.intakeFields, .intakeLine {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.intakeLine {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  align-items: end;
+  border: 1px solid var(--retail-edge);
+  border-radius: 12px;
+  padding: 0.75rem;
+}
+
+.intakeLine legend {
+  padding-inline: 0.35rem;
+  font-weight: 650;
+}
+
+.intakeResults {
+  display: grid;
+  gap: 0.35rem;
+}

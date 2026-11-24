@@ -5,11 +5,6 @@ import { AttendanceService } from './attendance.service';
 describe('AttendanceService basic daily punches', () => {
   afterEach(() => jest.useRealTimers());
   const actor = { userId: 'user-id', email: 'staff@example.test', role: Role.SUPER_ADMIN, locationIds: [] };
-  const jwt = {
-    signAsync: jest.fn().mockResolvedValue('signed-qr-token'),
-    decode: jest.fn().mockReturnValue({ exp: 1_800_000_060 }),
-    verifyAsync: jest.fn().mockResolvedValue({ purpose: 'attendance-check-in', locationId: 'location-id' }),
-  };
   const employee = {
     id: 'employee-id', firstName: 'Taylor', lastName: 'Staff', employeeCode: 'EMP-1', isActive: true, locationId: 'location-id',
     user: { isActive: true }, location: { id: 'location-id', name: 'Store', isActive: true, attendanceStartTime: null, company: { timezone: 'Asia/Kolkata' } },
@@ -29,7 +24,7 @@ describe('AttendanceService basic daily punches', () => {
       attendance: tx.attendance,
       $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
     };
-    return { service: new AttendanceService(prisma as any, jwt as any), prisma, tx };
+    return { service: new AttendanceService(prisma as any), prisma, tx };
   }
 
   it('starts a workday with a server-timestamped IN punch', async () => {
@@ -86,14 +81,14 @@ describe('AttendanceService basic daily punches', () => {
       }]) },
     };
     const manager = { ...actor, role: Role.STORE_MANAGER, locationIds: ['location-id'] };
-    const result = await new AttendanceService(prisma as any, jwt as any).getLocationAttendanceToday('location-id', manager);
+    const result = await new AttendanceService(prisma as any).getLocationAttendanceToday('location-id', manager);
     expect(result.employees[0]).toEqual(expect.objectContaining({ isLate: true, clockInAt, targetStartTime: '09:30' }));
   });
 
   it('blocks managers from viewing attendance outside their location scope', async () => {
     const prisma = { location: { findUnique: jest.fn() }, employee: { findMany: jest.fn() } };
     const manager = { ...actor, role: Role.STORE_MANAGER, locationIds: ['another-location'] };
-    await expect(new AttendanceService(prisma as any, jwt as any).getLocationAttendanceToday('location-id', manager)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(new AttendanceService(prisma as any).getLocationAttendanceToday('location-id', manager)).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.location.findUnique).not.toHaveBeenCalled();
   });
 
@@ -107,35 +102,16 @@ describe('AttendanceService basic daily punches', () => {
     };
     const prisma = { $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)) };
     const manager = { ...actor, role: Role.STORE_MANAGER, locationIds: ['location-id'] };
-    const result = await new AttendanceService(prisma as any, jwt as any).setLocationTargetStartTime('location-id', '09:00', manager);
+    const result = await new AttendanceService(prisma as any).setLocationTargetStartTime('location-id', '09:00', manager);
     expect(result.attendanceStartTime).toBe('09:00');
     expect(tx.auditEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: 'ATTENDANCE_START_TIME_UPDATED', targetId: 'location-id' }) }));
   });
 
-  it('issues a signed workplace QR that expires after one minute', async () => {
-    const prisma = { location: { findUnique: jest.fn().mockResolvedValue({ id: 'location-id', name: 'Store' }) } };
-    const manager = { ...actor, role: Role.STORE_MANAGER, locationIds: ['location-id'] };
-    const result = await new AttendanceService(prisma as any, jwt as any).issueLocationQr('location-id', manager);
-    expect(result.token).toBe('signed-qr-token');
-    expect(result.rotationSeconds).toBe(60);
-    expect(jwt.signAsync).toHaveBeenCalledWith(expect.objectContaining({ locationId: 'location-id' }), expect.objectContaining({ expiresIn: 60, audience: 'attendance-qr' }));
-  });
-
-  it('requires a QR and stores a valid matching location scan', async () => {
-    const qrEmployee = { ...employee, location: { ...employee.location, attendanceQrRequired: true } };
-    const { service, tx } = setup([], qrEmployee);
-    const result = await service.punch(actor, 'signed-qr-token');
-    expect(result.punch.qrVerified).toBe(true);
-    expect(tx.attendance.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ qrVerified: true }) }));
-    jwt.verifyAsync.mockResolvedValueOnce({ purpose: 'attendance-check-in', locationId: 'other-location' });
-    await expect(service.punch(actor, 'wrong-location-token')).rejects.toBeInstanceOf(ForbiddenException);
-  });
-
-  it('rejects a required punch without a QR scan', async () => {
-    const qrEmployee = { ...employee, location: { ...employee.location, attendanceQrRequired: true } };
-    const { service, tx } = setup([], qrEmployee);
-    await expect(service.punch(actor)).rejects.toBeInstanceOf(ConflictException);
-    expect(tx.attendance.create).not.toHaveBeenCalled();
+  it('records attendance at locations with the old QR requirement enabled', async () => {
+    const legacyEmployee = { ...employee, location: { ...employee.location, attendanceQrRequired: true } };
+    const { service } = setup([], legacyEmployee);
+    const result = await service.punch(actor);
+    expect(result.punch.punchType).toBe('IN');
   });
 
   it('corrects a punch with reason while keeping the original timestamp in the audit trail', async () => {
@@ -153,7 +129,7 @@ describe('AttendanceService basic daily punches', () => {
     };
     const prisma = { $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)) };
     const manager = { ...actor, role: Role.STORE_MANAGER, locationIds: ['location-id'] };
-    const result = await new AttendanceService(prisma as any, jwt as any).correctPunch('punch-id', corrected.toISOString(), 'Manager approved correction', manager);
+    const result = await new AttendanceService(prisma as any).correctPunch('punch-id', corrected.toISOString(), 'Manager approved correction', manager);
     expect(result.punch.originalTimestamp).toEqual(original);
     expect(result.punch.punchTimestamp).toEqual(corrected);
     expect(result.punch.isLate).toBe(true);
@@ -174,7 +150,7 @@ describe('AttendanceService basic daily punches', () => {
       }]) },
     };
     const manager = { ...actor, role: Role.STORE_MANAGER, locationIds: ['location-id'] };
-    const result = await new AttendanceService(prisma as any, jwt as any).getReport('location-id', 'daily', '2026-11-15', manager);
+    const result = await new AttendanceService(prisma as any).getReport('location-id', 'daily', '2026-11-15', manager);
     expect(result.summary).toEqual(expect.objectContaining({ employeesPresent: 1, completedDays: 1, lateDays: 1, workMinutes: 540 }));
     expect(result.employees[0].entries[0].date).toBe('2026-11-15');
   });

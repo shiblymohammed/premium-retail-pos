@@ -29,6 +29,8 @@ const MANAGER_ROLES: Role[] = [
   Role.SUB_WAREHOUSE_MANAGER,
   Role.STORE_MANAGER,
 ];
+const STORE_RECEIPT_ROLES: Role[] = [Role.STAFF, Role.CASHIER];
+const STORE_DELIVERY_STATUSES: TransferStatus[] = [TransferStatus.DISPATCHED, TransferStatus.PARTIALLY_DISPATCHED, TransferStatus.PARTIALLY_RECEIVED, TransferStatus.RECEIVED];
 const TERMINAL_TRANSFER_STATUSES: TransferStatus[] = [
   TransferStatus.RECEIVED,
   TransferStatus.CANCELLED,
@@ -110,7 +112,11 @@ export class TransfersService {
         const lines = variants.flatMap((variant) => {
           const reorderLevelBase = variant.product.reorderLevel!;
           const availableQtyBase = balanceByVariant.get(variant.id) ?? 0;
-          const systemSuggestedQtyBase = reorderLevelBase - availableQtyBase;
+          const cartonSize = variant.product.unitsPerCarton ?? 0;
+          const cartonRoute = this.isCartonRoute(source, destination);
+          if (cartonRoute && cartonSize <= 1) return [];
+          const needed = reorderLevelBase - availableQtyBase;
+          const systemSuggestedQtyBase = cartonRoute ? Math.ceil(needed / cartonSize) * cartonSize : needed;
           if (systemSuggestedQtyBase <= 0) return [];
           if (!Number.isSafeInteger(systemSuggestedQtyBase) || systemSuggestedQtyBase > 2147483647) {
             throw new BadRequestException(`Suggested replenishment for variant ${variant.id} exceeds the supported quantity range`);
@@ -166,23 +172,39 @@ export class TransfersService {
       if (request.status !== ReplenishmentStatus.DRAFT) throw new ConflictException('Only a draft replenishment request can be approved');
       if (request.generatedByUserId === actor.userId) throw new ForbiddenException('The requester cannot approve their own replenishment request');
       this.assertLocationAccess(actor, request.sourceLocationId);
-      this.assertTransferRoute(
-        await this.requireLocation(tx, request.sourceLocationId),
-        await this.requireLocation(tx, request.destLocationId),
-      );
+      const source = await this.requireLocation(tx, request.sourceLocationId);
+      const destination = await this.requireLocation(tx, request.destLocationId);
+      this.assertOperationalLocations(source, destination);
+      this.assertTransferRoute(source, destination);
 
       const approvedByVariant = this.uniqueByVariant(dto.lines, 'approved quantity');
-      if (approvedByVariant.size !== request.lines.length || request.lines.some((line) => !approvedByVariant.has(line.variantId))) {
-        throw new BadRequestException('Approval must include exactly one quantity for every suggested variant');
+      if (request.lines.some((line) => !approvedByVariant.has(line.variantId))) {
+        throw new BadRequestException('Approval must include a quantity for every suggested variant');
       }
-      const approvedLines = request.lines.map((line) => {
-        const approvedQtyBase = approvedByVariant.get(line.variantId)!.approvedQtyBase;
-        if (approvedQtyBase > 2147483647) throw new BadRequestException('Approved quantity exceeds the supported range');
-        return { ...line, managerApprovedQtyBase: approvedQtyBase };
+      const positive = dto.lines.filter((line) => line.approvedQtyBase > 0);
+      if (!positive.length) throw new BadRequestException('At least one replenishment quantity must be approved');
+      const variants = await this.loadTransferVariants(tx, positive.map((line) => line.variantId));
+      const suggestions = new Map(request.lines.map((line) => [line.variantId, line]));
+      const transferLines = positive.map((line) => {
+        const existing = suggestions.get(line.variantId);
+        const product = variants.get(line.variantId)!.product;
+        const unitsPerCarton = existing ? existing.unitsPerCarton : product.unitsPerCarton;
+        this.assertCartonQuantity(source, destination, line.approvedQtyBase, unitsPerCarton);
+        return {
+          variantId: line.variantId,
+          managerApprovedQtyBase: line.approvedQtyBase,
+          systemSuggestedQtyBase: existing?.systemSuggestedQtyBase ?? 0,
+          unitsPerCarton,
+          baseUnitSnapshot: existing?.baseUnitSnapshot ?? product.baseUnit,
+        };
       });
-      const transferLines = approvedLines.filter((line) => line.managerApprovedQtyBase > 0);
-      if (transferLines.length === 0) throw new BadRequestException('At least one replenishment quantity must be approved');
-      await this.loadTransferVariants(tx, transferLines.map((line) => line.variantId));
+      const addedLines = transferLines.filter((line) => !suggestions.has(line.variantId));
+      const destinationBalances = addedLines.length ? await tx.inventoryMovement.groupBy({
+        by: ['variantId'],
+        where: { locationId: destination.id, variantId: { in: addedLines.map((line) => line.variantId) }, stockState: StockState.AVAILABLE },
+        _sum: { quantityBaseUnits: true },
+      }) : [];
+      const availableByVariant = new Map(destinationBalances.map((line) => [line.variantId, line._sum.quantityBaseUnits ?? 0]));
 
       const transfer = await tx.transfer.create({
         data: {
@@ -210,10 +232,17 @@ export class TransfersService {
           approvedByUserId: actor.userId,
           approvedAt: new Date(),
           transferId: transfer.id,
-          lines: { update: approvedLines.map((line) => ({
-            where: { id: line.id },
-            data: { managerApprovedQtyBase: line.managerApprovedQtyBase },
-          })) },
+          lines: {
+            update: request.lines.map((line) => ({
+              where: { id: line.id },
+              data: { managerApprovedQtyBase: approvedByVariant.get(line.variantId)!.approvedQtyBase },
+            })),
+            create: addedLines.map((line) => ({
+              ...line,
+              availableQtyBase: availableByVariant.get(line.variantId) ?? 0,
+              reorderLevelBase: variants.get(line.variantId)!.product.reorderLevel ?? 0,
+            })),
+          },
         },
         include: { lines: true, transfer: { include: transferInclude } },
       });
@@ -246,7 +275,7 @@ export class TransfersService {
   }
 
   async findReplenishments(actor: TransferActor) {
-    this.assertManager(actor);
+    if (actor.role !== Role.INVENTORY) this.assertManager(actor);
     return this.prisma.replenishmentRequest.findMany({
       where: actor.role === Role.SUPER_ADMIN
         ? {}
@@ -257,7 +286,7 @@ export class TransfersService {
   }
 
   async createTransfer(dto: CreateTransferDto, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    if (actor.role !== Role.INVENTORY) this.assertManager(actor);
     this.assertCanViewTransfer(actor, dto.sourceLocationId, dto.destLocationId);
     const linesByVariant = this.uniqueByVariant(dto.lines, 'transfer line');
     return this.runIdempotentMutation(idempotencyKey, 'POST', '/transfers', actor, dto, async (tx) => {
@@ -271,6 +300,7 @@ export class TransfersService {
       const lines = [...linesByVariant.values()].map((line) => {
         const variant = variants.get(line.variantId)!;
         const requestedQtyBase = this.convertLine(line, variant.product.unitsPerCarton);
+        this.assertCartonQuantity(source, destination, requestedQtyBase, variant.product.unitsPerCarton);
         return {
           variantId: line.variantId,
           requestedQtyBase,
@@ -298,30 +328,43 @@ export class TransfersService {
   }
 
   async findTransfers(actor: TransferActor) {
-    this.assertManager(actor);
-    return this.prisma.transfer.findMany({
-      where: actor.role === Role.SUPER_ADMIN
+    const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role);
+    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertManager(actor);
+    const where: Prisma.TransferWhereInput = storeReceiver
+      ? {
+        destLocationId: { in: actor.locationIds },
+        destLocation: { type: LocationType.RETAIL_STORE, isActive: true },
+        status: { in: STORE_DELIVERY_STATUSES },
+      }
+      : actor.role === Role.SUPER_ADMIN
         ? {}
-        : { OR: [{ sourceLocationId: { in: actor.locationIds } }, { destLocationId: { in: actor.locationIds } }] },
-      include: transferInclude,
-      orderBy: { createdAt: 'desc' },
-    });
+        : { OR: [{ sourceLocationId: { in: actor.locationIds } }, { destLocationId: { in: actor.locationIds } }] };
+    return this.prisma.transfer.findMany({ where, include: transferInclude, orderBy: { createdAt: 'desc' } });
   }
 
   async findTransfer(id: string, actor: TransferActor) {
-    this.assertManager(actor);
+    const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role);
+    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertManager(actor);
     const transfer = await this.prisma.transfer.findUnique({ where: { id }, include: transferInclude });
     if (!transfer) throw new NotFoundException('Transfer not found');
-    this.assertCanViewTransfer(actor, transfer.sourceLocationId, transfer.destLocationId);
+    if (storeReceiver) {
+      this.assertLocationAccess(actor, transfer.destLocationId);
+      if (transfer.destLocation.type !== LocationType.RETAIL_STORE || !STORE_DELIVERY_STATUSES.includes(transfer.status)) {
+        throw new ForbiddenException('This transfer is unavailable for store receiving');
+      }
+    } else this.assertCanViewTransfer(actor, transfer.sourceLocationId, transfer.destLocationId);
     return transfer;
   }
 
   async submitTransfer(id: string, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    if (actor.role !== Role.INVENTORY) this.assertManager(actor);
     return this.updateTransferInTransaction(id, idempotencyKey, 'POST', `/transfers/${id}/submit`, actor, {}, async (tx, transfer) => {
       this.assertCanViewTransfer(actor, transfer.sourceLocationId, transfer.destLocationId);
       if (transfer.status !== TransferStatus.DRAFT) throw new ConflictException('Only a draft transfer can be submitted');
       if (transfer.lines.length === 0) throw new BadRequestException('A transfer must contain at least one line');
+      for (const line of transfer.lines) {
+        this.assertCartonQuantity(transfer.sourceLocation, transfer.destLocation, line.requestedQtyBase, line.unitsPerCarton);
+      }
       return tx.transfer.update({ where: { id }, data: { status: TransferStatus.PENDING_APPROVAL }, include: transferInclude });
     });
   }
@@ -337,7 +380,9 @@ export class TransfersService {
         throw new BadRequestException('Approval must include exactly one quantity for every transfer line');
       }
       for (const line of transfer.lines) {
-        if (approved.get(line.variantId)!.approvedQtyBase > line.requestedQtyBase) {
+        const approvedQuantity = approved.get(line.variantId)!.approvedQtyBase;
+        this.assertCartonQuantity(transfer.sourceLocation, transfer.destLocation, approvedQuantity, line.unitsPerCarton);
+        if (approvedQuantity > line.requestedQtyBase) {
           throw new BadRequestException('Approved quantity cannot exceed the requested quantity');
         }
       }
@@ -388,6 +433,7 @@ export class TransfersService {
         const approved = line.approvedQtyBase ?? 0;
         const alreadyDispatched = line.dispatchedQtyBase ?? 0;
         const quantity = this.convertLine(request, line.unitsPerCarton);
+        this.assertCartonQuantity(transfer.sourceLocation, transfer.destLocation, quantity, line.unitsPerCarton);
         if (quantity > approved - alreadyDispatched) {
           throw new BadRequestException(`Dispatch exceeds the approved remaining quantity for variant ${variantId}`);
         }
@@ -437,10 +483,14 @@ export class TransfersService {
   }
 
   async receiveTransfer(id: string, dto: ReceiveTransferDto, actor: TransferActor, idempotencyKey: string | undefined) {
-    this.assertManager(actor);
+    const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role);
+    if (!storeReceiver) this.assertManager(actor);
     const receipts = this.uniqueByVariant(dto.lines, 'receipt line');
     return this.updateTransferInTransaction(id, idempotencyKey, 'POST', `/transfers/${id}/receive`, actor, dto, async (tx, transfer) => {
       this.assertLocationAccess(actor, transfer.destLocationId);
+      if (storeReceiver && transfer.destLocation.type !== LocationType.RETAIL_STORE) {
+        throw new ForbiddenException('Store staff can receive deliveries at their assigned retail location');
+      }
       if (![TransferStatus.DISPATCHED, TransferStatus.PARTIALLY_DISPATCHED, TransferStatus.PARTIALLY_RECEIVED].includes(transfer.status)) {
         throw new ConflictException('This transfer has no dispatched stock to receive');
       }
@@ -471,9 +521,6 @@ export class TransfersService {
         }
         if ((damaged > 0 || excess > 0 || (receipt.shortQtyBase ?? 0) > 0) && !discrepancyNote) {
           throw new BadRequestException('A discrepancy note is required for damaged, excess, or short quantities');
-        }
-        if (receipt.finalizeLine && dispatched < (line.approvedQtyBase ?? 0)) {
-          throw new ConflictException('A line cannot be finalized until all approved units have been dispatched');
         }
         const short = receipt.shortQtyBase ?? 0;
         if (!receipt.finalizeLine && short > 0) throw new BadRequestException('A shortage can only be recorded when finalizing the line');
@@ -750,7 +797,7 @@ export class TransfersService {
     `);
     const variants = await tx.variant.findMany({
       where: { id: { in: ids }, isActive: true, product: { isActive: true } },
-      select: { id: true, product: { select: { unitsPerCarton: true, baseUnit: true } } },
+      select: { id: true, product: { select: { unitsPerCarton: true, baseUnit: true, reorderLevel: true } } },
     });
     if (variants.length !== ids.length) throw new NotFoundException('One or more active variants were not found');
     return new Map(variants.map((variant) => [variant.id, variant]));
@@ -765,6 +812,17 @@ export class TransfersService {
       if (error instanceof BadRequestException) throw error;
       if (error instanceof RangeError) throw new BadRequestException(error.message);
       throw error;
+    }
+  }
+
+  private isCartonRoute(source: Pick<LockedLocation, 'type'>, destination: Pick<LockedLocation, 'type'>): boolean {
+    return (source.type === LocationType.MAIN_WAREHOUSE && destination.type === LocationType.SUB_WAREHOUSE)
+      || (source.type === LocationType.SUB_WAREHOUSE && destination.type === LocationType.RETAIL_STORE);
+  }
+
+  private assertCartonQuantity(source: Pick<LockedLocation, 'type'>, destination: Pick<LockedLocation, 'type'>, quantity: number, unitsPerCarton: number | null): void {
+    if (quantity > 0 && this.isCartonRoute(source, destination) && (!unitsPerCarton || unitsPerCarton <= 1 || quantity % unitsPerCarton !== 0)) {
+      throw new BadRequestException('Warehouse deliveries on this route require whole cartons');
     }
   }
 

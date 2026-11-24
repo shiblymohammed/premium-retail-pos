@@ -14,7 +14,6 @@ import {
   LogIn,
   LogOut,
   Pencil,
-  QrCode,
   RefreshCw,
   Search,
   Settings,
@@ -27,8 +26,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import QRCode from 'qrcode';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { LOCATION_KEY } from '@/components/layout/nav-data';
 
@@ -70,7 +68,6 @@ type AttendanceRow = {
   clockOutAt: string | null;
   isLate: boolean;
   targetStartTime: string | null;
-  qrVerified: boolean;
   clockInCorrectionReason: string | null;
   clockOutCorrectionReason: string | null;
 };
@@ -80,7 +77,6 @@ type LocationDay = {
   localDate: string;
   timezone: string;
   targetStartTime: string | null;
-  qrRequired: boolean;
   employees: AttendanceRow[];
 };
 
@@ -154,7 +150,6 @@ const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
   users: UsersRound,
   hours: Timer,
   download: Download,
-  qr: QrCode,
   settings: Settings,
   x: X,
   edit: Pencil,
@@ -196,7 +191,6 @@ export default function AttendanceManagerPage() {
     localDate: initialDate,
     timezone: TIMEZONE,
     targetStartTime: null,
-    qrRequired: true,
     employees: [],
   });
 
@@ -208,10 +202,6 @@ export default function AttendanceManagerPage() {
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
   const [targetStartTime, setTargetStartTime] = useState('');
-  const [qrRequired, setQrRequired] = useState(false);
-  const [qrImage, setQrImage] = useState('');
-  const [qrExpiresAt, setQrExpiresAt] = useState('');
-  const [secondsLeft, setSecondsLeft] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('weekly');
@@ -260,7 +250,6 @@ export default function AttendanceManagerPage() {
           setSelectedDate(result.localDate);
           setReportDate(result.localDate);
           setTargetStartTime(result.targetStartTime || '');
-          setQrRequired(result.qrRequired);
         }
       } catch (caught) {
         if (!controller.signal.aborted) setError((caught as Error).message);
@@ -303,37 +292,6 @@ export default function AttendanceManagerPage() {
     });
     return () => controller.abort();
   }, [locationId, day.location.id, reportPeriod, reportDate, revision]);
-
-  const refreshQr = useCallback(async (signal: AbortSignal) => {
-    try {
-      const result = await attendanceRequest<{ token: string; expiresAt: string }>(`/attendance/locations/${locationId}/qr-code`, signal);
-      const qrUrl = `${window.location.origin}/attendance#qr=${encodeURIComponent(result.token)}`;
-      const image = await QRCode.toDataURL(qrUrl, { width: 280, margin: 4 });
-      if (signal.aborted) return;
-      setQrImage(image);
-      setQrExpiresAt(result.expiresAt);
-    } catch (caught) {
-      if (!signal.aborted) setError((caught as Error).message);
-    }
-  }, [locationId]);
-
-  const [qrRevision, setQrRevision] = useState(0);
-  useEffect(() => {
-    setQrImage('');
-    setQrExpiresAt('');
-    setSecondsLeft(0);
-    if (!locationId || !settingsOpen) return;
-    const controller = new AbortController();
-    void refreshQr(controller.signal);
-    const interval = window.setInterval(() => void refreshQr(controller.signal), 25000);
-    return () => { controller.abort(); window.clearInterval(interval); };
-  }, [locationId, refreshQr, settingsOpen, qrRevision]);
-  useEffect(() => {
-    const tick = () => setSecondsLeft(qrExpiresAt ? Math.max(0, Math.round((new Date(qrExpiresAt).getTime() - Date.now()) / 1000)) : 0);
-    tick();
-    const t = window.setInterval(tick, 1000);
-    return () => window.clearInterval(t);
-  }, [qrExpiresAt]);
 
   // Escape closes panels; clicks elsewhere close the row menu; notices fade
   useEffect(() => {
@@ -417,11 +375,7 @@ export default function AttendanceManagerPage() {
         await attendanceRequest(route + '/target-time', undefined, { startTime: targetStartTime || null });
         setDay((current) => ({ ...current, targetStartTime: targetStartTime || null }));
       }
-      if (qrRequired !== day.qrRequired) {
-        await attendanceRequest(route + '/qr-settings', undefined, { required: qrRequired });
-        setDay((current) => ({ ...current, qrRequired }));
-      }
-      setNotice('Shift and QR settings saved.');
+      setNotice('Shift settings saved.');
     } catch (caught) {
       setError((caught as Error).message);
     } finally {
@@ -533,7 +487,7 @@ export default function AttendanceManagerPage() {
             disabled={saving}
             onChange={(id) => { setReport(null); setLocationId(id); }}
           />
-          <button type="button" className={styles.ghostButton} onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}><Icon name="settings" size={15} /> Shift &amp; QR</button>
+          <button type="button" className={styles.ghostButton} onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}><Icon name="settings" size={15} /> Shift settings</button>
           <button type="button" className={styles.primaryButton} onClick={exportReport} disabled={!report || day.location.id !== locationId}><Icon name="download" size={15} /> Export report</button>
         </div>
       </header>
@@ -570,7 +524,7 @@ export default function AttendanceManagerPage() {
         </article>
       </section>
 
-      {/* ---------- Shift & QR settings (collapsible) ---------- */}
+      {/* ---------- Shift settings (collapsible) ---------- */}
       {settingsOpen && (
         <section className={styles.settings}>
           <div className={styles.settingBlock}>
@@ -578,19 +532,8 @@ export default function AttendanceManagerPage() {
             <p>Clock-ins after this time count as <b>late</b>.</p>
             <div className={styles.inline}>
               <input type="time" value={targetStartTime} onChange={(e) => setTargetStartTime(e.target.value)} aria-label="Shift start time" />
-              <label className={styles.switch}><input type="checkbox" checked={qrRequired} onChange={(e) => setQrRequired(e.target.checked)} /><i aria-hidden="true" /><span>Require QR for clock-in and clock-out</span></label>
             </div>
             <button type="button" className={styles.primaryButton} onClick={handleSaveSettings} disabled={saving}><Icon name="check" size={15} /> Save settings</button>
-          </div>
-          <div className={styles.qrBlock}>
-            {qrImage && secondsLeft > 0 ? <img src={qrImage} alt={`Clock-in QR code for ${location.name}`} /> : <span className={styles.qrPlaceholder}><Icon name="qr" size={40} /></span>}
-            <div>
-              <h3><Icon name="qr" size={15} /> Clock-in QR · {location.name}</h3>
-              <p>Show this at the counter. Staff scan it with the Attendance page to clock in or out.</p>
-              <div className={styles.qrTimer}><span style={{ width: `${(secondsLeft / 60) * 100}%` }} /></div>
-              <small>New code in {Math.max(0, secondsLeft - 35)}s · expires in {secondsLeft}s</small>
-              <button type="button" className={styles.linkButton} onClick={() => setQrRevision((value) => value + 1)}><Icon name="refresh" size={13} /> New code now</button>
-            </div>
           </div>
         </section>
       )}
@@ -634,7 +577,7 @@ export default function AttendanceManagerPage() {
                   <span><Icon name="arrowOut" size={13} /> {live?.status === 'WORKING' ? <b className={styles.workingText}>Working</b> : fmtMin(rec.outMin)}{live?.clockOutCorrectionReason ? <em title={`Corrected: ${live.clockOutCorrectionReason}`}>edited</em> : null}</span>
                 </span>
 
-                <span className={styles.worked}>{fmtDur(rec.workMin)}{live && !live.qrVerified && live.clockInAt && <small title="Clocked in without scanning the QR code">no QR</small>}</span>
+                <span className={styles.worked}>{fmtDur(rec.workMin)}</span>
 
                 <span>{statusPill(rec, live)}</span>
 
@@ -666,7 +609,7 @@ export default function AttendanceManagerPage() {
           <span><i className={styles.cell_late} /> Late</span>
           <span><i className={styles.cell_absent} /> Absent</span>
           <span><i className={styles.cell_off} /> Day off</span>
-          <span className={styles.legendNote}>Shift starts {fmtMin(targetMin)} · {day.qrRequired ? 'QR scan required' : 'QR optional'}</span>
+          <span className={styles.legendNote}>Shift starts {fmtMin(targetMin)}</span>
         </footer>
       </section>
 

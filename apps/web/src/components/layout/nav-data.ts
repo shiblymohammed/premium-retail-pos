@@ -18,7 +18,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Overview',
         href: '/dashboard',
         icon: 'dashboard',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF', 'INVENTORY'],
       },
       {
         label: 'Reports',
@@ -35,7 +35,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Checkout',
         href: '/pos-terminal',
         icon: 'pos',
-        roles: ['CASHIER'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CASHIER'],
       },
       {
         label: 'Returns',
@@ -54,7 +54,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Products',
         href: '/products',
         icon: 'products',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'INVENTORY'],
       },
       {
         label: 'Stock Counts',
@@ -62,13 +62,13 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         icon: 'audits',
         // Cashier and staff visibility is additionally gated by the server's
         // canCountStockAudits capability in AppFrameLayout.
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF', 'INVENTORY'],
       },
       {
         label: 'Transfers',
         href: '/operations',
         icon: 'transfers',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'STAFF', 'CASHIER', 'INVENTORY'],
       },
     ],
   },
@@ -85,7 +85,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'My Attendance',
         href: '/attendance',
         icon: 'attendance',
-        roles: ['CASHIER', 'STAFF'],
+        roles: ['CASHIER', 'STAFF', 'INVENTORY'],
       },
       {
         label: 'Users',
@@ -110,13 +110,13 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Discounts',
         href: '/admin/discount-limits',
         icon: 'discount',
-        roles: ['SUPER_ADMIN', 'ADMIN'],
+        roles: ['SUPER_ADMIN'],
       },
       {
         label: 'Permissions',
         href: '/admin/sales-permissions',
         icon: 'permissions',
-        roles: ['SUPER_ADMIN', 'ADMIN'],
+        roles: ['SUPER_ADMIN'],
       },
     ],
   },
@@ -127,7 +127,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Settings',
         href: '/settings',
         icon: 'settings',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF', 'INVENTORY'],
       },
     ],
   },

@@ -110,7 +110,6 @@ export function getSettingGroups(role: string): SettingGroup[] {
         { id: 'stock', icon: 'box', title: 'Stock & cash alerts', description: 'When to warn about low stock or a full cash drawer', summary: (p) => `Low stock at ${p.lowStockBuffer} units` },
         { id: 'receipt', icon: 'receipt', title: 'Receipt text', description: 'Tagline and return policy printed on receipts', summary: (p) => short(p.receiptHeaderTagline, 28) },
         { id: 'attendance', icon: 'clock', title: 'Staff attendance', description: 'Grace period before an arrival counts as late', summary: (p) => (p.attendanceGraceMinutes ? `${p.attendanceGraceMinutes} min grace` : 'No grace period') },
-        ...(isStoreManager ? [{ id: 'discounts', icon: 'receipt', title: 'Discount limits', description: 'Highest discount each cashier can give', summary: () => 'Open', href: '/admin/discount-limits' }] : []),
       ],
     });
   }
@@ -134,18 +133,8 @@ export function getSettingGroups(role: string): SettingGroup[] {
         { id: 'governance', icon: 'shield', title: 'Security & audit rules', description: 'Store binding, audit lock, reasons for voids and password expiry', summary: (p) => `${countOn(p.enforceDualAxisBinding, p.strictAuditFreezeCheck, p.requireCancellationReason)} · ${p.passwordExpiryDays ? `${p.passwordExpiryDays}-day passwords` : 'No expiry'}` },
         { id: 'users', icon: 'user', title: 'User directory', description: 'Add people and set their roles', summary: () => 'Open', href: '/admin/users' },
         { id: 'company', icon: 'store', title: 'Company & locations', description: 'Company details, stores and warehouses', summary: () => 'Open', href: '/admin/company' },
-        { id: 'discounts', icon: 'receipt', title: 'Discount limits', description: 'Highest discount each role can give', summary: () => 'Open', href: '/admin/discount-limits' },
-        { id: 'sales', icon: 'grid', title: 'Sale permissions', description: 'Who can void, refund or override prices', summary: () => 'Open', href: '/admin/sales-permissions' },
-      ],
-    });
-  }
-
-  // Cashier and staff clock in with the QR code on the Staff Attendance page
-  if (!(isStoreManager || isWarehouse || isAdmin)) {
-    groups.push({
-      id: 'shift', title: 'Shift & clock-in', description: 'Choose the camera you use for attendance.',
-      items: [
-        { id: 'shift', icon: 'clock', title: 'Attendance camera', description: 'Choose a camera for scanning QR codes', summary: (p) => p.qrCameraFacing === 'user' ? 'Front camera' : 'Back camera' },
+        ...(role === 'SUPER_ADMIN' ? [{ id: 'discounts', icon: 'receipt', title: 'Discount limits', description: 'Highest discount each role can give', summary: () => 'Open', href: '/admin/discount-limits' } as SettingItem] : []),
+        ...(role === 'SUPER_ADMIN' ? [{ id: 'sales', icon: 'grid', title: 'Sale permissions', description: 'Who can void, refund or override prices', summary: () => 'Open', href: '/admin/sales-permissions' } as SettingItem] : []),
       ],
     });
   }
@@ -239,7 +228,7 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
           />
           <div className={styles.infoBox}>
             <Icon name="info" size={16} />
-            <span>The shift start time and the QR code rule are set per store on the Attendance Oversight page, under &quot;Shift &amp; QR&quot;.</span>
+            <span>Set the start time for each store under Shift settings in Attendance Oversight.</span>
           </div>
           <a className={styles.linkRow} href="/attendance/manage"><Icon name="external" size={15} /> Open Attendance Oversight</a>
         </>
@@ -314,17 +303,6 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
             value={prefs.passwordExpiryDays} onChange={(v) => onUpdate('passwordExpiryDays', v)} columns={2}
           />
         </div>
-      );
-
-    case 'shift':
-      return (
-        <>
-          <ChoiceList
-            name="camera" label="Camera for QR clock-in"
-            options={[{ value: 'environment', label: 'Back camera', detail: 'Usual choice on a phone' }, { value: 'user', label: 'Front camera', detail: 'Laptop or kiosk screen' }]}
-            value={prefs.qrCameraFacing} onChange={(v) => onUpdate('qrCameraFacing', v)} columns={2}
-          />
-        </>
       );
 
     default:

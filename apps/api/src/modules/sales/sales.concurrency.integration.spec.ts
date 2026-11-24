@@ -54,10 +54,10 @@ const isolatedTestDatabase = (() => {
 
   afterAll(async () => prisma.$disconnect());
 
-  it('commits all simultaneous sales once and leaves the exact ledger balance when stock runs low', async () => {
+  it('commits only the sales covered by stock when checkouts race', async () => {
     const saleCount = 24;
     const actor = { userId: cashierId, role: Role.CASHIER, locationIds: [locationId] };
-    const results = await Promise.all(Array.from({ length: saleCount }, (_, index) => sales.createSale({
+    const results = await Promise.allSettled(Array.from({ length: saleCount }, (_, index) => sales.createSale({
       lines: [{ variantId, quantity: 1, enteredUnit: 'BASE_UNIT' as any }],
       paymentMethod: 'CARD' as any,
       paymentAmount: 1,
@@ -74,13 +74,13 @@ const isolatedTestDatabase = (() => {
       _sum: { quantityBaseUnits: true },
     });
 
-    expect(results).toHaveLength(saleCount);
-    expect(invoices).toHaveLength(saleCount);
-    expect(new Set(invoices.map((invoice) => invoice.invoiceNumber)).size).toBe(saleCount);
-    expect(new Set(invoices.map((invoice) => invoice.idempotencyKey)).size).toBe(saleCount);
-    expect(saleMovements._count._all).toBe(saleCount);
-    expect(saleMovements._sum.quantityBaseUnits).toBe(-saleCount);
-    // OD-03 allows negative stock; this asserts exact ledger accounting, not a stock floor.
-    expect(stockBalance._sum.quantityBaseUnits).toBe(5 - saleCount);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(5);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(saleCount - 5);
+    expect(invoices).toHaveLength(5);
+    expect(new Set(invoices.map((invoice) => invoice.invoiceNumber)).size).toBe(5);
+    expect(new Set(invoices.map((invoice) => invoice.idempotencyKey)).size).toBe(5);
+    expect(saleMovements._count._all).toBe(5);
+    expect(saleMovements._sum.quantityBaseUnits).toBe(-5);
+    expect(stockBalance._sum.quantityBaseUnits).toBe(0);
   });
 });

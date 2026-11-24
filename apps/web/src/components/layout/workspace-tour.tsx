@@ -20,7 +20,7 @@ const reports: Step = { title: 'Review store activity', description: 'Use dates 
 const products: Step = { title: 'Check the catalogue and stock', description: 'Find a product or SKU and review available stock before planning a transfer or count.', icon: Boxes, href: '/products', label: 'Products' };
 const transfers: Step = { title: 'Track stock transfers', description: 'Review transfers that need approval, dispatch, or receipt at your locations.', icon: MapPin, href: '/operations', label: 'Transfers' };
 const counts: Step = { title: 'Check assigned stock counts', description: 'Open the selected location’s count. Record what is physically present and check whether a recount is needed.', icon: ClipboardCheck, href: '/audits', label: 'Stock Counts' };
-const attendance: Step = { title: 'Record your shift', description: 'Check your assigned location and clock in or out. If your store requires a QR code, the attendance screen prompts you to scan it.', icon: UsersRound, href: '/attendance', label: 'My Attendance' };
+const attendance: Step = { title: 'Record your shift', description: 'Check your assigned location and clock in or out.', icon: UsersRound, href: '/attendance', label: 'My Attendance' };
 const checkout: Step = { title: 'Open checkout', description: 'Scan a barcode or search for an item, review the basket, and choose a payment method to complete the sale.', icon: Store, href: '/pos-terminal', label: 'Checkout' };
 const settings: Step = { title: 'Set up this device', description: 'Review display preferences and set an optional unlock PIN. Come back here whenever you want to take this tour again.', icon: Settings, href: '/settings', label: 'Settings' };
 

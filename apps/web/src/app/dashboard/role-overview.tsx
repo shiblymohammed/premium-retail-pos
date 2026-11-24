@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDownToLine, ArrowLeftRight, ArrowRight, Box, Camera, ClipboardCheck, Clock3, MapPin, PackageCheck, PackageSearch, ReceiptText, ScanBarcode, Settings2, Store, Truck, TriangleAlert, UsersRound, Warehouse, type LucideIcon } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeftRight, ArrowRight, Box, ClipboardCheck, Clock3, MapPin, PackageCheck, PackageSearch, ReceiptText, ScanBarcode, Settings2, Store, Truck, TriangleAlert, UsersRound, Warehouse, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { AuthSession } from '@/lib/auth';
@@ -8,7 +8,7 @@ import { LOCATION_KEY } from '@/components/layout/nav-data';
 import { metric, read, type Load } from './data';
 import styles from './dashboard.module.css';
 
-type Attendance = { location: { name: string }; status: 'NOT_STARTED' | 'WORKING' | 'COMPLETED'; nextAction: 'IN' | 'OUT' | null; targetStartTime: string | null; qrRequired: boolean };
+type Attendance = { location: { name: string }; status: 'NOT_STARTED' | 'WORKING' | 'COMPLETED'; nextAction: 'IN' | 'OUT' | null; targetStartTime: string | null };
 type Terminal = { location: { name: string } };
 type Location = { id: string; name: string; type: string; companyId?: string; company?: { currency: string; timezone?: string } };
 type LocationDay = { localDate: string; employees: Array<{ isLate: boolean; status: string }> };
@@ -58,7 +58,7 @@ export function ShiftOverview({ session }: { session: AuthSession }) {
       <section className={styles.deskHero} aria-label={cashier ? 'Checkout' : 'Attendance action'}>
         <div className={styles.deskHeroTop}><i>{cashier ? <ScanBarcode size={25} aria-hidden="true" /> : <Clock3 size={25} aria-hidden="true" />}</i><span>{cashier ? terminal ? 'Terminal assigned' : terminal === undefined ? 'Checking terminal…' : 'Terminal unavailable' : shift}</span></div>
         <h2>{cashier ? 'Start a sale' : shiftAction}</h2>
-        <p>{cashier ? terminal ? `Your terminal is assigned to ${terminal.location.name}. Open checkout to scan or search for products.` : terminal === undefined ? 'Checking your terminal assignment.' : 'Ask a manager to verify your store and terminal assignment.' : attendance ? attendance.status === 'COMPLETED' ? 'Your punches for today are recorded.' : attendance.qrRequired ? 'Have the store QR code ready before you open attendance.' : 'Open attendance to record your punch for this shift.' : 'Open attendance to check your shift and location.'}</p>
+        <p>{cashier ? terminal ? `Your terminal is assigned to ${terminal.location.name}. Open checkout to scan or search for products.` : terminal === undefined ? 'Checking your terminal assignment.' : 'Ask a manager to verify your store and terminal assignment.' : attendance ? attendance.status === 'COMPLETED' ? 'Your punches for today are recorded.' : 'Open attendance to record your punch for this shift.' : 'Open attendance to check your shift and location.'}</p>
         {cashier ? terminal && <Link href="/pos-terminal" className={styles.deskPrimary}>Start sale <ArrowRight size={17} aria-hidden="true" /></Link> : <Link href="/attendance" className={styles.deskPrimary}>{shiftAction} <ArrowRight size={17} aria-hidden="true" /></Link>}
         {cashier && terminal === null && <button type="button" className={styles.deskPrimary} onClick={() => { setTerminal(undefined); setRevision((value) => value + 1); }}>Check again <ArrowRight size={17} aria-hidden="true" /></button>}
         {cashier && terminal == null && <Link href="/pos-terminal" className={styles.offlineTerminal}>Open checkout for offline access</Link>}
@@ -67,7 +67,6 @@ export function ShiftOverview({ session }: { session: AuthSession }) {
         <h2>{cashier ? 'Your shift' : 'Shift information'}</h2>
         <div className={styles.shiftStatus}><Clock3 size={18} aria-hidden="true" /><span><b>{shift}</b><small>{attendance?.targetStartTime ? `Scheduled start ${attendance.targetStartTime}` : attendance?.location.name ?? 'Assigned location pending'}</small></span></div>
         <ResourceLink href="/attendance" title={cashier ? shiftAction : 'Attendance history'} description={cashier ? 'View today’s shift and punches' : 'Review your recent workdays'} icon={Clock3} />
-        {attendance && attendance.nextAction && <ResourceLink href="/attendance#shift" title="Scan attendance QR" description="Open the camera controls for your shift" icon={Camera} />}
         <ResourceLink href="/settings" title="Device settings" description="Manage your PIN and preferences" icon={Settings2} />
       </section>
     </div>

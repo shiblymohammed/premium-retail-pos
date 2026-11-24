@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { CloseCashDrawerDto, OpenCashDrawerDto } from './dto/cash-drawer.dto';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Role } from '@prisma/client';
+import { CHECKOUT_ROLES } from './checkout-access';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
@@ -13,22 +14,47 @@ export class PosController {
   constructor(private readonly posService: PosService) {}
 
   @Get('terminal/context')
-  async getTerminalContext(@CurrentUser() actor: RequestUser) {
-    return { data: await this.posService.getTerminalContext(actor) };
+  @Roles(...CHECKOUT_ROLES)
+  async getTerminalContext(@CurrentUser() actor: RequestUser, @Query('locationId') locationId?: string) {
+    return { data: await this.posService.getTerminalContext(actor, locationId) };
   }
 
   @Get('catalog')
-  @Roles(Role.CASHIER)
-  async getOfflineCatalog(@CurrentUser() actor: RequestUser) {
-    return { data: await this.posService.getOfflineCatalog(actor) };
+  @Roles(...CHECKOUT_ROLES)
+  async getOfflineCatalog(@CurrentUser() actor: RequestUser, @Query('locationId') locationId?: string) {
+    return { data: await this.posService.getOfflineCatalog(actor, locationId) };
+  }
+
+  @Get('receipts')
+  @Roles(...CHECKOUT_ROLES)
+  async recentReceipts(@CurrentUser() actor: RequestUser, @Query('locationId') locationId?: string, @Query('invoiceNumber') invoiceNumber?: string) {
+    return { data: await this.posService.recentReceipts(actor, locationId, invoiceNumber) };
+  }
+
+  @Get('cash-drawer')
+  @Roles(...CHECKOUT_ROLES)
+  async cashDrawers(@CurrentUser() actor: RequestUser, @Query('locationId') locationId?: string) {
+    return { data: await this.posService.cashDrawers(actor, locationId) };
+  }
+
+  @Post('cash-drawer/open')
+  @Roles(...CHECKOUT_ROLES)
+  async openCashDrawer(@CurrentUser() actor: RequestUser, @Body() dto: OpenCashDrawerDto, @Query('locationId') locationId?: string) {
+    return { data: await this.posService.openCashDrawer(actor, dto, locationId) };
+  }
+
+  @Post('cash-drawer/close')
+  @Roles(...CHECKOUT_ROLES)
+  async closeCashDrawer(@CurrentUser() actor: RequestUser, @Body() dto: CloseCashDrawerDto, @Query('locationId') locationId?: string) {
+    return { data: await this.posService.closeCashDrawer(actor, dto, locationId) };
   }
 
   @Post('cart-deletions')
-  @Roles(Role.CASHIER)
-  async logCartDeletion(@CurrentUser() actor: RequestUser, @Body() dto: CartDeletionDto) {
+  @Roles(...CHECKOUT_ROLES)
+  async logCartDeletion(@CurrentUser() actor: RequestUser, @Body() dto: CartDeletionDto, @Query('locationId') locationId?: string) {
     return {
       message: 'Cart item removal recorded',
-      data: await this.posService.logCartDeletion(actor, dto),
+      data: await this.posService.logCartDeletion(actor, dto, locationId),
     };
   }
 }

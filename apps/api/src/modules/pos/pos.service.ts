@@ -1,13 +1,18 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { LocationType, Role } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { CashDrawerSession, InvoiceStatus, LocationType, Prisma, Role } from '@prisma/client';
+import { CloseCashDrawerDto, OpenCashDrawerDto } from './dto/cash-drawer.dto';
+import type { RequestUser } from '../../common/decorators/current-user.decorator';
+import { checkoutLocationId } from './checkout-access';
 import { PrismaService } from '../../prisma/prisma.service';
+
+type Operator = Pick<RequestUser, 'userId' | 'role' | 'locationIds'>;
 
 @Injectable()
 export class PosService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getTerminalContext(actor: { userId: string; role: string; locationIds: string[] }) {
-    const location = await this.getCashierLocation(actor);
+  async getTerminalContext(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string) {
+    const location = await this.getCheckoutLocation(actor, requestedLocationId);
 
     return {
       cashierUserId: actor.userId,
@@ -20,8 +25,8 @@ export class PosService {
     };
   }
 
-  async getOfflineCatalog(actor: { userId: string; role: string; locationIds: string[] }) {
-    await this.getCashierLocation(actor);
+  async getOfflineCatalog(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string) {
+    await this.getCheckoutLocation(actor, requestedLocationId);
     return this.prisma.product.findMany({
       // The current catalogue schema is global (Product has no companyId); only safe sale fields are exposed here.
       where: { isActive: true, variants: { some: { isActive: true } } },
@@ -45,8 +50,9 @@ export class PosService {
   async logCartDeletion(
     actor: { userId: string; role: string; locationIds: string[] },
     input: { variantId: string; quantityRemoved: number; reason?: string },
+    requestedLocationId?: string,
   ) {
-    const location = await this.getCashierLocation(actor);
+    const location = await this.getCheckoutLocation(actor, requestedLocationId);
     const variant = await this.prisma.variant.findFirst({
       // Keep the audit possible if the catalogue item was deactivated while it remained in a draft basket.
       where: { id: input.variantId },
@@ -68,21 +74,88 @@ export class PosService {
     });
   }
 
-  private async getCashierLocation(actor: { userId: string; role: string; locationIds: string[] }) {
-    if (actor.role !== Role.CASHIER) {
-      throw new ForbiddenException('Only cashier accounts can open a cashier terminal');
-    }
-    if (actor.locationIds.length !== 1) {
-      throw new ForbiddenException('Cashier must be bound to exactly one retail store');
-    }
+  async recentReceipts(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string, invoiceNumber?: string) {
+    const location = await this.getCheckoutLocation(actor, requestedLocationId);
+    const search = invoiceNumber?.trim().slice(0, 100);
+    return this.prisma.invoice.findMany({
+      where: {
+        locationId: location.id,
+        status: InvoiceStatus.FINALIZED,
+        ...(actor.role === Role.CASHIER ? { cashierUserId: actor.userId } : {}),
+        ...(search ? { invoiceNumber: { contains: search, mode: 'insensitive' } } : {}),
+      },
+      select: {
+        id: true, invoiceNumber: true, createdAt: true, grossTotal: true, discountTotal: true, netTotal: true,
+        payment: { select: { method: true, amount: true, cashTenderedAmount: true, changeGivenAmount: true } },
+        lines: { select: {
+          id: true, quantityBaseUnits: true, unitPriceAtSale: true, lineTotal: true,
+          variant: { select: { sku: true, name: true, product: { select: { name: true, baseUnit: true } } } },
+        } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 25,
+    });
+  }
 
+  async cashDrawers(actor: Operator, requestedLocationId?: string) {
+    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId);
+    const where = { operatorId: actor.userId, locationId };
+    const [drawer, history] = await Promise.all([
+      this.prisma.cashDrawerSession.findFirst({ where: { ...where, closedAt: null } }),
+      this.prisma.cashDrawerSession.findMany({
+        where: { ...where, closedAt: { not: null } }, orderBy: { closedAt: 'desc' }, take: 20,
+      }),
+    ]);
+    return { drawer: drawer ? { ...drawer, ...await this.drawerTotals(this.prisma, drawer) } : null, history };
+  }
+
+  async openCashDrawer(actor: Operator, dto: OpenCashDrawerDto, requestedLocationId?: string) {
+    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${actor.userId} FOR UPDATE`;
+      const existing = await tx.cashDrawerSession.findFirst({ where: { operatorId: actor.userId, locationId, closedAt: null } });
+      if (existing && !existing.openingCash.equals(dto.openingCash)) throw new ConflictException('A cash drawer is already open');
+      return existing ?? tx.cashDrawerSession.create({ data: { operatorId: actor.userId, locationId, openingCash: dto.openingCash } });
+    });
+  }
+
+  async closeCashDrawer(actor: Operator, dto: CloseCashDrawerDto, requestedLocationId?: string) {
+    const { id: locationId } = await this.getCheckoutLocation(actor, requestedLocationId);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${actor.userId} FOR UPDATE`;
+      const drawer = await tx.cashDrawerSession.findFirst({ where: { id: dto.id, operatorId: actor.userId, locationId } });
+      if (!drawer) throw new NotFoundException('Cash drawer not found');
+      if (drawer.closedAt) {
+        if (drawer.countedCash?.equals(dto.countedCash) && drawer.countedCard?.equals(dto.countedCard)) return drawer;
+        throw new ConflictException('This drawer has already been closed');
+      }
+      const totals = await this.drawerTotals(tx, drawer);
+      return tx.cashDrawerSession.update({
+        where: { id: drawer.id },
+        data: { ...totals, closedAt: new Date(), countedCash: dto.countedCash, countedCard: dto.countedCard },
+      });
+    });
+  }
+
+  private async drawerTotals(db: Prisma.TransactionClient, drawer: CashDrawerSession) {
+    const [payments, refunds] = await Promise.all([
+      db.invoicePayment.groupBy({ by: ['method'], where: { cashDrawerId: drawer.id }, _sum: { amount: true } }),
+      db.invoiceRefund.groupBy({ by: ['method'], where: { cashDrawerId: drawer.id }, _sum: { amount: true } }),
+    ]);
+    const net = (method: 'CARD' | 'CASH') => new Prisma.Decimal(payments.find((row) => row.method === method)?._sum.amount ?? 0)
+      .sub(refunds.find((row) => row.method === method)?._sum.amount ?? 0);
+    return { expectedCash: drawer.openingCash.add(net('CASH')), expectedCard: net('CARD') };
+  }
+
+  private async getCheckoutLocation(actor: { userId: string; role: string; locationIds: string[] }, requestedLocationId?: string) {
+    const locationId = checkoutLocationId(actor, requestedLocationId);
     const location = await this.prisma.location.findUnique({
-      where: { id: actor.locationIds[0] },
+      where: { id: locationId },
       select: { id: true, name: true, type: true, isActive: true, company: { select: { currency: true } } },
     });
-    if (!location) throw new NotFoundException('Cashier store not found');
+    if (!location) throw new NotFoundException('Retail store not found');
     if (!location.isActive || location.type !== LocationType.RETAIL_STORE) {
-      throw new ForbiddenException('Cashier is not bound to an active retail store');
+      throw new ForbiddenException('Choose an active retail store for checkout');
     }
 
     return location;

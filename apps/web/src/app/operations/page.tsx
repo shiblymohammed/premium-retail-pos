@@ -29,7 +29,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { FormEvent, Fragment, useEffect, useMemo, useState } from 'react';
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './operations.module.css';
@@ -64,6 +64,8 @@ interface StockTransfer {
   id: string;
   sourceLocationId: string;
   destLocationId: string;
+  requestedByUserId: string;
+  cartonRoute: boolean;
   transferCode: string;
   sourceLocation: string;
   destLocation: string;
@@ -82,13 +84,19 @@ interface ReplenishmentRequest {
   requestNumber: string;
   status: string;
   generatedByUserId: string;
-  sourceLocation: { id: string; name: string };
-  destLocation: { id: string; name: string };
+  sourceLocation: { id: string; name: string; type: string };
+  destLocation: { id: string; name: string; type: string };
   lines: Array<{ variantId: string; systemSuggestedQtyBase: number; unitsPerCarton: number; variant?: { sku: string; name: string; product?: { name: string } } }>;
 }
 
 type LocationOption = { id: string; name: string; type: string; parentId: string | null };
 type CatalogOption = { variantId: string; sku: string; name: string; unitsPerCarton: number };
+
+const isCartonRoute = (source?: string, destination?: string) =>
+  (source === 'MAIN_WAREHOUSE' && destination === 'SUB_WAREHOUSE') || (source === 'SUB_WAREHOUSE' && destination === 'RETAIL_STORE');
+
+const isReceiver = (role?: string) => role === 'STAFF' || role === 'CASHIER';
+const outstandingQuantity = (item: TransferItem) => Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase);
 
 type StatusFilter = 'ALL' | 'PENDING' | 'TRANSIT' | 'RECEIVED';
 type SortKey = 'newest' | 'oldest' | 'units';
@@ -176,6 +184,18 @@ export default function OperationsPage() {
   const [catalog, setCatalog] = useState<CatalogOption[]>([]);
   const [apiToken, setApiToken] = useState('');
   const [apiUserId, setApiUserId] = useState('');
+  const [apiRole, setApiRole] = useState('');
+  const [packing, setPacking] = useState<StockTransfer | null>(null);
+  const [packingBalances, setPackingBalances] = useState<Record<string, number> | null>(null);
+  const [replenishing, setReplenishing] = useState<ReplenishmentRequest | null>(null);
+  const [lineQuantities, setLineQuantities] = useState<Record<string, number>>({});
+  const [addedVariant, setAddedVariant] = useState('');
+  const [isSavingLines, setIsSavingLines] = useState(false);
+  const [lineError, setLineError] = useState('');
+  const pendingKeys = useRef(new Map<string, string>());
+  const receiveOnly = isReceiver(apiRole);
+  const managesTransfers = !receiveOnly && apiRole !== 'INVENTORY';
+  const canActAt = (id: string) => apiRole === 'SUPER_ADMIN' || locations.some((location) => location.id === id);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState('');
   const [isCreatingBusy, setIsCreatingBusy] = useState(false);
@@ -192,8 +212,7 @@ export default function OperationsPage() {
 
   // Receive modal
   const [receivingTransfer, setReceivingTransfer] = useState<StockTransfer | null>(null);
-  const [damagedUnits, setDamagedUnits] = useState(0);
-  const [missingUnits, setMissingUnits] = useState(0);
+  const [receiptIssues, setReceiptIssues] = useState<Record<string, { damaged: number; missing: number }>>({});
   const [receiveNotes, setReceiveNotes] = useState('');
   const [receiveError, setReceiveError] = useState('');
   const [isReceivingBusy, setIsReceivingBusy] = useState(false);
@@ -238,6 +257,8 @@ export default function OperationsPage() {
       id: row.id,
       sourceLocationId: row.sourceLocationId,
       destLocationId: row.destLocationId,
+      requestedByUserId: row.requestedByUserId,
+      cartonRoute: isCartonRoute(row.sourceLocation?.type, row.destLocation?.type),
       transferCode: row.transferNumber,
       sourceLocation: row.sourceLocation?.name || row.sourceLocationId,
       destLocation: row.destLocation?.name || row.destLocationId,
@@ -253,14 +274,15 @@ export default function OperationsPage() {
     };
   };
 
-  const reloadOperations = async (token = apiToken) => {
+  const reloadOperations = async (token = apiToken, role = apiRole) => {
     if (!token) { setLoading(false); return; }
     const headers = { Authorization: `Bearer ${token}` };
+    const load = (path: string) => fetch(`${API_BASE}${path}`, { headers, cache: 'no-store' });
+    const empty = () => Promise.resolve(new Response('{"data":[]}'));
     const [transferRes, locationRes, productRes, replenishmentRes] = await Promise.all([
-      fetch(`${API_BASE}/transfers`, { headers, cache: 'no-store' }),
-      fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
-      fetch(`${API_BASE}/products?isActive=true`, { headers, cache: 'no-store' }),
-      fetch(`${API_BASE}/transfers/replenishment`, { headers, cache: 'no-store' }),
+      load('/transfers'), load('/locations?isActive=true'),
+      isReceiver(role) ? empty() : load('/products?isActive=true'),
+      isReceiver(role) ? empty() : load('/transfers/replenishment'),
     ]);
     const [transferBody, locationBody, productBody, replenishmentBody] = await Promise.all([
       transferRes.json().catch(() => ({})), locationRes.json().catch(() => ({})), productRes.json().catch(() => ({})), replenishmentRes.json().catch(() => ({})),
@@ -288,10 +310,12 @@ export default function OperationsPage() {
         sourceLocation: {
           id: request.sourceLocation?.id || request.sourceLocationId || '',
           name: locationLabel(request.sourceLocation, request.sourceLocationId),
+          type: request.sourceLocation?.type || '',
         },
         destLocation: {
           id: request.destLocation?.id || request.destLocationId || '',
           name: locationLabel(request.destLocation, request.destLocationId),
+          type: request.destLocation?.type || '',
         },
         lines: Array.isArray(request.lines) ? request.lines : [],
       })));
@@ -306,13 +330,14 @@ export default function OperationsPage() {
   useEffect(() => {
     const session = getStoredSession();
     if (!session?.accessToken) {
-      setApiError('Sign in with a manager account to view and manage transfers.');
+      setApiError('Sign in to view stock transfers.');
       setLoading(false);
       return;
     }
     setApiToken(session.accessToken);
     setApiUserId(session.user?.id || '');
-    reloadOperations(session.accessToken).catch((error) => setApiError(error instanceof Error ? error.message : 'Could not load transfers.')).finally(() => setLoading(false));
+    setApiRole(session.user?.role ?? '');
+    reloadOperations(session.accessToken, session.user?.role).catch((error) => setApiError(error instanceof Error ? error.message : 'Could not load transfers.')).finally(() => setLoading(false));
   }, []);
 
   // Follow the store chosen in the top bar
@@ -332,7 +357,8 @@ export default function OperationsPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      setReceivingTransfer(null);
+      if (!isReceivingBusy) setReceivingTransfer(null);
+      if (!isSavingLines) { setPacking(null); setReplenishing(null); }
       setCreateModalOpen(false);
       setMenuFor(null);
     };
@@ -342,7 +368,35 @@ export default function OperationsPage() {
     window.addEventListener('keydown', onKey);
     window.addEventListener('mousedown', onClick);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onClick); };
-  }, []);
+  }, [isReceivingBusy, isSavingLines]);
+
+  useEffect(() => {
+    if (!packing || !apiToken) return;
+    const controller = new AbortController();
+    const pending = packing.items.filter((line) => line.approvedQtyBase > line.dispatchedQtyBase);
+
+    async function readStock() {
+      const balances: Record<string, number> = {};
+      for (let index = 0; index < pending.length; index += 100) {
+        const params = new URLSearchParams({
+          locationId: packing!.sourceLocationId,
+          stockState: 'AVAILABLE',
+          variantIds: pending.slice(index, index + 100).map((item) => item.variantId).join(','),
+        });
+        const response = await fetch(`${API_BASE}/inventory/balances?${params}`, {
+          headers: { Authorization: `Bearer ${apiToken}` }, cache: 'no-store', signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('Stock availability could not be checked.');
+        const payload = await response.json() as { data: Array<{ variantId: string; quantityBaseUnits: number }> };
+        for (const row of payload.data) balances[row.variantId] = row.quantityBaseUnits;
+      }
+      if (!controller.signal.aborted) setPackingBalances(balances);
+    }
+
+    setPackingBalances(null);
+    void readStock().catch(() => { /* Dispatch still checks current stock on the server. */ });
+    return () => controller.abort();
+  }, [packing, apiToken]);
 
   // Auto-hide notices
   useEffect(() => {
@@ -391,64 +445,93 @@ export default function OperationsPage() {
   const count = (s: StatusFilter) => s === 'ALL' ? scoped.length : s === 'PENDING' ? scoped.filter((t) => isPending(t.status)).length : s === 'TRANSIT' ? scoped.filter((t) => isInTransit(t.status)).length : scoped.filter((t) => t.status === 'RECEIVED').length;
 
   async function mutate(path: string, method: 'POST' | 'PATCH', body?: unknown) {
-    if (!apiToken) throw new Error('Sign in with a manager account before changing transfers.');
+    if (!apiToken) throw new Error('Sign in before changing a transfer.');
+    const serialized = body === undefined ? undefined : JSON.stringify(body);
+    const signature = JSON.stringify([path, method, serialized]);
+    const key = pendingKeys.current.get(signature) ?? crypto.randomUUID();
+    pendingKeys.current.set(signature, key);
     const response = await fetch(`${API_BASE}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      body: serialized,
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.message || `Request failed (${response.status})`);
-    await reloadOperations();
+    pendingKeys.current.delete(signature);
+    await reloadOperations().catch(() => setApiError('The change was saved. Retry to refresh the transfer list.'));
     return payload.data;
   }
 
-  // ---------- actions ----------
-  function openReceive(t: StockTransfer) {
+  function openReceive(transfer: StockTransfer) {
     setMenuFor(null);
-    setReceivingTransfer(t);
-    setDamagedUnits(0);
-    setMissingUnits(0);
+    setReceivingTransfer(transfer);
+    setReceiptIssues({});
     setReceiveNotes('');
     setReceiveError('');
   }
 
-  async function handleReceiveConfirm(e: FormEvent) {
-    e.preventDefault();
-    if (!receivingTransfer) return;
-    const lines = receivingTransfer.items.map((item) => ({ ...item, outstanding: Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase) }));
-    const total = lines.reduce((sum, line) => sum + line.outstanding, 0);
-    if (damagedUnits + missingUnits > total) {
-      setReceiveError(`Damaged and missing (${damagedUnits + missingUnits}) can't be more than the ${total} units sent.`);
+  async function handleReceiveConfirm(event: FormEvent) {
+    event.preventDefault();
+    if (!receivingTransfer || isReceivingBusy) return;
+    const lines = receivingTransfer.items.filter((item) => outstandingQuantity(item) > 0).map((item) => {
+      const { damaged = 0, missing = 0 } = receiptIssues[item.variantId] ?? {};
+      return { variantId: item.variantId, expected: outstandingQuantity(item), damaged, missing };
+    });
+    if (!lines.length || lines.some((line) => line.damaged + line.missing > line.expected)) {
+      setReceiveError('Damaged and missing units cannot exceed the outstanding units on each product.');
       return;
     }
-    if ((damagedUnits || missingUnits) && !receiveNotes.trim()) { setReceiveError('A note is required when receipt quantities differ.'); return; }
-    if ((damagedUnits || missingUnits) && lines.filter((line) => line.outstanding > 0).length !== 1) {
-      setReceiveError('For a receipt discrepancy, process one product per transfer line so quantities can be attributed correctly.');
+    if (lines.some((line) => line.damaged || line.missing) && !receiveNotes.trim()) {
+      setReceiveError('Add a note to explain the discrepancy.');
       return;
     }
     setIsReceivingBusy(true);
+    setReceiveError('');
     try {
-      const line = lines.filter((item) => item.outstanding > 0);
-      await mutate(`/transfers/${receivingTransfer.id}/receive`, 'POST', { lines: line.map((item) => ({
-        variantId: item.variantId,
-        receivedQtyBase: item.outstanding - missingUnits,
-        ...(damagedUnits ? { damagedQtyBase: damagedUnits } : {}),
-        ...(missingUnits ? { shortQtyBase: missingUnits, finalizeLine: true } : {}),
-        ...((damagedUnits || missingUnits) ? { discrepancyNotes: receiveNotes.trim() } : {}),
-      })) });
+      await mutate(`/transfers/${receivingTransfer.id}/receive`, 'POST', {
+        lines: lines.map(({ variantId, expected, damaged, missing }) => ({
+          variantId,
+          receivedQtyBase: expected - missing,
+          damagedQtyBase: damaged,
+          ...(missing ? { shortQtyBase: missing, finalizeLine: true } : {}),
+          ...((damaged || missing) ? { discrepancyNotes: receiveNotes.trim() } : {}),
+        })),
+      });
       setReceivingTransfer(null);
-      setNotice('Receipt recorded by the server; inventory ledger updated.');
-    } catch (error) { setReceiveError(error instanceof Error ? error.message : 'Could not record receipt.'); }
-    finally { setIsReceivingBusy(false); }
+      setNotice('Receipt recorded. Inventory updated.');
+    } catch (error) {
+      setReceiveError(error instanceof Error ? error.message : 'Could not record receipt.');
+    } finally {
+      setIsReceivingBusy(false);
+    }
   }
 
-  async function dispatchTransfer(t: StockTransfer) {
+  function openPacking(transfer: StockTransfer) {
     setMenuFor(null);
+    setLineError('');
+    setLineQuantities({});
+    setPacking(transfer);
+  }
+
+  async function confirmPacking(event: FormEvent) {
+    event.preventDefault();
+    if (!packing || isSavingLines) return;
+    const lines = packing.items.filter((item) => lineQuantities[item.variantId] > 0).map((item) => ({
+      variantId: item.variantId,
+      ...(packing.cartonRoute ? { cartons: lineQuantities[item.variantId] } : { looseBaseUnits: lineQuantities[item.variantId] }),
+    }));
+    if (!lines.length) { setLineError('Enter the quantity packed for at least one product.'); return; }
+    setIsSavingLines(true);
+    setLineError('');
     try {
-      await mutate(`/transfers/${t.id}/dispatch`, 'POST', { lines: t.items.filter((item) => item.approvedQtyBase > item.dispatchedQtyBase).map((item) => ({ variantId: item.variantId, looseBaseUnits: item.approvedQtyBase - item.dispatchedQtyBase })) });
-      setNotice('Dispatch recorded by the server; stock moved to in-transit.');
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not dispatch this transfer.'); }
+      await mutate(`/transfers/${packing.id}/dispatch`, 'POST', { lines });
+      setPacking(null);
+      setNotice('Packed quantities dispatched. Any approved balance remains open.');
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : 'Could not dispatch this transfer.');
+    } finally {
+      setIsSavingLines(false);
+    }
   }
 
   async function submitTransfer(t: StockTransfer) {
@@ -485,11 +568,37 @@ export default function OperationsPage() {
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not generate replenishment.'); }
   }
 
-  async function approveReplenishment(request: ReplenishmentRequest) {
+  function openReplenishment(request: ReplenishmentRequest) {
+    const cartons = isCartonRoute(request.sourceLocation.type, request.destLocation.type);
+    setLineQuantities(Object.fromEntries(request.lines.map((line) => [
+      line.variantId, cartons && line.unitsPerCarton > 1 ? Math.ceil(line.systemSuggestedQtyBase / line.unitsPerCarton) : cartons ? 0 : line.systemSuggestedQtyBase,
+    ])));
+    setAddedVariant('');
+    setLineError('');
+    setReplenishing(request);
+  }
+
+  async function approveReplenishment(event: FormEvent) {
+    event.preventDefault();
+    if (!replenishing || isSavingLines) return;
+    const cartons = isCartonRoute(replenishing.sourceLocation.type, replenishing.destLocation.type);
+    const lines = Object.entries(lineQuantities).map(([variantId, quantity]) => {
+      const ratio = replenishing.lines.find((line) => line.variantId === variantId)?.unitsPerCarton
+        ?? catalog.find((variant) => variant.variantId === variantId)?.unitsPerCarton ?? 1;
+      return { variantId, approvedQtyBase: cartons ? quantity * ratio : quantity };
+    });
+    if (!lines.some((line) => line.approvedQtyBase > 0)) { setLineError('Approve a quantity for at least one product.'); return; }
+    setIsSavingLines(true);
+    setLineError('');
     try {
-      await mutate(`/transfers/replenishment/${request.id}/approve`, 'POST', { lines: request.lines.map((line) => ({ variantId: line.variantId, approvedQtyBase: line.systemSuggestedQtyBase })) });
-      setNotice(`Replenishment ${request.requestNumber} approved and transfer draft created.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not approve replenishment.'); }
+      await mutate(`/transfers/replenishment/${replenishing.id}/approve`, 'POST', { lines });
+      setReplenishing(null);
+      setNotice(`Replenishment ${replenishing.requestNumber} approved and transfer draft created.`);
+    } catch (error) {
+      setLineError(error instanceof Error ? error.message : 'Could not approve replenishment.');
+    } finally {
+      setIsSavingLines(false);
+    }
   }
 
   async function rejectReplenishment(request: ReplenishmentRequest, reason: string) {
@@ -512,16 +621,18 @@ export default function OperationsPage() {
     setCreateModalOpen(true);
   }
 
+  const draftCartonRoute = isCartonRoute(locations.find((location) => location.id === newOrigin)?.type, locations.find((location) => location.id === newDest)?.type);
   const draftItems: TransferItem[] = catalog.filter((p) => draft[p.sku]).map((p) => {
     const q = draft[p.sku];
-    const totalUnits = q.cartons * p.unitsPerCarton + q.loose;
-    return { variantId: p.variantId, sku: p.sku, name: p.name, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: q.loose, totalUnits, requestedQtyBase: totalUnits, approvedQtyBase: 0, dispatchedQtyBase: 0, receivedQtyBase: 0, shortQtyBase: 0, damagedQtyBase: 0 };
+    const loose = draftCartonRoute ? 0 : q.loose;
+    const totalUnits = q.cartons * p.unitsPerCarton + loose;
+    return { variantId: p.variantId, sku: p.sku, name: p.name, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: loose, totalUnits, requestedQtyBase: totalUnits, approvedQtyBase: 0, dispatchedQtyBase: 0, receivedQtyBase: 0, shortQtyBase: 0, damagedQtyBase: 0 };
   });
   const draftTotal = draftItems.reduce((s, i) => s + i.totalUnits, 0);
   const setQty = (sku: string, key: keyof DraftQty, value: number) => setDraft((d) => ({ ...d, [sku]: { ...d[sku], [key]: Math.max(0, value) } }));
   const toggleProduct = (sku: string) => setDraft((d) => {
     const next = { ...d };
-    if (next[sku]) delete next[sku]; else next[sku] = { cartons: 1, loose: 0 };
+    if (next[sku]) delete next[sku]; else { const packed = (catalog.find((variant) => variant.sku === sku)?.unitsPerCarton ?? 1) > 1; next[sku] = { cartons: packed ? 1 : 0, loose: packed ? 0 : 1 }; }
     return next;
   });
 
@@ -529,6 +640,7 @@ export default function OperationsPage() {
     e.preventDefault();
     if (newOrigin === newDest) { setCreateError('Pick a different destination.'); return; }
     if (!draftItems.length) { setCreateError('Choose at least one product to send.'); return; }
+    if (draftCartonRoute && draftItems.some((item) => item.unitsPerCarton <= 1)) { setCreateError('Remove products without a carton size for this route.'); return; }
     if (draftItems.some((i) => i.totalUnits <= 0)) { setCreateError('Each product needs at least one carton or loose unit.'); return; }
 
     setIsCreatingBusy(true);
@@ -575,8 +687,7 @@ export default function OperationsPage() {
     { key: 'RECEIVED', label: 'Received' },
   ];
 
-  const receiveTotal = receivingTransfer ? receivingTransfer.items.reduce((sum, item) => sum + Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase), 0) : 0;
-  const receiveGood = Math.max(0, receiveTotal - damagedUnits - missingUnits);
+
 
   const Stepper = ({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) => (
     <span className={styles.stepper}>
@@ -591,13 +702,13 @@ export default function OperationsPage() {
       {/* ---------- Header (same pattern as Products / Reports) ---------- */}
       <header className={styles.header}>
         <div>
-          <h1>Transfers &amp; Logistics</h1>
-          <p>Send stock between locations, follow it on the road and receive it into inventory.</p>
+          <h1>{receiveOnly ? 'Incoming deliveries' : 'Transfers & Logistics'}</h1>
+          <p>{receiveOnly ? 'Check and receive stock at your assigned store.' : 'Send stock between locations, follow it on the road and receive it into inventory.'}</p>
         </div>
-        <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={generateReplenishment} disabled={!apiToken || locationFilter === 'ALL'}>Generate replenishment</button>
+        {!receiveOnly && <div className={styles.headerActions}>
+          <button type="button" className={styles.ghostButton} onClick={generateReplenishment} disabled={!managesTransfers || !apiToken || locationFilter === 'ALL'}>Generate replenishment</button>
           <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={!apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
-        </div>
+        </div>}
       </header>
 
       {apiError && <div className={styles.notice} role="alert"><Icon name="alert" size={16} /><span>{apiError}</span><button type="button" onClick={() => { setLoading(true); reloadOperations().then(() => setApiError('')).catch((error) => setApiError(error.message)).finally(() => setLoading(false)); }}>Retry</button></div>}
@@ -712,6 +823,18 @@ export default function OperationsPage() {
             const isOpen = expanded === t.id;
             const issues = hasIssues(t);
             const created = splitStamp(t.createdAt);
+            const canApprove = managesTransfers && t.requestedByUserId !== apiUserId && canActAt(t.sourceLocationId);
+            const canDispatch = managesTransfers && canActAt(t.sourceLocationId) && ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && t.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (t.cartonRoute ? item.unitsPerCarton : 1));
+            const hasOutstanding = t.items.some((item) => outstandingQuantity(item) > 0);
+            const canReceive = apiRole !== 'INVENTORY' && canActAt(t.destLocationId) && hasOutstanding && ['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status);
+            const awaitingPacking = ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status)
+              && t.items.some((item) => item.approvedQtyBase > item.dispatchedQtyBase);
+            const nextSteps = [
+              t.status === 'DRAFT' ? 'Submit · requesting manager' : null,
+              t.status === 'PENDING_APPROVAL' ? `Approve · another manager at ${t.sourceLocation}` : null,
+              awaitingPacking ? `Pack · manager at ${t.sourceLocation}` : null,
+              hasOutstanding ? `Receive · authorized team at ${t.destLocation}` : null,
+            ].filter(Boolean);
             return (
               <Fragment key={t.id}>
                 <li className={`${styles.row} ${isOpen ? styles.rowOpen : ''}`}>
@@ -734,25 +857,25 @@ export default function OperationsPage() {
                     <small>{t.items.length} product{t.items.length === 1 ? '' : 's'} · {cartonsOf(t)} cartons</small>
                   </span>
 
-                  <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? 'Received · issues' : meta.label}</span></span>
+                  <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? 'Received · issues' : meta.label}</span>{nextSteps.map((step) => <small className={styles.nextStep} key={step}>{step}</small>)}</span>
 
                   <span className={styles.rowActions}>
-                    {t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
-                    {t.status === 'PENDING_APPROVAL' && <button type="button" className={styles.actionButton} onClick={() => approveTransfer(t)}>Approve</button>}
-                    {['APPROVED', 'PARTIALLY_DISPATCHED'].includes(t.status) && <button type="button" className={styles.actionButton} onClick={() => dispatchTransfer(t)}>Dispatch</button>}
-                    {['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
+                    {!receiveOnly && t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
+                    {t.status === 'PENDING_APPROVAL' && (canApprove ? <button type="button" className={styles.actionButton} onClick={() => approveTransfer(t)}>Approve</button> : <small>Waiting for another manager</small>)}
+                    {canDispatch && <button type="button" className={styles.actionButton} onClick={() => openPacking(t)}>Confirm packing</button>}
+                    {canReceive && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
                     <span className={styles.menuWrap} data-row-menu>
                       <button type="button" className={`${styles.moreButton} ${menuFor === t.id ? styles.moreOn : ''}`} onClick={() => setMenuFor(menuFor === t.id ? null : t.id)} aria-haspopup="menu" aria-expanded={menuFor === t.id} aria-label={`Options for ${t.transferCode}`}><Icon name="more" size={16} /></button>
                       {menuFor === t.id && (
                         <div className={styles.menu} role="menu">
                           <div className={styles.menuHeading}>{t.transferCode}</div>
                           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setExpanded(isOpen ? null : t.id); }}><Icon name="eye" size={15} /><span><b>{isOpen ? 'Hide details' : 'View details'}</b><small>Products, timeline and notes</small></span></button>
-                          {t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
-                          {t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => approveTransfer(t)}><Icon name="check" size={15} /><span><b>Approve</b><small>Approver cannot be the requester</small></span></button>}
-                          {t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${t.transferCode}?`, submit: (reason) => rejectTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
-                          {['APPROVED', 'PARTIALLY_DISPATCHED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => dispatchTransfer(t)}><Icon name="send" size={15} /><span><b>Dispatch remaining stock</b><small>Server checks available inventory</small></span></button>}
-                          {['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
-                          {!['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
+                          {!receiveOnly && t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
+                          {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => approveTransfer(t)}><Icon name="check" size={15} /><span><b>Approve</b><small>Approver cannot be the requester</small></span></button>}
+                          {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${t.transferCode}?`, submit: (reason) => rejectTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
+                          {canDispatch && <button type="button" role="menuitem" onClick={() => openPacking(t)}><Icon name="send" size={15} /><span><b>Confirm packed quantities</b><small>Server checks available inventory</small></span></button>}
+                          {canReceive && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
+                          {managesTransfers && !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
                           <button type="button" role="menuitem" onClick={() => copyTracking(t)}><Icon name="copy" size={15} /><span><b>Copy tracking number</b><small>{t.trackingNumber}</small></span></button>
                           <div className={styles.menuDivider} />
                           <button type="button" role="menuitem" onClick={() => exportCsv([t])}><Icon name="download" size={15} /><span><b>Download as CSV</b><small>This transfer only</small></span></button>
@@ -816,21 +939,74 @@ export default function OperationsPage() {
         </footer>
       </section>
 
-      <section className={styles.tableCard} aria-labelledby="replenishment-heading">
+      {!receiveOnly && <section className={styles.tableCard} aria-labelledby="replenishment-heading">
         <div className={styles.tableTop}><div><div className="heading-with-info"><h2 id="replenishment-heading">Replenishment requests</h2><InfoHint label="About replenishment requests">Review suggested transfers to restock low inventory. A different manager must approve the request.</InfoHint></div><p>Server generated suggestions require approval by a different manager.</p></div></div>
         {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p></div> : (
           <ul className={styles.rows}>{replenishments.map((request) => <li className={styles.row} key={request.id}>
             <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
             <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
             <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
-            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => approveReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Approve</button><button type="button" className={styles.ghostButton} onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) }); }} disabled={request.generatedByUserId === apiUserId}>Reject</button></span> : <span />}
+            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => openReplenishment(request)} disabled={!managesTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Review quantities</button><button type="button" className={styles.ghostButton} onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) }); }} disabled={!managesTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Reject</button></span> : <span />}
           </li>)}</ul>
         )}
-      </section>
+      </section>}
+
+      {(packing || replenishing) && <div className={styles.backdrop}>
+        <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="transfer-quantities-title">
+          <header className={styles.modalHead}>
+            <div><h2 id="transfer-quantities-title">{packing ? `Confirm packing for ${packing.transferCode}` : `Review ${replenishing?.requestNumber}`}</h2>
+              <p>{packing ? 'Enter what was actually packed. The remaining quantities stay open.' : 'Adjust the suggested quantities or add products before approving.'}</p></div>
+          </header>
+          <form onSubmit={packing ? confirmPacking : approveReplenishment}>
+            <div className={styles.modalBody}>
+              {packing ? packing.items.map((item) => {
+                const ratio = packing.cartonRoute ? item.unitsPerCarton : 1;
+                const remaining = Math.floor((item.approvedQtyBase - item.dispatchedQtyBase) / ratio);
+                const unit = packing.cartonRoute ? 'cartons' : 'units';
+                const available = packingBalances ? Math.floor(Math.max(0, packingBalances[item.variantId] ?? 0) / ratio) : null;
+                if (remaining <= 0 || (packing.cartonRoute && ratio <= 1)) return null;
+                return <label className={styles.field} key={item.variantId}>
+                  <span>{item.name} · {remaining} {unit} remaining</span>
+                  {available !== null && <small>{available} {unit} available</small>}
+                  <input type="number" inputMode="numeric" min="0" max={remaining} step="1" disabled={isSavingLines} value={lineQuantities[item.variantId] ?? ''} onChange={(event) => setLineQuantities((current) => ({ ...current, [item.variantId]: Number(event.target.value) }))} />
+                </label>;
+              }) : replenishing && (() => {
+                const cartons = isCartonRoute(replenishing.sourceLocation.type, replenishing.destLocation.type);
+                const choices = catalog.filter((variant) => !(variant.variantId in lineQuantities) && (!cartons || variant.unitsPerCarton > 1));
+                return <>
+                  {Object.entries(lineQuantities).map(([variantId, quantity]) => {
+                    const suggested = replenishing.lines.find((line) => line.variantId === variantId);
+                    const variant = catalog.find((item) => item.variantId === variantId);
+                    const isPacketOnly = cartons && (suggested?.unitsPerCarton ?? variant?.unitsPerCarton ?? 1) <= 1;
+                    return <label className={styles.field} key={variantId}>
+                      <span>{variant?.name ?? variantId} · {isPacketOnly ? 'Carton size needed' : cartons ? 'Cartons' : 'Units'}</span>
+                      <input type="number" min="0" step="1" max="2147483647" value={quantity} disabled={isSavingLines || isPacketOnly} onChange={(event) => setLineQuantities((current) => ({ ...current, [variantId]: Number(event.target.value) }))} />
+                    </label>;
+                  })}
+                  <label className={styles.field}><span>Add another product</span>
+                    <select value={addedVariant} disabled={isSavingLines} onChange={(event) => setAddedVariant(event.target.value)}><option value="">Select a product</option>
+                      {choices.map((variant) => <option key={variant.variantId} value={variant.variantId}>{variant.name} · {variant.sku}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" className={styles.ghostButton} disabled={!addedVariant || isSavingLines} onClick={() => {
+                    setLineQuantities((current) => ({ ...current, [addedVariant]: 1 }));
+                    setAddedVariant('');
+                  }}>Add product</button>
+                </>;
+              })()}
+              {lineError && <Feedback tone="error">{lineError}</Feedback>}
+            </div>
+            <footer className={styles.modalFoot}>
+              <button type="button" className={styles.ghostButton} disabled={isSavingLines} onClick={() => { setPacking(null); setReplenishing(null); }}>Cancel</button>
+              <button type="submit" className={styles.primaryButton} disabled={isSavingLines}>{isSavingLines ? 'Saving…' : packing ? 'Confirm and dispatch' : 'Approve request'}</button>
+            </footer>
+          </form>
+        </section>
+      </div>}
 
       {/* ---------- Receive modal ---------- */}
       {receivingTransfer && (
-        <div className={styles.backdrop} onClick={() => setReceivingTransfer(null)}>
+        <div className={styles.backdrop} onClick={() => { if (!isReceivingBusy) setReceivingTransfer(null); }}>
           <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="receive-title" onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHead}>
               <span className={`${styles.modalIcon} ${styles.icon_transit}`}><Icon name="inbox" size={18} /></span>
@@ -843,16 +1019,17 @@ export default function OperationsPage() {
             <form onSubmit={handleReceiveConfirm}>
               <div className={styles.modalBody}>
                 <div className={styles.manifest}>
-                  {receivingTransfer.items.map((i) => (
-                    <div key={i.sku}><span>{i.name}<small>{i.sku}</small></span><b>{i.totalUnits}</b></div>
-                  ))}
-                </div>
-
-                <div className={styles.receiveGrid}>
-                  <div className={styles.receiveBox}><small>Expected</small><b>{receiveTotal}</b></div>
-                  <div className={styles.receiveBox}><small>Damaged</small><Stepper value={damagedUnits} onChange={(v) => setDamagedUnits(Math.max(0, v))} label="damaged units" /></div>
-                  <div className={styles.receiveBox}><small>Missing</small><Stepper value={missingUnits} onChange={(v) => setMissingUnits(Math.max(0, v))} label="missing units" /></div>
-                  <div className={`${styles.receiveBox} ${styles.receiveGood}`}><small>Into stock</small><b>{receiveGood}</b></div>
+                  {receivingTransfer.items.filter((item) => outstandingQuantity(item) > 0).map((item) => {
+                    const expected = outstandingQuantity(item);
+                    const issues = receiptIssues[item.variantId] ?? { damaged: 0, missing: 0 };
+                    return <fieldset key={item.variantId} className={styles.receiptLine}>
+                      <legend>{item.name} · {item.sku}</legend>
+                      <span>Expected <strong>{expected} units</strong></span>
+                      <label>Damaged<input type="number" min="0" step="1" max={expected} value={issues.damaged} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, damaged: Number(event.target.value) } }))} /></label>
+                      <label>Missing<input type="number" min="0" step="1" max={expected} value={issues.missing} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, missing: Number(event.target.value) } }))} /></label>
+                      <span>Into stock <strong>{Math.max(0, expected - issues.damaged - issues.missing)}</strong></span>
+                    </fieldset>;
+                  })}
                 </div>
 
                 <label className={styles.field}><span>Note</span><textarea rows={2} value={receiveNotes} onChange={(e) => setReceiveNotes(e.target.value)} placeholder="e.g. 1 carton crushed, 2 units missing" /></label>
@@ -923,9 +1100,9 @@ export default function OperationsPage() {
                           </button>
                           {q && (
                             <div className={styles.productQty}>
-                              <label><small>Cartons</small><Stepper value={q.cartons} onChange={(v) => setQty(p.sku, 'cartons', v)} label={`cartons of ${p.name}`} /></label>
-                              <label><small>Loose</small><Stepper value={q.loose} onChange={(v) => setQty(p.sku, 'loose', v)} label={`loose units of ${p.name}`} /></label>
-                              <span className={styles.qtyTotal}><small>Units</small><b>{q.cartons * p.unitsPerCarton + q.loose}</b></span>
+                              {p.unitsPerCarton > 1 && <label><small>Cartons</small><Stepper value={q.cartons} onChange={(v) => setQty(p.sku, 'cartons', v)} label={`cartons of ${p.name}`} /></label>}
+                              {!draftCartonRoute && <label><small>Loose</small><Stepper value={q.loose} onChange={(v) => setQty(p.sku, 'loose', v)} label={`loose units of ${p.name}`} /></label>}
+                              <span className={styles.qtyTotal}><small>Units</small><b>{q.cartons * p.unitsPerCarton + (draftCartonRoute ? 0 : q.loose)}</b></span>
                             </div>
                           )}
                         </div>

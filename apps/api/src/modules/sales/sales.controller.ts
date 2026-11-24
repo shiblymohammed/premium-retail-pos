@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Role } from '@prisma/client';
+import { CHECKOUT_ROLES } from '../pos/checkout-access';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -16,7 +16,7 @@ export class SalesController {
   constructor(private readonly sales: SalesService) {}
 
   @Post('quote')
-  @Roles(Role.CASHIER)
+  @Roles(...CHECKOUT_ROLES)
   async quote(@Body() dto: QuoteSaleDto, @CurrentUser() actor: RequestUser) {
     return { data: await this.sales.quoteSale(dto, actor) };
   }
@@ -27,7 +27,7 @@ export class SalesController {
   }
 
   @Post()
-  @Roles(Role.CASHIER)
+  @Roles(...CHECKOUT_ROLES)
   async create(
     @Body() dto: CreateSaleDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,

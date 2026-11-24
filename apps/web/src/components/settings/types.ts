@@ -37,7 +37,6 @@ export interface UserPreferences {
 
   // Staff Preferences
   shiftReminderAdvanceMinutes: number;
-  qrCameraFacing: 'environment' | 'user';
 
   // Admin Enterprise Policies
   passwordExpiryDays: number;
@@ -84,7 +83,6 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   requireDriverSealConfirmation: true,
 
   shiftReminderAdvanceMinutes: 30,
-  qrCameraFacing: 'environment',
 
   passwordExpiryDays: 90,
   enforceDualAxisBinding: true,

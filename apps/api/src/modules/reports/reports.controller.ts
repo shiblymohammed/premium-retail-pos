@@ -28,6 +28,16 @@ export class ReportsController {
     return { data: await this.reports.salesDetails(query, actor, page, pageSize) };
   }
 
+  @Get('sales-details/export')
+  async exportInvoices(@Query() query: ReportQuery, @CurrentUser() actor: RequestUser) {
+    return { data: await this.reports.exportInvoices(query, actor) };
+  }
+
+  @Get('product-performance')
+  async productPerformance(@Query() query: ReportQuery, @CurrentUser() actor: RequestUser) {
+    return { data: await this.reports.productPerformance(query, actor) };
+  }
+
   @Get('stock')
   async stock(@Query() query: ReportQuery, @CurrentUser() actor: RequestUser) {
     return { data: await this.reports.stock(query, actor) };

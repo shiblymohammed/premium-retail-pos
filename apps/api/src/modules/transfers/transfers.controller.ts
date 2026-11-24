@@ -40,6 +40,7 @@ export class TransfersController {
   }
 
   @Get('replenishment')
+  @Roles(...MANAGER_ROLES, Role.INVENTORY)
   async listReplenishments(@CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findReplenishments(actor) };
   }
@@ -65,6 +66,7 @@ export class TransfersController {
   }
 
   @Post()
+  @Roles(...MANAGER_ROLES, Role.INVENTORY)
   async create(
     @Body() dto: CreateTransferDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
@@ -74,16 +76,19 @@ export class TransfersController {
   }
 
   @Get()
+  @Roles(...MANAGER_ROLES, Role.INVENTORY, Role.STAFF, Role.CASHIER)
   async findAll(@CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findTransfers(actor) };
   }
 
   @Get(':id')
+  @Roles(...MANAGER_ROLES, Role.INVENTORY, Role.STAFF, Role.CASHIER)
   async findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findTransfer(id, actor) };
   }
 
   @Post(':id/submit')
+  @Roles(...MANAGER_ROLES, Role.INVENTORY)
   async submit(
     @Param('id') id: string,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
@@ -123,6 +128,7 @@ export class TransfersController {
   }
 
   @Post(':id/receive')
+  @Roles(...MANAGER_ROLES, Role.STAFF, Role.CASHIER)
   async receive(
     @Param('id') id: string,
     @Body() dto: ReceiveTransferDto,

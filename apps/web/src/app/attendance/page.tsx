@@ -1,9 +1,8 @@
 'use client';
 
-import { CameraScanner } from '@/components/ui/camera-scanner';
 import { ConfirmAction } from '@/components/ui/confirm-action';
 import { InfoHint } from '@/components/ui/info-hint';
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, Camera, Check, ChevronRight, Clock, Info, MapPin, QrCode, Timer } from 'lucide-react';
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronRight, Clock, Info, MapPin, Timer } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import styles from './attendance.module.css';
@@ -16,7 +15,6 @@ type Punch = {
   punchTimestamp: string;
   isLate: boolean;
   targetStartTime: string | null;
-  qrVerified: boolean;
   originalTimestamp: string | null;
   correctionReason: string | null;
 };
@@ -27,7 +25,6 @@ type Today = {
   localDate: string;
   timezone: string;
   targetStartTime: string | null;
-  qrRequired: boolean;
   status: 'NOT_STARTED' | 'WORKING' | 'COMPLETED';
   nextAction: 'IN' | 'OUT' | null;
   punches: Punch[];
@@ -81,9 +78,7 @@ export default function AttendancePage() {
   const [apiToken, setApiToken] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [scannerOpen, setScannerOpen] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
-  const [qrToken, setQrToken] = useState('');
   const [clockNow, setClockNow] = useState<Date | null>(null);
   const [history, setHistory] = useState<HistoryDay[]>([]);
 
@@ -92,13 +87,6 @@ export default function AttendancePage() {
     const now = new Date();
     setClockNow(now);
     const timer = window.setInterval(() => setClockNow(new Date()), 1000);
-
-    const code = new URLSearchParams(window.location.hash.slice(1)).get('qr');
-    if (code) {
-      setQrToken(code);
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      setNotice('Attendance QR link received. The server will verify it when you record your punch.');
-    }
 
     if (!session?.accessToken) {
       setError('Sign in with an employee account to view attendance.');
@@ -197,7 +185,7 @@ export default function AttendancePage() {
   }
 
   async function handlePunch() {
-    if (!today?.nextAction || !apiToken || busy || (today.qrRequired && !qrToken)) return;
+    if (!today?.nextAction || !apiToken || busy) return;
     setBusy(true);
     setError('');
 
@@ -205,7 +193,6 @@ export default function AttendancePage() {
       const response = await fetch(`${API_BASE}/attendance/me/punch`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(qrToken ? { qrToken } : {}),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'Could not record attendance. Please try again.');
@@ -225,7 +212,6 @@ export default function AttendancePage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not record attendance. Please try again.');
     } finally {
-      setQrToken('');
       setBusy(false);
     }
   }
@@ -278,26 +264,18 @@ export default function AttendancePage() {
 
         <section className={styles.mainGrid}>
           <article id="shift" className={styles.actionPanel}>
-            <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><div className="heading-with-info"><h2>Shift check-in</h2><InfoHint label="About shift check-in">Attendance entries are recorded against your assigned location. Scan the store QR code when the screen asks for it.</InfoHint></div><p>Manage your punches for today.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
-
-            {today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}>
-              <span className={styles.qrIcon}>{qrToken ? <Check size={18} /> : <QrCode size={18} />}</span>
-              <div><strong>{qrToken ? 'Attendance code ready' : today.qrRequired ? 'Scan the location QR to continue' : 'Location verification'}</strong>
-              <small>{qrToken ? 'The code is verified when you record your punch.' : 'Use the current attendance code displayed at your location.'}</small></div>
-              <button className="admin-secondary" type="button" onClick={() => setScannerOpen(true)}><Camera size={17} /> {qrToken ? 'Scan again' : 'Scan QR'}</button>
-              {qrToken && <button className="admin-secondary" type="button" onClick={() => setQrToken('')}>Clear code</button>}
-            </div>}
+            <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><div className="heading-with-info"><h2>Shift check-in</h2><InfoHint label="About shift check-in">Attendance entries are recorded against your assigned location.</InfoHint></div><p>Manage your punches for today.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
 
             <div className={styles.shiftSummary}>
               {today.status === 'NOT_STARTED' && <>
                 <div><small>Local time</small><strong>{clockValue}</strong><p>{today.targetStartTime ? `Scheduled start ${today.targetStartTime}` : 'Clock in when you’re ready to start.'}</p></div>
-                <button className="admin-primary" type="button" disabled={busy || (today.qrRequired && !qrToken)} onClick={handlePunch}>
+                <button className="admin-primary" type="button" disabled={busy} onClick={handlePunch}>
                   <ArrowUpRight size={18} /> {busy ? 'Saving…' : 'Clock in'}
                 </button>
               </>}
               {today.status === 'WORKING' && <>
                 <div><small>Time on shift</small><strong>{elapsed}</strong><p>Clocked in at {clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'}</p></div>
-                <button className="admin-secondary" type="button" disabled={busy || (today.qrRequired && !qrToken)} onClick={() => setConfirmOut(true)}>
+                <button className="admin-secondary" type="button" disabled={busy} onClick={() => setConfirmOut(true)}>
                   <ArrowDownLeft size={18} /> {busy ? 'Saving…' : 'Clock out'}
                 </button>
               </>}
@@ -306,17 +284,6 @@ export default function AttendancePage() {
                 <p>{clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'} to {clockOut ? formatTime(clockOut.punchTimestamp, today.timezone) : '—'}</p>
               </div>}
             </div>
-            {scannerOpen && <CameraScanner kind="qr" onClose={() => setScannerOpen(false)} onScan={(value) => {
-              try {
-                const url = new URL(value);
-                const code = new URLSearchParams(url.hash.slice(1)).get('qr');
-                if (url.origin !== window.location.origin || url.pathname !== '/attendance' || !code) return false;
-                setQrToken(code);
-                setError('');
-                setScannerOpen(false);
-                return true;
-              } catch { return false; }
-            }} />}
             {confirmOut && <ConfirmAction title="Clock out now?" confirmLabel="Yes, clock out" cancelLabel="No, stay on shift"
               onCancel={() => setConfirmOut(false)} onConfirm={() => { setConfirmOut(false); void handlePunch(); }}>
               This records the end of today’s shift at {today.location.name}.
@@ -324,7 +291,7 @@ export default function AttendancePage() {
 
             <div className={styles.todayTimeline}>
               <div className={styles.subheading}><div><span className={styles.sectionLabel}>PUNCH RECORD</span><h3>Today’s activity</h3></div><span>{today.punches.length} {today.punches.length === 1 ? 'entry' : 'entries'}</span></div>
-              {today.punches.length ? today.punches.slice().reverse().map((punch) => <div className={styles.punchRow} key={punch.id}><span className={`${styles.punchMarker} ${punch.punchType === 'OUT' ? styles.punchMarkerOut : ''}`}>{punch.punchType === 'IN' ? <ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /> : <ArrowDownLeft size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{punch.punchType === 'IN' ? 'Clocked in' : 'Clocked out'}{punch.isLate && <em className={styles.lateBadge}>Late</em>}</strong><small>{punch.isLate ? `After scheduled start at ${punch.targetStartTime}` : punch.qrVerified ? 'Store verification recorded' : 'Time recorded on this device'}{punch.correctionReason ? ` · Corrected: ${punch.correctionReason}` : ''}</small></div><time>{formatTime(punch.punchTimestamp, today.timezone)}</time></div>) : <div className={styles.noPunches}><span><Clock size="1em" className="inline-icon" aria-hidden="true" /></span><p>No punches yet today. Your clock-in and clock-out will appear here.</p></div>}
+              {today.punches.length ? today.punches.slice().reverse().map((punch) => <div className={styles.punchRow} key={punch.id}><span className={`${styles.punchMarker} ${punch.punchType === 'OUT' ? styles.punchMarkerOut : ''}`}>{punch.punchType === 'IN' ? <ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /> : <ArrowDownLeft size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{punch.punchType === 'IN' ? 'Clocked in' : 'Clocked out'}{punch.isLate && <em className={styles.lateBadge}>Late</em>}</strong><small>{punch.isLate ? `After scheduled start at ${punch.targetStartTime}` : 'Time recorded'}{punch.correctionReason ? ` · Corrected: ${punch.correctionReason}` : ''}</small></div><time>{formatTime(punch.punchTimestamp, today.timezone)}</time></div>) : <div className={styles.noPunches}><span><Clock size="1em" className="inline-icon" aria-hidden="true" /></span><p>No punches yet today. Your clock-in and clock-out will appear here.</p></div>}
             </div>
           </article>
 

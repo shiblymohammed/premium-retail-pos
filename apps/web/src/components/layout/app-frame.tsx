@@ -292,13 +292,14 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
     matchingLink.roles.includes(userRole) ||
     (isSuperUser && matchingLink.href !== '/')
   ));
-  const isFeatureRouteAuthorized = matchingLink?.href === '/audits' && (rawRole === 'CASHIER' || rawRole === 'STAFF')
+  const requiresStockCountPermission = ['CASHIER', 'STAFF', 'INVENTORY'].includes(rawRole);
+  const isFeatureRouteAuthorized = matchingLink?.href === '/audits' && requiresStockCountPermission
     ? auditCapabilityLoaded && canCountStockAudits
     : matchingLink?.href === '/sales-controls'
       ? saleCapabilityLoaded && (isSuperUser || canAccessSaleControls)
       : hasStandardRouteRole;
   const isAuthorizationPending = Boolean(session && (
-    (matchingLink?.href === '/audits' && (rawRole === 'CASHIER' || rawRole === 'STAFF') && !auditCapabilityLoaded) ||
+    (matchingLink?.href === '/audits' && requiresStockCountPermission && !auditCapabilityLoaded) ||
     (matchingLink?.href === '/sales-controls' && !saleCapabilityLoaded)
   ));
   const isAuthorized = !isDeferredRoute && (session
@@ -312,7 +313,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
           ...group,
           links: group.links.filter(
             (link) => (link.roles.includes(rawRole) || link.roles.includes(userRole)) &&
-              (link.href !== '/audits' || (rawRole !== 'CASHIER' && rawRole !== 'STAFF') || (auditCapabilityLoaded && canCountStockAudits)) &&
+              (link.href !== '/audits' || !requiresStockCountPermission || (auditCapabilityLoaded && canCountStockAudits)) &&
               (link.href !== '/sales-controls' || (saleCapabilityLoaded && (isSuperUser || canAccessSaleControls)))
           ),
         }))
@@ -388,10 +389,16 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
             >
               <div style={{ fontSize: '48px', marginBottom: '12px' }}><Lock size="1em" className="inline-icon" aria-hidden="true" /></div>
               <h2 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--retail-ink)', margin: '0 0 8px' }}>
-                Restricted Operational Zone
+                Access needed
               </h2>
               <p style={{ color: 'var(--retail-muted)', fontSize: '13.5px', lineHeight: 1.5, margin: '0 0 20px' }}>
-                Your current role (<strong>{rawRole.replace('_', ' ')}</strong>) does not have access permissions for this workspace module.
+                {matchingLink?.href === '/sales-controls'
+                  ? 'A Super Admin can grant the return or cancellation permission for this screen.'
+                  : matchingLink?.href === '/audits' && requiresStockCountPermission
+                    ? 'A Super Admin can grant stock count access for your assigned location.'
+                    : matchingLink
+                      ? `Open this screen with one of these roles: ${matchingLink.roles.filter((role) => role !== 'WAREHOUSE_MANAGER').map((role) => role.toLowerCase().replaceAll('_', ' ')).join(', ')}.`
+                      : 'Choose an available screen from your dashboard.'}
               </p>
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
                 <a

@@ -39,11 +39,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import { getStoredSession } from '@/lib/auth';
 import styles from './products.module.css';
+import { StockIntake, type IntakeMode, type StockLocation } from './stock-intake';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
 interface ProductItem {
   id: number;
+  variantId: string;
   name: string;
   imageUrl?: string | null;
   variant: string;
@@ -52,6 +54,7 @@ interface ProductItem {
   category: string;
   location: string;
   price: number;
+  purchasePrice?: number;
   availableStock: { cartons: number; loose: number };
   totalUnits: number;
   unitsPerCarton: number;
@@ -113,6 +116,11 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 export default function ProductsPage() {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
+  const [stockLocations, setStockLocations] = useState<StockLocation[]>([]);
+  const [intakeMode, setIntakeMode] = useState<IntakeMode | null>(null);
+  const [operator, setOperator] = useState({ token: '', role: '' });
+  const canImport = ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER'].includes(operator.role);
+  const supplierLocations = stockLocations.filter((location) => location.type === 'MAIN_WAREHOUSE');
   const [currency, setCurrency] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -157,8 +165,10 @@ export default function ProductsPage() {
   }, []);
 
   useEffect(() => {
-    const token = getStoredSession()?.accessToken;
+    const session = getStoredSession();
+    const token = session?.accessToken;
     if (!token) { setLoading(false); return; }
+    setOperator({ token, role: session?.user?.role ?? '' });
     const headers = { Authorization: `Bearer ${token}` };
     const currencyController = new AbortController();
     setCurrency(null);
@@ -170,7 +180,9 @@ export default function ProductsPage() {
       const [productPayload, locationPayload] = await Promise.all([productResponse.json(), locationResponse.json()]);
       const availableLocations = locationPayload.data || [];
       const names = availableLocations.map((location: { name: string }) => location.name);
+      if (currencyController.signal.aborted) return;
       setLocations(names);
+      setStockLocations(availableLocations);
       const catalogue: any[] = productPayload.data || [];
       const variantIds = catalogue.flatMap((product) => product.variants || []).map((variant) => variant.id);
       const selectedLocations = ['All retail locations', 'All locations'].includes(selectedLocation)
@@ -210,6 +222,7 @@ export default function ProductsPage() {
             return { availableStock: { cartons: packSize > 1 ? Math.trunc(stock.available / packSize) : 0, loose: packSize > 1 ? stock.available % packSize : stock.available }, totalUnits: stock.available, inTransit: stock.transit, reserved: stock.reserved, quarantined: stock.quarantined, status };
           })(),
           id: productIndex * 1000 + variantIndex + 1,
+          variantId: variant.id,
           name: product.name,
           imageUrl: product.imageUrl || null,
           variant: variant.name || 'Default',
@@ -218,11 +231,12 @@ export default function ProductsPage() {
           category: product.category?.name || 'Uncategorised',
           location: selectedLocations.length === 1 ? selectedLocations[0].name : '',
           price: Number(product.sellingPrice || 0),
+          purchasePrice: product.purchasePrice == null ? undefined : Number(product.purchasePrice),
           unitsPerCarton: Number(product.unitsPerCarton || 1),
-          packaging: product.unitsPerCarton ? `Carton (${product.unitsPerCarton})` : 'Base unit',
+          packaging: Number(product.unitsPerCarton) > 1 ? `Carton (${product.unitsPerCarton})` : 'Base unit',
         })),
       );
-      setProducts(rows);
+      if (!currencyController.signal.aborted) setProducts(rows);
     }).catch((error) => showToast(error instanceof Error ? error.message : 'Could not load product data.', 'info')).finally(() => setLoading(false));
     return () => currencyController.abort();
   }, [reloadKey, selectedLocation]);
@@ -529,9 +543,11 @@ export default function ProductsPage() {
             <button type="button" onClick={handleExportCSV} className={styles.ghostButton} title="Download CSV inventory export">
               <Icon name="upload" size={15} /> Export
             </button>
-            <button type="button" onClick={() => setAddProductModalOpen(true)} className={styles.primaryButton}>
-              <Icon name="plus" size={16} /> Add New Product
-            </button>
+            {canImport && <button type="button" className={styles.ghostButton} disabled={!products.length || !stockLocations.length} onClick={() => setIntakeMode('opening')}>Import opening stock</button>}
+            {(canImport || operator.role === 'INVENTORY') && supplierLocations.length > 0 && <button type="button" className={styles.ghostButton} disabled={!products.length} onClick={() => setIntakeMode('supplier')}>Receive from supplier</button>}
+            {operator.role === 'SUPER_ADMIN' && <button type="button" onClick={() => setAddProductModalOpen(true)} className={styles.primaryButton}>
+              <Icon name="plus" size={16} /> Add product
+            </button>}
           </div>
         </header>
 
@@ -668,7 +684,7 @@ export default function ProductsPage() {
                     </div>
 
                     <div className={styles.priceCell}>
-                      <b>{formatPrice(product.price)}</b>
+                      <b>{formatPrice(product.price)}</b>{product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}
                       <small>per pack</small>
                     </div>
 
@@ -712,7 +728,7 @@ export default function ProductsPage() {
                     <div className={styles.gridFigures}>
                       <div><small>On hand</small><b className={isNegative ? styles.negative : ''}>{product.totalUnits}</b></div>
                       <div><small>In transit</small><b className={product.inTransit ? styles.transitText : ''}>+{product.inTransit}</b></div>
-                      <div><small>Price</small><b>{formatPrice(product.price)}</b></div>
+                      <div><small>Price</small><b>{formatPrice(product.price)}</b>{product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}</div>
                     </div>
                     <div className={styles.gridHealth}><Gauge product={product} /><span>{product.packaging.includes('Carton') && !isNegative ? `${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose` : product.packaging}</span></div>
                     <div className={styles.gridFoot}>
@@ -741,6 +757,12 @@ export default function ProductsPage() {
           )}
         </section>
       </div>
+
+      {intakeMode && <StockIntake mode={intakeMode} apiBase={API_BASE} token={operator.token}
+        locations={intakeMode === 'supplier' ? supplierLocations : stockLocations} initialLocation={selectedLocation} variants={products}
+        onCancel={() => setIntakeMode(null)}
+        onSaved={(message) => { setIntakeMode(null); setReloadKey((key) => key + 1); showToast(message, 'success'); }}
+      />}
 
       {/* MODAL 2: Add Product Modal */}
       {addProductModalOpen && (
@@ -863,7 +885,7 @@ export default function ProductsPage() {
                 </div>
               </div>
 
-              <p className={styles.fieldHint}>This creates the product catalogue record only. Import opening stock separately to record quantities at each location.</p>
+              <p className={styles.fieldHint}>After saving, use Import opening stock to record quantities at a location.</p>
 
               <div className={styles.modalFooter}>
                 <button
@@ -879,7 +901,7 @@ export default function ProductsPage() {
                 </button>
               </div>
             </form>
-            {barcodeCameraOpen && <CameraScanner kind="barcode" onClose={() => setBarcodeCameraOpen(false)} onScan={(value) => {
+            {barcodeCameraOpen && <CameraScanner onClose={() => setBarcodeCameraOpen(false)} onScan={(value) => {
               if (!/^(?:\d{8}|\d{12}|\d{13})$/.test(value)) return false;
               setNewProdBarcode(value);
               setBarcodeCameraOpen(false);

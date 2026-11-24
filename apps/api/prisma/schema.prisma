@@ -28,6 +28,7 @@ enum Role {
   STORE_MANAGER
   CASHIER
   STAFF
+  INVENTORY
 }
 
 /// Location type within the organizational hierarchy
@@ -136,6 +137,7 @@ enum RepaymentStatus {
 
 /// Core user account for authentication and authorization
 model User {
+  cashDrawers CashDrawerSession[]
   id                   String    @id @default(uuid())
   email                String    @unique
   passwordHash         String    @map("password_hash")
@@ -222,6 +224,7 @@ model Company {
 /// Physical location within the tiered hierarchy
 /// Main Warehouse → Sub-Warehouses → Retail Stores
 model Location {
+  cashDrawers CashDrawerSession[]
   id                    String       @id @default(uuid())
   companyId             String       @map("company_id")
   name                  String
@@ -273,6 +276,9 @@ model Employee {
   firstName     String   @map("first_name")
   lastName      String   @map("last_name")
   phone         String?
+  address       String?
+  designation   String?
+  monthlyBaseSalary Decimal? @db.Decimal(12, 2) @map("monthly_base_salary")
   locationId    String   @map("location_id") // Primary workplace
   reportingToId String?  @map("reporting_to_id")
   hireDate      DateTime @map("hire_date")
@@ -590,6 +596,25 @@ model ReplenishmentRequestLine {
 // POS & SALES (Module 7)
 // ============================================================
 
+model CashDrawerSession {
+  id String @id @default(uuid())
+  operatorId String @map("operator_id")
+  locationId String @map("location_id")
+  openedAt DateTime @default(now()) @map("opened_at")
+  closedAt DateTime? @map("closed_at")
+  openingCash Decimal @map("opening_cash") @db.Decimal(12, 2)
+  countedCash Decimal? @map("counted_cash") @db.Decimal(12, 2)
+  countedCard Decimal? @map("counted_card") @db.Decimal(12, 2)
+  expectedCash Decimal? @map("expected_cash") @db.Decimal(14, 2)
+  expectedCard Decimal? @map("expected_card") @db.Decimal(14, 2)
+  operator User @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  payments InvoicePayment[]
+  refunds InvoiceRefund[]
+  @@index([operatorId, locationId, openedAt], map: "cash_drawers_operator_history")
+  @@map("cash_drawer_sessions")
+}
+
 /// Finalized sales invoice — immutable once created (Invariant 8)
 /// Invariant 9: Reversal-driven cancellation
 /// Invariant 13: Idempotency via idempotencyKey
@@ -663,6 +688,9 @@ model InvoicePayment {
   @@index([method, recordedAt])
   @@index([recordedByUserId, recordedAt])
   @@map("invoice_payments")
+  cashDrawerId String? @map("cash_drawer_id")
+  cashDrawer CashDrawerSession? @relation(fields: [cashDrawerId], references: [id], onDelete: Restrict)
+  @@index([cashDrawerId])
 }
 
 /// Manual record of money returned; this does not initiate a payment or gateway transaction.
@@ -685,6 +713,9 @@ model InvoiceRefund {
   @@index([invoiceId, recordedAt])
   @@index([recordedByUserId, recordedAt])
   @@map("invoice_refunds")
+  cashDrawerId String? @map("cash_drawer_id")
+  cashDrawer CashDrawerSession? @relation(fields: [cashDrawerId], references: [id], onDelete: Restrict)
+  @@index([cashDrawerId])
 }
 
 /// Return must be tied to its original invoice; there is intentionally no customer data or time limit.

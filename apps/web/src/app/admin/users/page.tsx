@@ -28,10 +28,11 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/
 export interface ManagedUser {
   id: string;
   employeeId?: string;
+  employeeDetails?: { phone: string | null; address: string | null; designation: string | null; hireDate: string; monthlyBaseSalary: string | null };
   name: string;
   email: string;
   employeeCode: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'STORE_MANAGER' | 'CENTRAL_MANAGER' | 'SUB_WAREHOUSE_MANAGER' | 'CASHIER' | 'STAFF';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'STORE_MANAGER' | 'CENTRAL_MANAGER' | 'SUB_WAREHOUSE_MANAGER' | 'CASHIER' | 'STAFF' | 'INVENTORY';
   assignedLocations: string[];
   assignedLocationIds: string[];
   discountLimitPercent: number;
@@ -41,6 +42,19 @@ export interface ManagedUser {
   isActive: boolean;
   joinedDate: string;
 }
+
+type PermissionPreset = {
+  canProcessReturns: boolean;
+  canCancelSales: boolean;
+  canCountStockAudits: boolean;
+  discountLimitPercent: number;
+};
+
+const permissionFields = [
+  ['canProcessReturns', 'Process returns'],
+  ['canCancelSales', 'Cancel sales'],
+  ['canCountStockAudits', 'Grant stock count entry'],
+] as const;
 
 type ManagedLocation = { id: string; name: string };
 
@@ -53,6 +67,7 @@ const ROLE_OPTIONS = [
   { value: 'SUB_WAREHOUSE_MANAGER', label: 'Sub Warehouse' },
   { value: 'CASHIER', label: 'Cashier Station' },
   { value: 'STAFF', label: 'Floor Staff' },
+  { value: 'INVENTORY', label: 'Inventory' },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -64,6 +79,7 @@ const roleLabels: Record<string, string> = {
   SUB_WAREHOUSE_MANAGER: 'Sub Warehouse',
   CASHIER: 'Cashier Station',
   STAFF: 'Floor Staff',
+  INVENTORY: 'Inventory',
 };
 
 export default function UserManagementPage() {
@@ -103,7 +119,16 @@ export default function UserManagementPage() {
   const [locationSearch, setLocationSearch] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formEmployeeCode, setFormEmployeeCode] = useState('');
+  const [formHireDate, setFormHireDate] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formAddress, setFormAddress] = useState('');
+  const [formDesignation, setFormDesignation] = useState('');
+  const [formSalary, setFormSalary] = useState('');
   const [formRole, setFormRole] = useState<ManagedUser['role']>('CASHIER');
+  const [presets, setPresets] = useState<Record<string, PermissionPreset>>({});
+  const [presetError, setPresetError] = useState('');
+  const [permissionOverrides, setPermissionOverrides] = useState<Partial<PermissionPreset>>({});
+  const preset = presets[formRole];
   const [formLocations, setFormLocations] = useState<string[]>([]);
 
   // Google Drive Reference UI State
@@ -155,6 +180,13 @@ export default function UserManagementPage() {
       return;
     }
     const headers = { Authorization: `Bearer ${session.accessToken}` };
+    void fetch(`${API_BASE}/users/role-presets`, { headers, cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Could not load role presets.');
+        const { data } = await response.json() as { data: Record<string, PermissionPreset> };
+        setPresets(data);
+      })
+      .catch(() => setPresetError('Could not load role presets.'));
     Promise.all([
       fetch(`${API_BASE}/users`, { headers, cache: 'no-store' }),
       fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
@@ -168,6 +200,7 @@ export default function UserManagementPage() {
         const mapped: ManagedUser[] = Array.isArray(userPayload.data) ? userPayload.data.map((user: any) => ({
           id: user.id,
           employeeId: user.employee?.id,
+          employeeDetails: user.employee,
           name: user.employee ? `${user.employee.firstName} ${user.employee.lastName}` : user.email.split('@')[0],
           email: user.email,
           employeeCode: user.employee?.employeeCode || '',
@@ -226,7 +259,13 @@ export default function UserManagementPage() {
     setFormPassword('');
     setLocationSearch('');
     setFormEmployeeCode('');
+    setFormHireDate(new Date().toLocaleDateString('sv-SE'));
+    setFormPhone('');
+    setFormAddress('');
+    setFormDesignation('');
+    setFormSalary('');
     setFormRole('CASHIER');
+    setPermissionOverrides({});
     setFormLocations([]);
     setIsModalOpen(true);
   };
@@ -240,6 +279,11 @@ export default function UserManagementPage() {
     setFormPassword('');
     setLocationSearch('');
     setFormEmployeeCode(u.employeeCode);
+    setFormHireDate(u.employeeDetails?.hireDate?.slice(0, 10) ?? new Date().toLocaleDateString('sv-SE'));
+    setFormPhone(u.employeeDetails?.phone ?? '');
+    setFormAddress(u.employeeDetails?.address ?? '');
+    setFormDesignation(u.employeeDetails?.designation ?? '');
+    setFormSalary(u.employeeDetails?.monthlyBaseSalary ?? '');
     setFormRole(u.role);
     setFormLocations([...u.assignedLocationIds]);
     setIsModalOpen(true);
@@ -275,8 +319,15 @@ export default function UserManagementPage() {
       setFormError('Remove inactive locations before saving this account.');
       return;
     }
+    const initialPermissions = !editingUser && currentUserRole === 'SUPER_ADMIN' && Object.keys(permissionOverrides).length
+      ? { initialPermissions: permissionOverrides } : {};
     const nameParts = formName.trim().split(/\s+/);
     const createEmployeeProfile = !editingUser && needsEmployee;
+    const employeeProfile = {
+      employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0],
+      hireDate: formHireDate, phone: formPhone.trim() || null, address: formAddress.trim() || null,
+      designation: formDesignation.trim() || null, monthlyBaseSalary: formSalary.trim() || null,
+    };
     setFormError('');
     setSavingUser(true);
     try {
@@ -285,22 +336,21 @@ export default function UserManagementPage() {
         headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
         cache: 'no-store',
         body: JSON.stringify(editingUser
-          ? { role: formRole, locationIds }
+          ? { role: formRole, locationIds, ...(needsEmployee ? { employeeProfile } : {}) }
           : createEmployeeProfile
             ? {
                 email: formEmail.trim(), password: formPassword, role: formRole, locationIds,
-                employeeCode: formEmployeeCode.trim(), firstName: nameParts[0],
-                lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0],
-                hireDate: new Date().toISOString().slice(0, 10),
+                ...employeeProfile, ...initialPermissions, locationId: locationIds[0],
               }
-            : { email: formEmail.trim(), password: formPassword, role: formRole, locationIds }),
+            : { email: formEmail.trim(), password: formPassword, role: formRole, locationIds, ...initialPermissions }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'The server could not save this user.');
       const saved = payload.data;
       const mapped: ManagedUser = {
         id: saved.id,
-        employeeId: editingUser?.employeeId,
+        employeeId: saved.employee?.id ?? editingUser?.employeeId,
+        employeeDetails: saved.employee ?? editingUser?.employeeDetails,
         name: formName.trim() || saved.email.split('@')[0],
         email: saved.email,
         employeeCode: formEmployeeCode.trim(),
@@ -314,27 +364,8 @@ export default function UserManagementPage() {
         isActive: saved.isActive !== false,
         joinedDate: saved.createdAt ? new Date(saved.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
       };
-      if (editingUser && needsEmployee) {
-        const employeeResponse = await fetch(`${API_BASE}/employees${editingUser?.employeeId ? `/${editingUser.employeeId}` : ''}`, {
-          method: editingUser?.employeeId ? 'PATCH' : 'POST',
-          headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
-          cache: 'no-store',
-          body: JSON.stringify(editingUser?.employeeId
-            ? { employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0] }
-            : { userId: saved.id, employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0], hireDate: new Date().toISOString().slice(0, 10) }),
-        });
-        const employeePayload = await employeeResponse.json().catch(() => ({}));
-        if (!employeeResponse.ok) {
-          setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
-          setIsModalOpen(false);
-          setNotice(`User account ${saved.email} was saved, but employee details were not: ${employeePayload.message || 'the employee profile could not be saved.'}`, 'error');
-          return;
-        }
-        mapped.employeeId = (employeePayload.data ?? employeePayload).id || editingUser.employeeId;
-      }
-      if (createEmployeeProfile) mapped.employeeId = saved.employee?.id;
       setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
-      if (!editingUser && formRole !== 'SUPER_ADMIN') setPermissionReview(saved.email);
+      if (!editingUser && currentUserRole === 'SUPER_ADMIN' && formRole !== 'SUPER_ADMIN') setPermissionReview(saved.email);
       setNotice(editingUser ? `Account updated for ${saved.email}.` : `Account created for ${saved.email}.`);
       setIsModalOpen(false);
     } catch (error) {
@@ -1165,11 +1196,12 @@ export default function UserManagementPage() {
                   </label>
                   <select id="user-role"
                     value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as any)}
+                    onChange={(event) => { setFormRole(event.target.value as ManagedUser['role']); setPermissionOverrides({}); }}
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px', background: 'var(--retail-card)' }}
                   >
                     <option value="CASHIER">Cashier (POS Lane)</option>
                     <option value="STAFF">Staff (Floor Operations)</option>
+                    <option value="INVENTORY">Inventory</option>
                     <option value="STORE_MANAGER">Store Manager (Store Lead)</option>
                     <option value="CENTRAL_MANAGER">Central Manager (Main WH)</option>
                     <option value="SUB_WAREHOUSE_MANAGER">Sub Warehouse Manager (Depot)</option>
@@ -1182,6 +1214,35 @@ export default function UserManagementPage() {
                   </select>
                 </div>
               </div>
+
+              {!editingUser && formRole !== 'SUPER_ADMIN' && <fieldset className="admin-permission-preview">
+                <legend>{roleLabels[formRole]} preset</legend>
+                {preset ? <>
+                  {permissionFields.map(([field, label]) => <label key={field}>
+                    <input type="checkbox" checked={permissionOverrides[field] ?? preset[field]} disabled={currentUserRole !== 'SUPER_ADMIN' || savingUser}
+                      onChange={(event) => setPermissionOverrides((current) => ({ ...current, [field]: event.target.checked }))} />
+                    <span>{label} <small>Default {preset[field] ? 'allowed' : 'off'}</small></span>
+                  </label>)}
+                  <label>Maximum discount (%)
+                    <input type="number" min="0" max="100" step="0.01" value={permissionOverrides.discountLimitPercent ?? preset.discountLimitPercent}
+                      disabled={currentUserRole !== 'SUPER_ADMIN' || savingUser} onChange={(event) => {
+                        const value = event.target.value;
+                        setPermissionOverrides((current) => ({ ...current, discountLimitPercent: value === '' ? undefined : Number(value) }));
+                      }} />
+                    <small>Default {preset.discountLimitPercent}%</small>
+                  </label>
+                  {currentUserRole === 'SUPER_ADMIN' && Object.keys(permissionOverrides).length > 0 &&
+                    <button type="button" className="admin-secondary" onClick={() => setPermissionOverrides({})}>Reset to preset</button>}
+                </> : <p role="status">{presetError || 'Loading role preset…'}</p>}
+              </fieldset>}
+
+              {formRole !== 'SUPER_ADMIN' && formRole !== 'ADMIN' && <div className="admin-form-grid">
+                <label>Joining date <input className="admin-profile-input" type="date" required value={formHireDate} onChange={(event) => setFormHireDate(event.target.value)} /></label>
+                <label>Phone <input className="admin-profile-input" type="tel" maxLength={21} value={formPhone} onChange={(event) => setFormPhone(event.target.value)} /></label>
+                <label>Designation <input className="admin-profile-input" maxLength={120} value={formDesignation} onChange={(event) => setFormDesignation(event.target.value)} /></label>
+                <label>Monthly base salary <input className="admin-profile-input" type="number" min="0" max="9999999999.99" step="0.01" value={formSalary} onChange={(event) => setFormSalary(event.target.value)} /></label>
+                <label>Address <input className="admin-profile-input" maxLength={400} value={formAddress} onChange={(event) => setFormAddress(event.target.value)} /></label>
+              </div>}
 
               {!editingUser && (
                 <div style={{ marginBottom: '14px' }}>

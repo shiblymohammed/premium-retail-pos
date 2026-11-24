@@ -7,12 +7,20 @@ import { useEffect, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './reports.module.css';
-import { Icon, formatInr, formatCompactInr, formatDay, type SalesSummary, type SalesDetails, type StockReport, type TableData } from './report-ui';
-import { SalesView, InvoicesView, StockView, SpecializedView } from './report-views';
+import { EXTRA_REPORTS, toReportTable } from './report-data';
+import { Icon, formatMoney, formatCompactMoney, formatDay, type SalesSummary, type SalesDetails, type StockReport, type TableData } from './report-ui';
+import { SalesView, InvoicesView, StockView, Card, Table } from './report-views';
 
 const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
-type Location = { id: string; name: string; type: string };
+type Location = { id: string; name: string; type: string; isActive: boolean; company: { currency: string } };
+
+async function requestData<T>(path: string, token: string, signal: AbortSignal): Promise<T> {
+  const response = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.data === undefined) throw new Error(payload.message || 'Could not load this report.');
+  return payload.data as T;
+}
 
 type NotificationItem = {
   id: string;
@@ -38,6 +46,7 @@ type ReportKind =
   | 'salesDetails'
   | 'stock'
   | 'lowStock'
+  | 'productPerformance'
   | 'ledger'
   | 'transferDiscrepancies'
   | 'auditVariances'
@@ -54,6 +63,7 @@ const REPORT_TABS: Array<{ key: ReportKind; label: string }> = [
   { key: 'sales', label: 'Sales' },
   { key: 'salesDetails', label: 'Invoices' },
   { key: 'stock', label: 'Stock' },
+  { key: 'productPerformance', label: 'Product performance' },
   { key: 'lowStock', label: 'Low stock' },
   { key: 'ledger', label: 'Movements' },
   { key: 'transferDiscrepancies', label: 'Transfers' },
@@ -66,7 +76,7 @@ const REPORT_TABS: Array<{ key: ReportKind; label: string }> = [
 const REPORT_GROUPS: Array<{ label: string; keys: ReportKind[] }> = [
   { label: 'Overview', keys: ['overview'] },
   { label: 'Sales', keys: ['sales', 'salesDetails', 'cancellations', 'itemDeletions'] },
-  { label: 'Inventory', keys: ['stock', 'lowStock', 'ledger', 'priceChanges'] },
+  { label: 'Inventory', keys: ['stock', 'productPerformance', 'lowStock', 'ledger', 'priceChanges'] },
   { label: 'Operations', keys: ['transferDiscrepancies', 'auditVariances'] },
 ];
 
@@ -125,7 +135,7 @@ function downloadPdf(title: string, description: string, headers: string[], rows
   objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
   let pdfDocument = '%PDF-1.4\n';
   const offsets = [0];
-  objects.forEach((object) => { offsets.push(pdfDocument.length); pdfDocument += `${object}\nendobj\n`; });
+  objects.forEach((object, index) => { offsets.push(pdfDocument.length); pdfDocument += `${index + 1} 0 obj\n${object}\nendobj\n`; });
   const xrefOffset = pdfDocument.length;
   pdfDocument += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')}trailer\n<< /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
   
@@ -134,10 +144,27 @@ function downloadPdf(title: string, description: string, headers: string[], rows
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function reportParams(from: string, to: string, locationId: string) {
+  const rangeEnd = new Date(`${to}T00:00:00`);
+  rangeEnd.setDate(rangeEnd.getDate() + 1);
+  const params = new URLSearchParams({
+    from: new Date(`${from}T00:00:00`).toISOString(),
+    to: rangeEnd.toISOString(),
+  });
+  if (locationId) params.set('locationId', locationId);
+  return params;
+}
+
 export default function ReportsPage() {
   const [token, setToken] = useState('');
   const [role, setRole] = useState('');
   const [locations, setLocations] = useState<Location[]>([]);
+  const [locationState, setLocationState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [locationRetry, setLocationRetry] = useState(0);
+  const [reportResult, setReportResult] = useState({ key: '', error: '' });
+  const [reportRetry, setReportRetry] = useState(0);
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [productOrder, setProductOrder] = useState<'top' | 'slow' | 'unsold'>('top');
   const [locationId, setLocationId] = useState('');
   const [from, setFrom] = useState(isoDate(new Date(Date.now() - 30 * 86400000)));
   const [to, setTo] = useState(isoDate(new Date()));
@@ -156,6 +183,8 @@ export default function ReportsPage() {
 
   const [notice, setNotice] = useState('');
   const [query, setQuery] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
 
@@ -177,17 +206,40 @@ export default function ReportsPage() {
     }
     setRole(authSession?.user?.role ?? '');
 
-    const stored = window.localStorage.getItem('premium-retail-location-scope');
-    // Global location selection is applied by the API query when a location ID is selected.
+  }, []);
 
-    const syncLocation = (event: Event) => {
-      const locName = (event as CustomEvent<string>).detail;
-      setLocationId('');
+  const canConsolidate = role === 'SUPER_ADMIN' || role === 'ADMIN';
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    const applyLocation = (items: Location[], selectedName: string | null) => {
+      const selected = items.find((item) => item.name === selectedName);
+      setLocationId(selected?.id ?? (canConsolidate ? '' : items[0]?.id ?? ''));
+      setInvoicePage(1);
     };
 
+    setLocationState('loading');
+    void requestData<Location[]>('/locations', token, controller.signal).then((items) => {
+      if (controller.signal.aborted) return;
+      setLocations(items);
+      applyLocation(items, window.localStorage.getItem('premium-retail-location-scope'));
+      setLocationState('ready');
+    }).catch(() => {
+      if (!controller.signal.aborted) setLocationState('error');
+    });
+    return () => controller.abort();
+  }, [token, canConsolidate, locationRetry]);
+
+  useEffect(() => {
+    const syncLocation = (event: Event) => {
+      const selected = locations.find((item) => item.name === (event as CustomEvent<string>).detail);
+      setLocationId(selected?.id ?? (canConsolidate ? '' : locations[0]?.id ?? ''));
+      setInvoicePage(1);
+    };
     window.addEventListener('premium-retail-location-change', syncLocation);
     return () => window.removeEventListener('premium-retail-location-change', syncLocation);
-  }, []);
+  }, [locations, canConsolidate]);
 
   useEffect(() => {
     if (!token) return;
@@ -259,11 +311,58 @@ export default function ReportsPage() {
     window.history.replaceState(null, '', url);
   }, [report]);
 
-  // Load Specialized Report datasets
+  const scopedLocations = locationId
+    ? locations.filter((location) => location.id === locationId)
+    : locations.filter((location) => canConsolidate && location.isActive);
+  const currencies = [...new Set(scopedLocations.map((location) => location.company?.currency).filter(Boolean))];
+  const currency = currencies[0] ?? '';
+  const needsCurrency = ['overview', 'sales', 'salesDetails', 'cancellations', 'productPerformance'].includes(report);
+  const scopeError = locationState !== 'ready' ? '' :
+    !scopedLocations.length ? 'No authorized locations are available for reporting.' :
+    needsCurrency && currencies.length !== 1 ? 'Choose a location to report sales in its currency.' :
+    !from || !to || from > to ? 'Choose a valid reporting period.' : '';
+  const reportKey = JSON.stringify([report, locationId, from, to, report === 'salesDetails' ? invoicePage : 1, reportRetry]);
+  const loaded = locationState === 'ready' && !scopeError && reportResult.key === reportKey && !reportResult.error;
+  const failure = reportResult.key === reportKey ? reportResult.error : '';
+  const formatAmount = (value: number, digits = 2) => formatMoney(currency, value, digits);
+  const formatShortAmount = (value: number) => formatCompactMoney(currency, value);
+
   useEffect(() => {
-    if (report === 'overview' || report === 'sales' || report === 'stock' || report === 'salesDetails') return;
-    setTableData(null);
-  }, [report]);
+    if (!token || locationState !== 'ready' || scopeError) return;
+    const controller = new AbortController();
+    const params = reportParams(from, to, locationId);
+    const read = <T,>(route: string) => requestData<T>(`/reports/${route}?${params}`, token, controller.signal);
+
+    async function loadReport() {
+      if (report === 'overview') {
+        const [saleData, stockData] = await Promise.all([read<SalesSummary>('sales-summary'), read<StockReport>('stock')]);
+        if (controller.signal.aborted) return;
+        setSales(saleData);
+        setStock(stockData);
+      } else if (report === 'sales') {
+        const saleData = await read<SalesSummary>('sales-summary');
+        if (!controller.signal.aborted) setSales(saleData);
+      } else if (report === 'stock') {
+        const stockData = await read<StockReport>('stock');
+        if (!controller.signal.aborted) setStock(stockData);
+      } else if (report === 'salesDetails') {
+        params.set('page', String(invoicePage));
+        params.set('pageSize', '100');
+        const details = await read<SalesDetails>('sales-details');
+        if (!controller.signal.aborted) setSalesDetails(details);
+      } else {
+        if (report === 'ledger') params.set('limit', '500');
+        const raw = await read<unknown>(EXTRA_REPORTS[report]);
+        if (!controller.signal.aborted) setTableData(toReportTable(report, raw));
+      }
+      if (!controller.signal.aborted) setReportResult({ key: reportKey, error: '' });
+    }
+
+    void loadReport().catch((error: unknown) => {
+      if (!controller.signal.aborted) setReportResult({ key: reportKey, error: error instanceof Error ? error.message : 'Could not load this report.' });
+    });
+    return () => controller.abort();
+  }, [token, locationState, scopeError, reportKey, report, locationId, from, to, invoicePage]);
 
   async function markRead(id: string) {
     if (!notifications || !token) return;
@@ -311,19 +410,19 @@ export default function ReportsPage() {
     setNotice(failed ? failed.message || 'Some alerts could not be marked as read.' : 'All operational notifications marked as read.');
   }
 
-  function getExportData() {
+  function getExportData(invoiceRows = salesDetails?.rows ?? []) {
     let headers: string[] = [];
     let rows: unknown[][] = [];
 
     if (report === 'overview') {
-      headers = ['Location', 'Invoices', 'Cancelled', 'Net Sales (INR)', 'Average Bill (INR)'];
+      headers = ['Location', 'Invoices', 'Cancelled', `Net Sales (${currency})`, `Average Bill (${currency})`];
       rows = (sales?.locations ?? []).map(r => [r.locationName, r.invoices, r.cancelled, r.netSales, r.invoices ? (Number(r.netSales) / r.invoices).toFixed(2) : '0.00']);
     } else if (report === 'sales') {
-      headers = ['Date', 'Invoices', 'Cancelled', 'Net Sales (INR)'];
+      headers = ['Date', 'Invoices', 'Cancelled', `Net Sales (${currency})`];
       rows = (sales?.daily ?? []).map(r => [r.date, r.invoices, r.cancelled, r.netSales]);
     } else if (report === 'salesDetails') {
-      headers = ['Invoice Number', 'Location', 'Status', 'Net Total (INR)', 'Created At'];
-      rows = (salesDetails?.rows ?? []).map(r => [r.invoiceNumber, r.location.name, r.status, r.netTotal, r.createdAt]);
+      headers = ['Invoice Number', 'Location', 'Status', `Net Total (${currency})`, 'Created At'];
+      rows = invoiceRows.map(r => [r.invoiceNumber, r.location.name, r.status, r.netTotal, r.createdAt]);
     } else if (report === 'stock') {
       headers = ['Location', 'SKU', 'Product', 'Variant', 'Available', 'Base Unit', 'Cartons', 'Loose', 'In-Transit', 'Reserved', 'Quarantined'];
       rows = (stock?.rows ?? []).map(r => [r.locationName, r.sku, r.productName, r.variantName, r.available, r.baseUnit, r.cartons ?? 0, r.looseBaseUnits, r.inTransit, r.reserved, r.quarantined]);
@@ -332,34 +431,51 @@ export default function ReportsPage() {
       rows = tableData.rows;
     }
 
-    return { headers, rows };
+    if (report === 'productPerformance') {
+      headers = headers.map((header) => header === 'Net sales' ? `Net sales (${currency})` : header);
+      if (productOrder === 'unsold') rows = rows.filter((row) => Number(row[4]) === 0 && Number(row[6]) > 0);
+      if (productOrder === 'slow') rows = rows.filter((row) => Number(row[4]) > 0)
+        .sort((first, second) => Number(first[4]) - Number(second[4]));
+    }
+    if (report === 'cancellations') headers = headers.map((header) => header === 'Net total' ? `Net total (${currency})` : header);
+    return { headers, rows: rows.filter((row) => matches(...row.map((value) => String(value ?? '')))) };
   }
 
-  function handleExportCsv() {
-    const { headers, rows } = getExportData();
-    const csv = [headers, ...rows].map(line => line.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Premium-Retail-Report-${report}-${from}-to-${to}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setNotice(`Exported ${rows.length} records to CSV.`);
-  }
-
-  function handleExportPdf() {
-    const { headers, rows } = getExportData();
-    const reportTitle = report === 'overview' ? 'REPORTS OVERVIEW - STORE PERFORMANCE' : tableData && !['sales', 'salesDetails', 'stock'].includes(report) ? tableData.title : report.toUpperCase() + ' REPORT';
-    const description = `${rows.length} records · ${locationId ? locations.find(l => l.id === locationId)?.name : 'All retail locations'}`;
-    downloadPdf(reportTitle, description, headers, rows, `Premium-Retail-Report-${report}-${from}-to-${to}.csv`);
-    setNotice(`Exported ${rows.length} records to vector PDF.`);
+  async function exportReport(format: 'PDF' | 'CSV') {
+    if (!loaded || exporting) return;
+    setExportOpen(false);
+    setExporting(true);
+    setExportError('');
+    try {
+      const invoiceRows = report === 'salesDetails'
+        ? await requestData<SalesDetails['rows']>(`/reports/sales-details/export?${reportParams(from, to, locationId)}`, token, new AbortController().signal)
+        : undefined;
+      const { headers, rows } = getExportData(invoiceRows);
+      const filename = `Premium-Retail-Report-${report}-${from}-to-${to}.csv`;
+      if (format === 'PDF') {
+        const title = report === 'overview' ? 'Store performance overview' : reportLabel;
+        downloadPdf(title, `${rows.length} records · ${scopeName}`, headers, rows, filename);
+      } else {
+        const csv = [headers, ...rows].map((line) => line.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setNotice(`Exported ${rows.length} records to ${format}.`);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : 'Could not export this report.');
+    } finally {
+      setExporting(false);
+    }
   }
 
   // ---------- Derived overview data (scoped by the selected location) ----------
   const q = query.trim().toLowerCase();
   const matches = (...values: Array<string | number>) => !q || values.join(' ').toLowerCase().includes(q);
-  const scopeName = locationId ? locations.find((l) => l.id === locationId)?.name ?? 'Selected location' : 'All retail locations';
+  const scopeName = locationId ? locations.find((l) => l.id === locationId)?.name ?? 'Selected location' : 'All locations';
   const scopedStores = (sales?.locations ?? []).filter((l) => !locationId || l.locationId === locationId);
   const netRevenue = scopedStores.reduce((sum, l) => sum + Number(l.netSales), 0);
   const invoiceCount = scopedStores.reduce((sum, l) => sum + l.invoices, 0);
@@ -413,7 +529,7 @@ export default function ReportsPage() {
       <header className={styles.header}>
         <div>
           <h1>Reports</h1>
-          <p>{scopeName}</p>
+          <p>{scopeName}{needsCurrency && currencies.length === 1 ? ` · ${currency}` : ''}</p>
         </div>
         <div className={styles.headerActions}>
           <label className={styles.search}>
@@ -432,14 +548,14 @@ export default function ReportsPage() {
             {notifications && notifications.unread > 0 && <span className={styles.badgeDot}>{notifications.unread}</span>}
           </button>
           <div className={styles.exportWrap} ref={exportRef}>
-            <button type="button" className={styles.primaryButton} onClick={() => setExportOpen((o) => !o)} aria-haspopup="menu" aria-expanded={exportOpen}>
-              <Icon name="download" size={16} /> Export report
+            <button type="button" className={styles.primaryButton} disabled={!loaded || exporting} onClick={() => setExportOpen((o) => !o)} aria-haspopup="menu" aria-expanded={exportOpen}>
+              <Icon name="download" size={16} /> {exporting ? 'Preparing report…' : 'Export report'}
             </button>
-            {exportOpen && (
+            {exportOpen && loaded && (
               <div className={styles.exportMenu} role="menu">
-                <div className={styles.exportHeading}>EXPORT {reportLabel.toUpperCase()}</div>
-                <button type="button" role="menuitem" onClick={() => { handleExportPdf(); setExportOpen(false); }}><Icon name="fileText" size={15} /> Download PDF</button>
-                <button type="button" role="menuitem" onClick={() => { handleExportCsv(); setExportOpen(false); }}><Icon name="download" size={15} /> Export CSV</button>
+                <div className={styles.exportHeading}>EXPORT {reportLabel.toUpperCase()} · {report === 'salesDetails' ? (query.trim() ? 'Matching invoices across all pages' : `${salesDetails?.total ?? 0} rows across all pages`) : `${getExportData().rows.length} rows`}</div>
+                <button type="button" role="menuitem" onClick={() => void exportReport('PDF')}><Icon name="fileText" size={15} /> Download PDF</button>
+                <button type="button" role="menuitem" onClick={() => void exportReport('CSV')}><Icon name="download" size={15} /> Export CSV</button>
               </div>
             )}
           </div>
@@ -471,11 +587,12 @@ export default function ReportsPage() {
               if (next === 'custom') return;
               setFrom(isoDate(new Date(Date.now() - (next === 'last7' ? 7 : 30) * 86400000)));
               setTo(isoDate(new Date()));
+              setInvoicePage(1);
             }}
             footer={
               <div className={styles.rangeInputs}>
-                <label>From<input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></label>
-                <label>To<input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></label>
+                <label>From<input type="date" value={from} max={to} onChange={(e) => { setFrom(e.target.value); setInvoicePage(1); }} /></label>
+                <label>To<input type="date" value={to} min={from} onChange={(e) => { setTo(e.target.value); setInvoicePage(1); }} /></label>
               </div>
             }
           />
@@ -484,8 +601,8 @@ export default function ReportsPage() {
             heading="Location boundary"
             ariaLabel="Location boundary"
             icon={<Icon name="mapPin" size={14} />}
-            options={[{ value: 'all', label: 'All locations' }, ...locations.map((l) => ({ value: l.id, label: `${l.name}${l.type === 'WAREHOUSE' ? ' (Warehouse)' : ''}` }))]}
-            onChange={(next) => setLocationId(next === 'all' ? '' : next)}
+            options={[...(canConsolidate ? [{ value: 'all', label: 'All active locations' }] : []), ...locations.map((l) => ({ value: l.id, label: `${l.name}${l.isActive ? '' : ' (Inactive)'}` }))]}
+            onChange={(next) => { setLocationId(next === 'all' ? '' : next); setInvoicePage(1); }}
           />
         </div>
       </div>
@@ -493,7 +610,7 @@ export default function ReportsPage() {
       {groupTabs.length > 1 && (
         <div className={styles.reportSubtabs} role="group" aria-label="Report type">
           {groupTabs.map((tab) => (
-            <button key={tab.key} type="button" aria-pressed={report === tab.key} onClick={() => setReport(tab.key)}>{tab.label}</button>
+            <button key={tab.key} type="button" aria-pressed={report === tab.key} onClick={() => { setReport(tab.key); setInvoicePage(1); }}>{tab.label}</button>
           ))}
         </div>
       )}
@@ -533,20 +650,26 @@ export default function ReportsPage() {
         </section>
       )}
 
+      {exportError && <Feedback tone="error">{exportError}</Feedback>}
       {notice && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
+      {locationState === 'error' && <Feedback tone="error">Could not load reporting locations. <button type="button" className={styles.textButton} onClick={() => setLocationRetry((value) => value + 1)}>Retry</button></Feedback>}
+      {scopeError && <Feedback tone="error">{scopeError}</Feedback>}
+      {failure && <Feedback tone="error">{failure} <button type="button" className={styles.textButton} onClick={() => setReportRetry((value) => value + 1)}>Retry</button></Feedback>}
+      {!loaded && !scopeError && !failure && locationState !== 'error' && <p role="status">Loading report…</p>}
+
       {/* ---------- OVERVIEW ---------- */}
-      {report === 'overview' && (
+      {loaded && report === 'overview' && (
         <>
           <section className={styles.kpiGrid} aria-label="Key figures">
             <article className={styles.kpi}>
-              <div className={styles.kpiTop}><span>Net revenue</span><i><Icon name="rupee" size={15} /></i></div>
-              <strong>{formatInr(netRevenue)}</strong>
+              <div className={styles.kpiTop}><span>Net revenue</span><i><Icon name="money" size={15} /></i></div>
+              <strong>{formatAmount(netRevenue)}</strong>
               <span className={`${styles.chip} ${styles.chipGood}`}>{scopedStores.length} {scopedStores.length === 1 ? 'store' : 'stores'}</span>
             </article>
             <article className={styles.kpi}>
               <div className={styles.kpiTop}><span>Average bill</span><i><Icon name="receipt" size={15} /></i></div>
-              <strong>{formatInr(avgBill)}</strong>
+              <strong>{formatAmount(avgBill)}</strong>
               <span className={`${styles.chip} ${styles.chipGood}`}>per invoice</span>
             </article>
             <article className={`${styles.kpi} ${styles.kpiTeal}`}>
@@ -573,15 +696,15 @@ export default function ReportsPage() {
                   <div className="heading-with-info"><h2>Daily turnover</h2><InfoHint label="About daily turnover">Bars show daily net sales for the selected date range and location.</InfoHint></div>
                   <p>{daily.length ? `Net sales over ${daily.length} trading days` : 'Net sales for the selected period'}</p>
                 </div>
-                {bestDay && <span className={styles.highlightPill}>Best day: {formatDay(bestDay.date)} · {formatCompactInr(Number(bestDay.netSales))}</span>}
+                {bestDay && <span className={styles.highlightPill}>Best day: {formatDay(bestDay.date)} · {formatShortAmount(Number(bestDay.netSales))}</span>}
               </div>
               {daily.length ? <div className={styles.columns} role="region" aria-label="Daily turnover chart" tabIndex={0}>
                 {daily.map((day) => {
                   const value = Number(day.netSales);
                   const isBest = day.date === bestDay?.date;
                   return (
-                    <div className={styles.column} key={day.date} title={`${formatDay(day.date)}: ${formatInr(value)} · ${day.invoices} invoices · ${day.cancelled} cancelled`}>
-                      <b>{formatCompactInr(value)}</b>
+                    <div className={styles.column} key={day.date} title={`${formatDay(day.date)}: ${formatAmount(value)} · ${day.invoices} invoices · ${day.cancelled} cancelled`}>
+                      <b>{formatShortAmount(value)}</b>
                       <span className={styles.columnTrack}><i className={isBest ? styles.columnBest : ''} style={{ height: `${(value / maxDaily) * 100}%` }} /></span>
                       <strong>{formatDay(day.date)}</strong>
                       <small>{day.invoices} invoices{day.cancelled ? ` · ${day.cancelled} void` : ''}</small>
@@ -633,9 +756,9 @@ export default function ReportsPage() {
                   return (
                     <div className={styles.barRow} key={store.locationId}>
                       <span className={styles.rowIcon}><Icon name="store" size={15} /></span>
-                      <span className={styles.rowLabel}><strong>{store.locationName}</strong><small>{store.invoices} invoices · {formatInr(store.invoices ? value / store.invoices : 0)} avg</small></span>
+                      <span className={styles.rowLabel}><strong>{store.locationName}</strong><small>{store.invoices} invoices · {formatAmount(store.invoices ? value / store.invoices : 0)} avg</small></span>
                       <span className={styles.track}><i style={{ width: `${(value / maxStoreRevenue) * 100}%` }} /></span>
-                      <b className={styles.rowValue}>{formatCompactInr(value)}</b>
+                      <b className={styles.rowValue}>{formatShortAmount(value)}</b>
                       <span className={`${styles.chip} ${styles.chipGood}`}>{share}%</span>
                     </div>
                   );
@@ -646,17 +769,17 @@ export default function ReportsPage() {
                 <div className={styles.shareBlock}>
                   <small className={styles.shareCaption}>Share of net sales</small>
                   <div className={styles.shareBar} role="img" aria-label={scopedStores.map((s) => `${s.locationName} ${Math.round((Number(s.netSales) / netRevenue) * 100)}%`).join(', ')}>
-                    {scopedStores.map((s, i) => <i key={s.locationId} style={{ width: `${(Number(s.netSales) / netRevenue) * 100}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }} title={`${s.locationName}: ${formatInr(Number(s.netSales))}`} />)}
+                    {scopedStores.map((s, i) => <i key={s.locationId} style={{ width: `${(Number(s.netSales) / netRevenue) * 100}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }} title={`${s.locationName}: ${formatAmount(Number(s.netSales))}`} />)}
                   </div>
                   <div className={styles.shareLegend}>
-                    {scopedStores.map((s, i) => <span key={s.locationId}><i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />{s.locationName}<b>{formatCompactInr(Number(s.netSales))}</b></span>)}
+                    {scopedStores.map((s, i) => <span key={s.locationId}><i style={{ background: SHARE_COLORS[i % SHARE_COLORS.length] }} />{s.locationName}<b>{formatShortAmount(Number(s.netSales))}</b></span>)}
                   </div>
                 </div>
               )}
               {avgSpread && (
                 <button type="button" className={styles.insight} onClick={() => setReport('sales')}>
                   <Icon name="spark" size={14} />
-                  <span>{avgSpread.low.locationName} averages {formatInr(avgSpread.lowAvg)} per bill, {formatInr(avgSpread.highAvg - avgSpread.lowAvg)} below {avgSpread.high.locationName}.</span>
+                  <span>{avgSpread.low.locationName} averages {formatAmount(avgSpread.lowAvg)} per bill, {formatAmount(avgSpread.highAvg - avgSpread.lowAvg)} below {avgSpread.high.locationName}.</span>
                   <Icon name="arrow" size={13} />
                 </button>
               )}            </article>
@@ -696,10 +819,23 @@ export default function ReportsPage() {
       )}
 
       {/* ---------- Report tabs ---------- */}
-      {report === 'sales' && sales && <SalesView sales={sales} matches={matches} rangeLabel={rangeLabel} />}
-      {report === 'salesDetails' && salesDetails && <InvoicesView details={salesDetails} matches={matches} />}
-      {report === 'stock' && stock && <StockView stock={stock} matches={matches} />}
-      {!['overview', 'sales', 'salesDetails', 'stock'].includes(report) && tableData && <SpecializedView kind={report} data={tableData} matches={matches} />}
+      {loaded && report === 'sales' && sales && <SalesView currency={currency} sales={sales} matches={matches} rangeLabel={rangeLabel} />}
+      {loaded && report === 'salesDetails' && salesDetails && <>
+        <InvoicesView currency={currency} details={salesDetails} matches={matches} />
+        {salesDetails.totalPages > 1 && <div className={styles.headerActions} aria-label="Invoice pages">
+          <button type="button" className={styles.textButton} disabled={invoicePage <= 1} onClick={() => setInvoicePage((page) => page - 1)}>Previous</button>
+          <span>Page {invoicePage} of {salesDetails.totalPages} · {salesDetails.total} invoices</span>
+          <button type="button" className={styles.textButton} disabled={invoicePage >= salesDetails.totalPages} onClick={() => setInvoicePage((page) => page + 1)}>Next</button>
+        </div>}
+      </>}
+      {loaded && report === 'stock' && stock && <StockView stock={stock} matches={matches} />}
+      {loaded && !['overview', 'sales', 'salesDetails', 'stock'].includes(report) && tableData && <Card title={tableData.title} subtitle={report === 'productPerformance' ? 'Net units and sales for the period. Available stock is current.' : tableData.description}
+        action={report === 'productPerformance' && <PillDropdown
+          value={productOrder} onChange={setProductOrder} ariaLabel="Rank products" heading="Rank products"
+          options={[{ value: 'top', label: 'Most sold' }, { value: 'slow', label: 'Fewest sold' }, { value: 'unsold', label: 'In stock with no net sales' }]}
+        />}>
+        <Table headers={getExportData().headers} rows={getExportData().rows.map((row) => row.map(String))} />
+      </Card>}
     </div>
   );
 }

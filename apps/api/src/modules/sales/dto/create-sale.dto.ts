@@ -19,6 +19,13 @@ export class CreateSaleLineDto {
   @IsEnum(SaleUnit)
   enteredUnit: SaleUnit;
 
+  // Extra cartons on a mixed line whose primary quantity is in base units.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  cartonQuantity?: number;
+
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
@@ -27,6 +34,16 @@ export class CreateSaleLineDto {
 }
 
 export class CreateSaleDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  locationId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  cashDrawerId?: string;
+
   @ValidateNested({ each: true })
   @Type(() => CreateSaleLineDto)
   @ArrayMinSize(1)

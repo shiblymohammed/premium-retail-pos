@@ -29,7 +29,7 @@ export class ReportsService {
           GROUP BY r."invoice_id"
         )
         SELECT i."location_id" AS "locationId",
-          (i."created_at" AT TIME ZONE c."timezone")::date::text AS "date",
+          (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date::text AS "date",
           COUNT(*) FILTER (WHERE i."status" = 'FINALIZED')::integer AS "invoices",
           COUNT(*) FILTER (WHERE i."status" = 'CANCELLED')::integer AS "cancelled",
           COALESCE(SUM(i."net_total" - COALESCE(refunded."amount", 0)), 0)::text AS "netSales"
@@ -40,8 +40,8 @@ export class ReportsService {
         WHERE i."location_id" IN (${Prisma.join(scope.locationIds)})
           AND i."created_at" >= ${scope.from}
           AND i."created_at" < ${scope.to}
-        GROUP BY i."location_id", (i."created_at" AT TIME ZONE c."timezone")::date
-        ORDER BY (i."created_at" AT TIME ZONE c."timezone")::date ASC
+        GROUP BY i."location_id", (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date
+        ORDER BY (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date ASC
       `),
     ]);
     const locations = await this.prisma.location.findMany({ where: { id: { in: scope.locationIds } }, select: { id: true, name: true, company: { select: { timezone: true } } } });
@@ -89,6 +89,65 @@ export class ReportsService {
       }),
     ]);
     return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), rows };
+  }
+
+  async exportInvoices(query: ReportQuery, actor: RequestUser) {
+    const scope = await this.resolveScope(query, actor);
+    const limit = 10000;
+    const rows = await this.prisma.invoice.findMany({
+      where: { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      select: { invoiceNumber: true, status: true, netTotal: true, createdAt: true, location: { select: { name: true } } },
+    });
+    if (rows.length > limit) throw new BadRequestException('This export matches over 10,000 invoices. Narrow the date range or select a store.');
+    return rows;
+  }
+
+  async productPerformance(query: ReportQuery, actor: RequestUser) {
+    const { locationIds, from, to } = await this.resolveScope(query, actor);
+    return this.prisma.$queryRaw<Array<{
+      product: string; variant: string; sku: string; baseUnit: string; sold: string; netSales: string; available: string;
+    }>>(Prisma.sql`
+      WITH sales AS (
+        SELECT sl."id", sl."variant_id", sl."quantity_base_units", sl."line_total"
+        FROM "sale_lines" sl
+        JOIN "invoices" i ON i."id" = sl."invoice_id"
+        WHERE i."location_id" IN (${Prisma.join(locationIds)})
+          AND i."status" = 'FINALIZED' AND i."created_at" >= ${from} AND i."created_at" < ${to}
+      ),
+      returns AS (
+        SELECT r."sale_line_id", SUM(r."quantity_base_units") AS "units", SUM(r."refund_amount") AS "amount"
+        FROM "sale_return_lines" r
+        JOIN sales s ON s."id" = r."sale_line_id"
+        JOIN "sale_returns" sr ON sr."id" = r."sale_return_id"
+        WHERE sr."processed_at" < ${to}
+        GROUP BY r."sale_line_id"
+      ),
+      sold AS (
+        SELECT s."variant_id",
+          SUM(s."quantity_base_units" - COALESCE(r."units", 0)) AS "units",
+          SUM(s."line_total" - COALESCE(r."amount", 0)) AS "revenue"
+        FROM sales s LEFT JOIN returns r ON r."sale_line_id" = s."id"
+        GROUP BY s."variant_id"
+      ),
+      stock AS (
+        SELECT "variant_id", SUM("quantity_base_units") AS "units"
+        FROM "inventory_movements"
+        WHERE "location_id" IN (${Prisma.join(locationIds)}) AND "stock_state" = 'AVAILABLE'
+        GROUP BY "variant_id"
+      )
+      SELECT p."name" AS "product", v."name" AS "variant", v."sku", p."base_unit" AS "baseUnit",
+        COALESCE(s."units", 0)::text AS "sold", COALESCE(s."revenue", 0)::text AS "netSales",
+        COALESCE(stock."units", 0)::text AS "available"
+      FROM "variants" v
+      JOIN "products" p ON p."id" = v."product_id"
+      LEFT JOIN sold s ON s."variant_id" = v."id"
+      LEFT JOIN stock ON stock."variant_id" = v."id"
+      WHERE s."variant_id" IS NOT NULL OR (p."is_active" AND v."is_active" AND COALESCE(stock."units", 0) > 0)
+      ORDER BY COALESCE(s."units", 0) DESC, v."sku" ASC
+      LIMIT 5000
+    `);
   }
 
   async stock(query: ReportQuery, actor: RequestUser) {
@@ -254,17 +313,17 @@ export class ReportsService {
     const from = this.parseDate(query.from, new Date(to.getTime() - 30 * 86400000), 'from');
     if (from >= to) throw new BadRequestException('from must be earlier than to');
     if (to.getTime() - from.getTime() > 366 * 86400000) throw new BadRequestException('Report date range cannot exceed 366 days');
-    let locationIds = actor.role === Role.SUPER_ADMIN
-      ? (query.locationId ? [query.locationId] : (await this.prisma.location.findMany({ where: { isActive: true }, select: { id: true } })).map((l) => l.id))
-      : actor.locationIds;
-    if (query.locationId) {
-      if (actor.role !== Role.SUPER_ADMIN && !actor.locationIds.includes(query.locationId)) throw new ForbiddenException('You are not authorized to access this location');
-      locationIds = [query.locationId];
+    if (query.locationId && actor.role !== Role.SUPER_ADMIN && !actor.locationIds.includes(query.locationId)) {
+      throw new ForbiddenException('You are not authorized to access this location');
     }
-    if (locationIds.length === 0) throw new ForbiddenException('No authorized location is available for reporting');
-    if (!query.locationId && locationIds.length > 1 && actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
+    if (!query.locationId && actor.locationIds.length > 1 && actor.role !== Role.SUPER_ADMIN && actor.role !== Role.ADMIN) {
       throw new ForbiddenException('Consolidated reports are limited to Admin and Super Admin accounts; choose one location instead');
     }
+    const locationIds = query.locationId ? [query.locationId] : (await this.prisma.location.findMany({
+      where: { isActive: true, ...(actor.role === Role.SUPER_ADMIN ? {} : { id: { in: actor.locationIds } }) },
+      select: { id: true },
+    })).map((location) => location.id);
+    if (locationIds.length === 0) throw new ForbiddenException('No authorized location is available for reporting');
     return { locationIds, from, to };
   }
 

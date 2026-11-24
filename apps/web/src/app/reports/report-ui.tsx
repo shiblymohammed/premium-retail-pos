@@ -10,6 +10,7 @@ import {
   Clock,
   Download,
   FileText,
+  Banknote,
   IndianRupee,
   ListFilter,
   MapPin,
@@ -88,14 +89,14 @@ export type TableData = {
   rows: string[][];
 };
 
-export function formatInr(amount: number, fractionDigits = 0) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(amount);
+export function formatMoney(currency: string, amount: number, fractionDigits = 2) {
+  if (!/^[A-Z]{3}$/.test(currency)) return amount.toFixed(fractionDigits);
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency, minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(amount);
 }
 
-export function formatCompactInr(amount: number) {
-  if (Math.abs(amount) >= 100000) return `₹${(amount / 100000).toFixed(2).replace(/\.?0+$/, '')}L`;
-  if (Math.abs(amount) >= 1000) return `₹${(amount / 1000).toFixed(1).replace(/\.0$/, '')}K`;
-  return `₹${Math.round(amount)}`;
+export function formatCompactMoney(currency: string, amount: number) {
+  if (Math.abs(amount) < 1000 || !/^[A-Z]{3}$/.test(currency)) return formatMoney(currency, amount);
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(amount);
 }
 
 /** "2026-11-17" → "17 Nov" (timezone-safe: parsed as a calendar date). */
@@ -115,6 +116,7 @@ const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
   alert: TriangleAlert,
   search: Search,
   rupee: IndianRupee,
+  money: Banknote,
   receipt: ReceiptText,
   store: Store,
   arrow: ArrowRight,

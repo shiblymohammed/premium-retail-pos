@@ -1,5 +1,6 @@
 'use client';
 
+import { CashDrawer } from './cash-drawer';
 import { InfoHint } from '@/components/ui/info-hint';
 import {
   ArrowRight,
@@ -8,8 +9,8 @@ import {
   CookingPot,
   CupSoda,
   Ellipsis,
-  Minus,
   Plus,
+  ReceiptText,
   Sandwich,
   Scroll,
   Search,
@@ -51,6 +52,8 @@ type TerminalContext = {
   location: { id: string; name: string; type: string; currency: string };
 };
 
+type SaleUnit = 'BASE_UNIT' | 'CARTON';
+
 type CartLine = {
   variantId: string;
   productName: string;
@@ -58,8 +61,16 @@ type CartLine = {
   sku: string;
   baseUnit: string;
   quantity: number;
+  cartonQuantity: number;
+  primaryUnit: SaleUnit;
+  secondUnit: boolean;
+  unitsPerCarton: number;
   sellingPrice: number;
 };
+
+function baseQuantity(line: CartLine) {
+  return line.quantity + line.cartonQuantity * line.unitsPerCarton;
+}
 
 type StockBalance = {
   quantityBaseUnits: number;
@@ -240,7 +251,7 @@ async function findOfflineProducts(term: string, locationId: string): Promise<Pr
 }
 
 async function refreshOfflineCatalog(accessToken: string, locationId: string) {
-  const response = await fetch(`${API_BASE}/pos/catalog`, {
+  const response = await fetch(`${API_BASE}/pos/catalog?locationId=${encodeURIComponent(locationId)}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
     cache: 'no-store',
   });
@@ -268,6 +279,14 @@ export default function PosTerminal() {
   const [opening, setOpening] = useState(true);
   const [terminalRetry, setTerminalRetry] = useState(0);
   const [terminal, setTerminal] = useState<TerminalContext | null>(null);
+  const [checkoutRole, setCheckoutRole] = useState('');
+  const [storeOptions, setStoreOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [checkoutLocation, setCheckoutLocation] = useState('');
+  const [cashDrawerId, setCashDrawerId] = useState<string | null>(null);
+  const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
+  const [receiptHistory, setReceiptHistory] = useState<SaleReceipt[] | null>(null);
+  const [receiptHistoryError, setReceiptHistoryError] = useState('');
+  const [receiptQuery, setReceiptQuery] = useState('');
   const [cart, setCart] = useState<CartLine[]>([]);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Product[]>([]);
@@ -339,15 +358,24 @@ export default function PosTerminal() {
   ])].sort(), [cart, results]);
 
   const saleTotals = useMemo(() => {
-    const gross = cart.reduce((sum, line) => sum + line.sellingPrice * line.quantity, 0);
-    const lineDiscount = cart.reduce((sum, line) => {
-      const percent = parsePercent(lineDiscounts[line.variantId] || '');
-      return sum + Math.round(line.sellingPrice * line.quantity * percent) / 100;
-    }, 0);
-    const billPercent = parsePercent(billDiscount);
-    const billDiscountAmount = Math.round((gross - lineDiscount) * billPercent) / 100;
-    const discount = lineDiscount + billDiscountAmount;
-    return { gross, discount, net: Math.max(0, gross - discount), percent: gross > 0 ? discount * 100 / gross : 0 };
+    let grossCents = 0;
+    let lineDiscountCents = 0;
+    let requestedDiscount = 0;
+    for (const line of cart) {
+      const lineGross = Math.round(line.sellingPrice * 100) * baseQuantity(line);
+      const discount = lineGross * Math.round(parsePercent(lineDiscounts[line.variantId] || '') * 100) / 10000;
+      grossCents += lineGross;
+      requestedDiscount += discount;
+      lineDiscountCents += Math.round(discount);
+    }
+    const billRate = Math.round(parsePercent(billDiscount) * 100) / 10000;
+    const discountCents = lineDiscountCents + Math.round((grossCents - lineDiscountCents) * billRate);
+    return {
+      gross: grossCents / 100,
+      discount: discountCents / 100,
+      net: Math.max(0, grossCents - discountCents) / 100,
+      percent: grossCents ? (requestedDiscount / grossCents + billRate) * 100 : 0,
+    };
   }, [billDiscount, cart, lineDiscounts]);
   const formatMoney = (amount: number | string) => new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -414,7 +442,8 @@ export default function PosTerminal() {
     if (!token) return;
     try {
       const savedBody = JSON.parse(sale.body) as Record<string, any>;
-      const quoteBody: Record<string, any> = { lines: savedBody.lines };
+      const quoteBody: Record<string, unknown> = { lines: savedBody.lines };
+      if (savedBody.locationId) quoteBody.locationId = savedBody.locationId;
       if (!removeDiscounts && savedBody.billDiscountPercent !== undefined) quoteBody.billDiscountPercent = savedBody.billDiscountPercent;
       if (removeDiscounts) {
         quoteBody.lines = savedBody.lines.map((line: Record<string, unknown>) => {
@@ -621,7 +650,9 @@ export default function PosTerminal() {
   function addToCart(product: Product, variant: Variant) {
     setCart((current) => {
       const existing = current.find((line) => line.variantId === variant.id);
-      if (existing) return current.map((line) => line.variantId === variant.id ? { ...line, quantity: line.quantity + 1 } : line);
+      if (existing) return current.map((line) => line.variantId === variant.id && baseQuantity(line) < 2147483647
+        ? { ...line, quantity: line.quantity + 1, secondUnit: line.secondUnit || line.primaryUnit === 'CARTON' }
+        : line);
       return [...current, {
         variantId: variant.id,
         productName: product.name,
@@ -629,6 +660,10 @@ export default function PosTerminal() {
         sku: variant.sku,
         baseUnit: product.baseUnit,
         quantity: 1,
+        cartonQuantity: 0,
+        primaryUnit: 'BASE_UNIT',
+        secondUnit: false,
+        unitsPerCarton: product.unitsPerCarton ?? 1,
         sellingPrice: Number(product.sellingPrice),
       }];
     });
@@ -638,8 +673,9 @@ export default function PosTerminal() {
     window.setTimeout(() => searchRef.current?.focus(), 0);
   }
 
-  async function loadTerminalSession(accessToken: string) {
-    const contextResponse = await fetch(`${API_BASE}/pos/terminal/context`, {
+  async function loadTerminalSession(accessToken: string, locationId: string) {
+    const path = locationId ? `?locationId=${encodeURIComponent(locationId)}` : '';
+    const contextResponse = await fetch(`${API_BASE}/pos/terminal/context${path}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
     });
@@ -668,16 +704,57 @@ export default function PosTerminal() {
 
   useEffect(() => {
     const existing = getStoredSession();
-    if (!existing?.accessToken) {
-      setOpening(false);
-      return;
+    if (!existing?.accessToken) { setOpening(false); return; }
+    const role = existing.user.role;
+    setCheckoutRole(role);
+    let active = true;
+
+    async function openTerminal(accessToken: string) {
+      if (role === 'CASHIER') {
+        await loadTerminalSession(accessToken, '');
+        return;
+      }
+      const response = await fetch(`${API_BASE}/locations?type=RETAIL_STORE&isActive=true`, {
+        headers: { Authorization: `Bearer ${accessToken}` }, cache: 'no-store',
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const { data } = await response.json() as { data: Array<{ id: string; name: string }> };
+      if (!active) return;
+      setStoreOptions(data);
+      if (!data.length) throw new Error('Your account has no active retail locations for checkout.');
+      const selected = checkoutLocation || (data.length === 1 ? data[0].id : '');
+      if (selected) await loadTerminalSession(accessToken, selected);
     }
-    void loadTerminalSession(existing.accessToken).catch((caught: Error) => {
+
+    void openTerminal(existing.accessToken).catch((caught: Error) => {
+      if (!active) return;
       setError(caught.message || 'Could not open checkout.');
       setTerminal(null);
       setToken('');
-    }).finally(() => setOpening(false));
-  }, [terminalRetry]);
+    }).finally(() => { if (active) setOpening(false); });
+    return () => { active = false; };
+  }, [terminalRetry, checkoutLocation]);
+
+  useEffect(() => {
+    if (!receiptHistoryOpen || !terminal || !token) return;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setReceiptHistory(null);
+      setReceiptHistoryError('');
+      try {
+        const query = new URLSearchParams({ locationId: terminal.location.id, invoiceNumber: receiptQuery });
+        const response = await fetch(`${API_BASE}/pos/receipts?${query}`, {
+          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const { data } = await response.json() as { data: SaleReceipt[] };
+        if (!controller.signal.aborted) setReceiptHistory(data);
+      } catch (cause) {
+        if (!controller.signal.aborted) setReceiptHistoryError(cause instanceof Error ? cause.message : 'Could not load receipt history.');
+      }
+    }, 200);
+    return () => { controller.abort(); window.clearTimeout(timeout); };
+  }, [receiptHistoryOpen, terminal, token, receiptQuery]);
 
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== 'Enter') return;
@@ -692,22 +769,54 @@ export default function PosTerminal() {
       .finally(() => setBusy(false));
   }
 
-  function setQuantity(variantId: string, value: string) {
+  function setQuantity(variantId: string, field: 'quantity' | 'cartonQuantity', value: string) {
     const parsed = Number(value);
-    if (!Number.isSafeInteger(parsed) || parsed < 1) return;
-    setCart((current) => current.map((line) => line.variantId === variantId ? { ...line, quantity: parsed } : line));
+    if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 2147483647) return;
+    setCart((current) => current.map((line) => {
+      if (line.variantId !== variantId) return line;
+      const updated = { ...line, [field]: parsed };
+      return baseQuantity(updated) <= 2147483647 ? updated : line;
+    }));
+  }
+
+  function changePrimaryUnit(variantId: string, unit: SaleUnit) {
+    setCart((current) => current.map((line) => {
+      if (line.variantId !== variantId || line.primaryUnit === unit) return line;
+      if (line.secondUnit) return { ...line, primaryUnit: unit };
+      const quantity = line.primaryUnit === 'BASE_UNIT' ? line.quantity : line.cartonQuantity;
+      const updated = {
+        ...line,
+        primaryUnit: unit,
+        quantity: unit === 'BASE_UNIT' ? quantity : 0,
+        cartonQuantity: unit === 'CARTON' ? quantity : 0,
+      };
+      return baseQuantity(updated) <= 2147483647 ? updated : line;
+    }));
+  }
+
+  function toggleSecondUnit(variantId: string) {
+    setCart((current) => current.map((line) => {
+      if (line.variantId !== variantId) return line;
+      const field = line.primaryUnit === 'BASE_UNIT' ? 'cartonQuantity' : 'quantity';
+      return { ...line, secondUnit: !line.secondUnit, [field]: 0 };
+    }));
   }
 
   async function removeLine(variantId: string) {
     const line = cart.find((item) => item.variantId === variantId);
-    if (!line || !token || removingVariantId) return;
+    if (!line || !token || !terminal || removingVariantId) return;
+    if (!baseQuantity(line)) {
+      setCart((items) => items.filter((item) => item.variantId !== variantId));
+      setLineDiscounts((current) => { const next = { ...current }; delete next[variantId]; return next; });
+      return;
+    }
     setRemovingVariantId(variantId);
     setError('');
     try {
-      const response = await fetch(`${API_BASE}/pos/cart-deletions`, {
+      const response = await fetch(`${API_BASE}/pos/cart-deletions?locationId=${encodeURIComponent(terminal!.location.id)}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variantId, quantityRemoved: line.quantity }),
+        body: JSON.stringify({ variantId, quantityRemoved: baseQuantity(line) }),
       });
       if (!response.ok) throw new Error(await readError(response));
       setCart((current) => current.filter((item) => item.variantId !== variantId));
@@ -728,11 +837,16 @@ export default function PosTerminal() {
     setNotice('');
     try {
       for (const line of [...cart]) {
+        if (!baseQuantity(line)) {
+          setCart((current) => current.filter((item) => item.variantId !== line.variantId));
+          setLineDiscounts((current) => { const next = { ...current }; delete next[line.variantId]; return next; });
+          continue;
+        }
         setRemovingVariantId(line.variantId);
-        const response = await fetch(`${API_BASE}/pos/cart-deletions`, {
+        const response = await fetch(`${API_BASE}/pos/cart-deletions?locationId=${encodeURIComponent(terminal!.location.id)}`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ variantId: line.variantId, quantityRemoved: line.quantity }),
+          body: JSON.stringify({ variantId: line.variantId, quantityRemoved: baseQuantity(line) }),
         });
         if (!response.ok) throw new Error(await readError(response));
         setCart((current) => current.filter((item) => item.variantId !== line.variantId));
@@ -751,6 +865,10 @@ export default function PosTerminal() {
 
   async function checkout() {
     if (!token || !cart.length || busy) return;
+    if (cart.some((line) => !baseQuantity(line))) {
+      setError('Enter a quantity for every basket line.');
+      return;
+    }
     if (saleTotals.percent > discountLimit + 0.000001) {
       setError(`Discount exceeds your assigned ${discountLimit.toFixed(2)}% limit.`);
       return;
@@ -763,16 +881,19 @@ export default function PosTerminal() {
     try {
       if (!pendingSaleRef.current) {
         const enteredDiscounts = [...Object.values(lineDiscounts), billDiscount].filter((value) => value !== '');
-        if (enteredDiscounts.some((value) => !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100 || Math.round(Number(value) * 100) !== Number(value) * 100)) {
+        if (enteredDiscounts.some((value) => !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100 || Math.abs(Math.round(Number(value) * 100) - Number(value) * 100) > 0.000001)) {
           throw new Error('Discounts must be valid percentages with up to two decimal places.');
         }
         const body: Record<string, unknown> = {
+          ...(checkoutRole !== 'CASHIER' && terminal ? { locationId: terminal.location.id } : {}),
           lines: cart.map((line) => ({
             variantId: line.variantId,
-            quantity: line.quantity,
-            enteredUnit: 'BASE_UNIT',
+            quantity: line.quantity || line.cartonQuantity,
+            enteredUnit: line.quantity ? 'BASE_UNIT' : 'CARTON',
+            ...(line.quantity && line.cartonQuantity ? { cartonQuantity: line.cartonQuantity } : {}),
             ...(Number(lineDiscounts[line.variantId] || 0) > 0 ? { discountPercent: Number(lineDiscounts[line.variantId]) } : {}),
           })),
+          ...(cashDrawerId ? { cashDrawerId } : {}),
           paymentMethod,
           paymentAmount: Number(saleTotals.net.toFixed(2)),
           ...(Number(billDiscount || 0) > 0 ? { billDiscountPercent: Number(billDiscount) } : {}),
@@ -997,7 +1118,12 @@ export default function PosTerminal() {
   if (!terminal) return (
     <main className="app-page">
       <h1>Checkout</h1>
-      {opening ? <p role="status">Opening checkout…</p> : <>
+      {opening ? <p role="status">Opening checkout…</p> : storeOptions.length > 1 && !checkoutLocation && !error ? <label className="discount-input">Retail store
+        <select value="" onChange={(event) => { setOpening(true); setCheckoutLocation(event.target.value); }}>
+          <option value="">Choose a store</option>
+          {storeOptions.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
+        </select>
+      </label> : <>
         <Feedback tone="error">{error || 'Sign in to open checkout.'}</Feedback>
         <div className="device-lock-actions">
           {error && <button type="button" className="admin-secondary" onClick={() => {
@@ -1015,6 +1141,14 @@ export default function PosTerminal() {
   return (
     <main className="pos-shell">
       <div className="pos-content">
+        <div className="pos-history-actions">
+          <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id}
+            onDrawer={setCashDrawerId} formatMoney={formatMoney}
+            canClose={!cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length} />
+          <button className="admin-secondary" type="button" onClick={() => { setReceiptHistory(null); setReceiptHistoryOpen(true); }}><ReceiptText size={16} /> Receipt history</button>
+          {storeOptions.length > 1 && <button className="admin-secondary" type="button" disabled={cart.length > 0 || busy || saleRetryPending || syncingSales}
+            onClick={() => { setTerminal(null); setCashDrawerId(null); setResults([]); setSaleControl(null); setOfflineSales([]); setCheckoutLocation(''); }}>Change store</button>}
+        </div>
         <section className="catalog-panel">
           <div className="catalog-search-area">
             <div className="search-wrap">
@@ -1042,7 +1176,7 @@ export default function PosTerminal() {
           <section className="catalog-browser">
             <div className="catalog-heading">
               <div><div className="eyebrow">SALES FLOOR</div><h1>Products <span>({results.length})</span></h1></div>
-              <div className="catalog-controls"><a className="pos-basket-jump" href="#pos-basket"><ShoppingCart size={16} aria-hidden="true" /> Basket ({cart.reduce((sum, line) => sum + line.quantity, 0)})</a><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
+              <div className="catalog-controls"><a className="pos-basket-jump" href="#pos-basket"><ShoppingCart size={16} aria-hidden="true" /> Basket ({cart.reduce((sum, line) => sum + baseQuantity(line), 0)})</a><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
             </div>
             <div className="category-chips" aria-label="Product categories">
               <button className={selectedCategory === 'All categories' ? 'active' : ''} onClick={() => setSelectedCategory('All categories')}>All categories</button>
@@ -1065,7 +1199,7 @@ export default function PosTerminal() {
                         <span className="product-variant-name">{variant.name}</span>
                         <span className="product-sku">{variant.sku}</span>
                         <strong className="product-price">{formatMoney(product.sellingPrice)} <small>/ {product.baseUnit}</small></strong>
-                        <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-hidden="true"><TriangleAlert size={10} aria-hidden="true" /></b>}{isNegative ? `${stock.formattedQuantity} in stock · Backorder sale` : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
+                        <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-hidden="true"><TriangleAlert size={10} aria-hidden="true" /></b>}{isNegative ? 'Out of stock' : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
                       </div>
                       <button className="tile-add-button" aria-label={`Add ${product.name} to basket`} disabled={busy || saleRetryPending} onClick={() => addToCart(product, variant)}><span><Plus size="1em" className="inline-icon" aria-hidden="true" /></span><span className="tile-add-label">Add</span></button>
                     </article>
@@ -1077,13 +1211,40 @@ export default function PosTerminal() {
         </section>
 
         <aside className="basket-panel" id="pos-basket" aria-label="Current basket" tabIndex={-1}>
-          <div className="basket-heading"><div><div className="eyebrow">CURRENT SALE</div><h2>Current basket</h2><small>{terminal.location.name}</small></div><div className="basket-heading-actions"><span className="item-count">{cart.reduce((sum, line) => sum + line.quantity, 0)} items</span><button className="clear-basket-button" disabled={!cart.length || busy || saleRetryPending} onClick={() => void clearBasket()}>Clear basket</button></div></div>
+          <div className="basket-heading"><div><div className="eyebrow">CURRENT SALE</div><h2>Current basket</h2><small>{terminal.location.name}</small></div><div className="basket-heading-actions"><span className="item-count">{cart.reduce((sum, line) => sum + baseQuantity(line), 0)} items</span><button className="clear-basket-button" disabled={!cart.length || busy || saleRetryPending} onClick={() => void clearBasket()}>Clear basket</button></div></div>
           {cart.length ? (
             <div className="basket-lines">
               {cart.map((line) => (
                 <div className="basket-line" key={line.variantId}>
-                  <div className="basket-line-main"><div className="basket-item-icon">{line.productName.slice(0, 1).toUpperCase()}</div><div className="basket-item-copy"><strong>{line.productName}</strong><span>{line.variantName} · {line.sku}</span><small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small><small className="basket-line-total">Line total · {formatMoney(line.sellingPrice * line.quantity)}</small><small className={stockBalances[line.variantId]?.negativeAvailable ? 'stock-warning-text' : 'basket-stock'}>{stockBalances[line.variantId] ? <>{stockBalances[line.variantId].negativeAvailable ? <><TriangleAlert size="1em" className="inline-icon" aria-hidden="true" /> Negative stock: </> : 'Available: '}{stockBalances[line.variantId].quantityBaseUnits} {line.baseUnit}s</> : 'Checking store stock…'}</small></div><button className="remove-button" disabled={removingVariantId === line.variantId || saleRetryPending} aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>{removingVariantId === line.variantId ? <Ellipsis size={16} className="inline-icon" aria-hidden="true" /> : <X size={16} className="inline-icon" aria-hidden="true" />}</button></div>
-                  <div className="quantity-control"><button aria-label="Decrease quantity" disabled={line.quantity <= 1 || saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity - 1))}><Minus size="1em" className="inline-icon" aria-hidden="true" /></button><input aria-label={`Quantity for ${line.productName}`} inputMode="numeric" value={line.quantity} disabled={saleRetryPending} onChange={(event) => setQuantity(line.variantId, event.target.value)} /><button aria-label="Increase quantity" disabled={saleRetryPending} onClick={() => setQuantity(line.variantId, String(line.quantity + 1))}><Plus size="1em" className="inline-icon" aria-hidden="true" /></button></div>
+                  <div className="basket-line-main"><div className="basket-item-icon">{line.productName.slice(0, 1).toUpperCase()}</div><div className="basket-item-copy"><strong>{line.productName}</strong><span>{line.variantName} · {line.sku}</span><small>{formatMoney(line.sellingPrice)} / {line.baseUnit}</small><small className="basket-line-total">Line total · {formatMoney(line.sellingPrice * baseQuantity(line))}</small><small className={stockBalances[line.variantId]?.negativeAvailable ? 'stock-warning-text' : 'basket-stock'}>{stockBalances[line.variantId] ? <>{stockBalances[line.variantId].negativeAvailable ? <><TriangleAlert size="1em" className="inline-icon" aria-hidden="true" /> Negative stock: </> : 'Available: '}{stockBalances[line.variantId].quantityBaseUnits} {line.baseUnit}s</> : 'Checking store stock…'}</small></div><button className="remove-button" disabled={removingVariantId === line.variantId || saleRetryPending} aria-label={`Remove ${line.productName}`} onClick={() => void removeLine(line.variantId)}>{removingVariantId === line.variantId ? <Ellipsis size={16} className="inline-icon" aria-hidden="true" /> : <X size={16} className="inline-icon" aria-hidden="true" />}</button></div>
+                  <div className="basket-quantity-fields">
+                    {line.unitsPerCarton > 1 && <label className="discount-input">Selling unit
+                      <select aria-label={`Selling unit for ${line.productName}`} disabled={busy || saleRetryPending} value={line.primaryUnit}
+                        onChange={(event) => changePrimaryUnit(line.variantId, event.target.value as SaleUnit)}>
+                        <option value="BASE_UNIT">{line.baseUnit}</option>
+                        <option value="CARTON">Carton ({line.unitsPerCarton} {line.baseUnit}s)</option>
+                      </select>
+                    </label>}
+                    <label className="discount-input">{line.primaryUnit === 'CARTON' ? 'Carton quantity' : `${line.baseUnit} quantity`}
+                      <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
+                        value={line.primaryUnit === 'CARTON' ? line.cartonQuantity : line.quantity}
+                        onChange={(event) => setQuantity(line.variantId, line.primaryUnit === 'CARTON' ? 'cartonQuantity' : 'quantity', event.target.value)} />
+                    </label>
+                  </div>
+                  {line.secondUnit && <div className="basket-quantity-fields">
+                    <label className="discount-input">{line.primaryUnit === 'CARTON' ? `${line.baseUnit} quantity` : 'Carton quantity'}
+                      <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
+                        value={line.primaryUnit === 'CARTON' ? line.quantity : line.cartonQuantity}
+                        onChange={(event) => setQuantity(line.variantId, line.primaryUnit === 'CARTON' ? 'quantity' : 'cartonQuantity', event.target.value)} />
+                    </label>
+                  </div>}
+                  {line.unitsPerCarton > 1 && <button type="button" className="small-action-button secondary" disabled={busy || saleRetryPending}
+                    onClick={() => toggleSecondUnit(line.variantId)}>
+                    {line.secondUnit ? 'Remove' : 'Add'} {line.primaryUnit === 'CARTON' ? line.baseUnit + 's' : 'cartons'}
+                  </button>}
+                  <small className="basket-stock">{baseQuantity(line)} {line.baseUnit}s deducted from stock</small>
+                  {stockBalances[line.variantId] && baseQuantity(line) > Math.max(stockBalances[line.variantId].quantityBaseUnits, 0) &&
+                    <small className="stock-warning-text">Quantity exceeds available stock. Reduce it or restock before checkout.</small>}
                   <label className="discount-input">Line discount (%)<input type="number" min="0" max="100" step="0.01" value={lineDiscounts[line.variantId] || ''} disabled={saleRetryPending || Number(billDiscount || 0) > 0} onChange={(event) => setLineDiscounts((current) => ({ ...current, [line.variantId]: event.target.value }))} /></label>
                 </div>
               ))}
@@ -1092,7 +1253,7 @@ export default function PosTerminal() {
           <div className="basket-footer">
             <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
             <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
-            <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
+            <button className="checkout-button" disabled={busy || cart.length === 0 || cart.some((line) => !baseQuantity(line)) || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
             <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
             {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
             <p>Prices, discounts, payment, and stock are verified by the server before invoice finalization.</p>
@@ -1157,9 +1318,23 @@ export default function PosTerminal() {
           <header><div><div className="eyebrow">PAYMENT</div><div className="heading-with-info"><h2 id="checkout-title">Complete sale</h2><InfoHint label="About checkout">Choose the payment method. For cash, enter the amount received to calculate change.</InfoHint></div><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout"><X size={16} className="inline-icon" aria-hidden="true" /></button></header>
           <div className="checkout-due"><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
           <label className="payment-select">Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
-          {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{[100, 200, 500, 2000].map((amount) => <button key={amount} onClick={() => setCashTendered(String(amount))}>₹{amount}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
+          {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button disabled={saleRetryPending} onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{(terminal.location.currency === 'INR' ? [100, 200, 500, 2000] : [5, 10, 20, 50]).map((amount) => <button key={amount} disabled={saleRetryPending} onClick={() => setCashTendered(String(amount))}>{formatMoney(amount)}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">Transaction reference (optional)<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
           {error && <Feedback tone="error">{error}</Feedback>}
-          <button className="checkout-button" disabled={busy || cart.length === 0 || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
+          <button className="checkout-button" disabled={busy || cart.length === 0 || cart.some((line) => !baseQuantity(line)) || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001)} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
+        </section>
+      </div>}
+      {receiptHistoryOpen && <div className="receipt-overlay">
+        <section className="receipt-card receipt-history-card" role="dialog" aria-modal="true" aria-labelledby="receipt-history-title"
+          onKeyDown={(event) => { if (event.key === 'Escape') setReceiptHistoryOpen(false); }}>
+          <h2 id="receipt-history-title">Receipt history</h2>
+          <p>{terminal.location.name} · Up to 25 matching finalized sales</p>
+          <label className="discount-input">Invoice number<input autoFocus value={receiptQuery} onChange={(event) => setReceiptQuery(event.target.value)} /></label>
+          {receiptHistoryError ? <Feedback tone="error">{receiptHistoryError}</Feedback> : receiptHistory === null ? <p role="status">Loading receipts…</p> :
+            receiptHistory.length === 0 ? <p>No matching receipts.</p> : receiptHistory.map((receipt) => <div className="receipt-line" key={receipt.id}>
+              <span><b>{receipt.invoiceNumber}</b><small>{new Date(receipt.createdAt).toLocaleString()} · {formatMoney(receipt.netTotal)}</small></span>
+              <button type="button" className="admin-secondary" onClick={() => { setReceiptHistoryOpen(false); setLastReceipt(receipt); }}>Open receipt</button>
+            </div>)}
+          <button type="button" className="admin-secondary" onClick={() => setReceiptHistoryOpen(false)}>Close</button>
         </section>
       </div>}
       {lastReceipt && <div className="receipt-overlay" role="dialog" aria-modal="true" aria-label="Sale receipt"><section className="receipt-card"><div className="eyebrow">{terminal?.location.name}</div><h2>{lastReceipt.invoiceNumber}</h2><p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>{lastReceipt.lines.map((line, index) => <div className="receipt-line" key={`${line.variant.sku}-${index}`}><span>{line.variant.product.name} · {line.variant.name}<small>{line.quantityBaseUnits} {line.variant.product.baseUnit} × {formatMoney(line.unitPriceAtSale)} · {line.variant.sku}</small></span><strong>{formatMoney(line.lineTotal)}</strong></div>)}<div className="receipt-line"><span>Subtotal</span><strong>{formatMoney(lastReceipt.grossTotal)}</strong></div><div className="receipt-line"><span>Discount</span><strong>−{formatMoney(lastReceipt.discountTotal)}</strong></div><div className="receipt-line receipt-total"><span>Total paid · {lastReceipt.payment?.method}</span><strong>{formatMoney(lastReceipt.netTotal)}</strong></div>{lastReceipt.payment?.cashTenderedAmount && <div className="receipt-line"><span>Cash tendered</span><strong>{formatMoney(lastReceipt.payment.cashTenderedAmount)}</strong></div>}{lastReceipt.payment?.changeGivenAmount && Number(lastReceipt.payment.changeGivenAmount) > 0 && <div className="receipt-line"><span>Change</span><strong>{formatMoney(lastReceipt.payment.changeGivenAmount)}</strong></div>}<div className="receipt-actions"><button className="checkout-button" onClick={() => window.print()}>Print receipt</button><button className="text-button" onClick={() => setLastReceipt(null)}>Close</button></div></section></div>}

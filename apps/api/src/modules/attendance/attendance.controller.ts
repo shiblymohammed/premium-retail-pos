@@ -6,8 +6,6 @@ import { Roles } from '../../common/decorators';
 import { LocationScopeGuard } from '../../common/guards';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AttendanceStartTimeDto } from './dto/attendance-start-time.dto';
-import { AttendancePunchDto } from './dto/attendance-punch.dto';
-import { AttendanceQrSettingsDto } from './dto/attendance-qr-settings.dto';
 import { AttendanceCorrectionDto } from './dto/attendance-correction.dto';
 import { AttendanceService } from './attendance.service';
 
@@ -29,8 +27,8 @@ export class AttendanceController {
   }
 
   @Post('me/punch')
-  async punch(@Body() dto: AttendancePunchDto | undefined, @CurrentUser() actor: RequestUser) {
-    return { message: 'Attendance recorded', data: await this.attendance.punch(actor, dto?.qrToken) };
+  async punch(@CurrentUser() actor: RequestUser) {
+    return { message: 'Attendance recorded', data: await this.attendance.punch(actor) };
   }
 
   @Get('locations/:locationId/target-time')
@@ -52,20 +50,6 @@ export class AttendanceController {
   @Roles(...MANAGERS)
   async locationToday(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.attendance.getLocationAttendanceToday(locationId, actor) };
-  }
-
-  @Get('locations/:locationId/qr-code')
-  @UseGuards(LocationScopeGuard)
-  @Roles(...MANAGERS)
-  async qrCode(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
-    return { data: await this.attendance.issueLocationQr(locationId, actor) };
-  }
-
-  @Patch('locations/:locationId/qr-settings')
-  @UseGuards(LocationScopeGuard)
-  @Roles(...MANAGERS)
-  async qrSettings(@Param('locationId') locationId: string, @Body() dto: AttendanceQrSettingsDto, @CurrentUser() actor: RequestUser) {
-    return { message: 'Attendance QR settings saved', data: await this.attendance.setLocationQrRequirement(locationId, dto.required, actor) };
   }
 
   @Patch('punches/:attendanceId/correct')

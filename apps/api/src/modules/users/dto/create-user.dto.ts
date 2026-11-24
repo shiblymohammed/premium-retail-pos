@@ -1,3 +1,6 @@
+import { Type } from 'class-transformer';
+import { ValidateNested } from 'class-validator';
+import { InitialPermissionsDto } from './initial-permissions.dto';
 import {
   IsEmail,
   IsEnum,
@@ -29,4 +32,9 @@ export class CreateUserDto {
   @IsString({ each: true })
   @IsOptional()
   locationIds?: string[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InitialPermissionsDto)
+  initialPermissions?: InitialPermissionsDto;
 }

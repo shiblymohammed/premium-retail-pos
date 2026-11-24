@@ -35,14 +35,6 @@
 .statusPill{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;padding:6px 9px;border-radius:20px;font-size:9.5px;font-weight:750;white-space:nowrap}
 .statusPill i{width:6px;height:6px;border-radius:50%;background:currentColor}
 .statusPill.live{background:light-dark(#e9f8f0, #1f372a);color:light-dark(#16794a, #baf2d7)}.statusPill.done{background:light-dark(#edf3ff, #1d2534);color:var(--retail-muted)}.statusPill.waiting{background:var(--retail-edge);color:var(--retail-muted)}
-.qrNotice{display:flex;align-items:center;gap:10px;margin-top:11px;padding:10px 11px;border:1px solid light-dark(#f0dfb8, #5f5130);border-radius:9px;background:light-dark(#fffbf1, #332c1d)}
-.qrVerified{border-color:light-dark(#c8e8d5, #2f5d42);background:light-dark(#f3fbf6, #1d3325)}
-.qrIcon{display:grid;width:30px;height:30px;flex:0 0 30px;place-items:center;border-radius:8px;background:light-dark(#fff1d5, #3a3221);color:light-dark(#936000, #f5dfb6);font-weight:800}
-.qrVerified .qrIcon{background:light-dark(#e3f5eb, #20392b);color:light-dark(#187548, #bbf1d7)}
-.qrNotice>div{display:grid;flex:1;gap:3px;min-width:0}
-.qrNotice strong{color:light-dark(#70531a, #f0dfbd);font-size:10.5px}.qrVerified strong{color:light-dark(#1a7045, #bdf0d6)}.qrNotice small{color:light-dark(#8a7952, #ddd6c5);font-size:9.5px;line-height:1.4}.qrVerified small{color:light-dark(#57836b, #c8dad0)}
-.qrNotice button{height:30px;padding:0 10px;border:1px solid light-dark(#e4d1a3, #665733);border-radius:7px;background:var(--retail-card);color:light-dark(#765a1f, #eedebd);font-size:9.5px;font-weight:700;white-space:nowrap;cursor:pointer}
-.qrNotice button:hover{background:light-dark(#fff7e4, #362f1e)}
 .profileNotice{display:flex;align-items:flex-start;gap:11px;margin-top:16px;padding:14px;border:1px solid var(--retail-edge-strong);border-radius:10px;background:var(--retail-raised);color:var(--retail-muted)}
 .profileNotice>span{display:grid;width:25px;height:25px;flex:0 0 25px;place-items:center;border-radius:50%;background:var(--retail-edge);color:var(--retail-muted);font-size:13px;font-weight:800}
 .profileNotice>div{display:grid;gap:5px}.profileNotice strong{color:var(--retail-ink);font-size:11px}.profileNotice small{font-size:10px;line-height:1.5}
@@ -118,7 +110,7 @@
 .emptyHistory,.emptyRecent{margin:10px 0 0;padding:12px;border-radius:8px;background:var(--retail-raised);color:var(--retail-subtle);font-size:10px;line-height:1.45}.emptyRecent{border-top:1px solid var(--retail-edge);border-radius:0;background:transparent}
 @media(max-width:1000px){.page{padding:24px 20px 32px}.summaryGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.mainGrid{grid-template-columns:minmax(0,1fr) minmax(330px,.9fr);gap:12px}.actionPanel{padding:16px}.historyPanel,.recentPanel{padding:15px}}
 @media(max-width:760px){.page{padding:21px 15px 28px}.pageHeading{align-items:flex-start;flex-direction:column;margin:16px 0}.headingMeta{width:100%}.mainGrid{grid-template-columns:1fr}.historyColumn{grid-template-columns:1fr 1fr;align-items:start}.actionPanel{padding:16px}.shiftControls{min-height:350px}.historyPanel,.recentPanel{padding:14px}}
-@media(max-width:540px){.summaryGrid{gap:8px}.summaryCard{min-height:74px;gap:8px;padding:10px}.summaryIcon{width:31px;height:31px;flex-basis:31px;font-size:17px}.summaryCard strong{font-size:12px}.summaryCard em{font-size:8.5px}.historyColumn{grid-template-columns:1fr}.historyPanel{overflow:hidden}.panelHeading{gap:7px}.statusPill{padding:5px 7px;font-size:8.5px}.actionPanel{padding:14px}.qrNotice{flex-wrap:wrap}.qrNotice button{margin-left:40px}}
+@media(max-width:540px){.summaryGrid{gap:8px}.summaryCard{min-height:74px;gap:8px;padding:10px}.summaryIcon{width:31px;height:31px;flex-basis:31px;font-size:17px}.summaryCard strong{font-size:12px}.summaryCard em{font-size:8.5px}.historyColumn{grid-template-columns:1fr}.historyPanel{overflow:hidden}.panelHeading{gap:7px}.statusPill{padding:5px 7px;font-size:8.5px}.actionPanel{padding:14px}}
 
 .pageHeading h1 { font-size: clamp(25px, 3vw, 37px); letter-spacing: -.05em; }
 .summaryCard, .actionPanel, .historyPanel, .recentPanel { border-radius: var(--retail-radius); box-shadow: var(--retail-shadow); }
@@ -131,4 +123,3 @@
 .shiftSummary div { display: grid; gap: 5px; }
 .shiftSummary small, .shiftSummary p { margin: 0; color: var(--retail-muted); }
 .shiftSummary strong { font-size: clamp(30px, 5vw, 42px); font-variant-numeric: tabular-nums; line-height: 1.1; }
-.qrNotice { flex-wrap: wrap; }

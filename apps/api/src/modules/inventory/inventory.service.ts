@@ -220,6 +220,10 @@ export class InventoryService {
         AND "stock_state" = ${input.stockState}::"StockState"
     `);
     const resultingBalanceBigInt = (balanceRows[0]?.quantityBaseUnits ?? 0n) + BigInt(input.quantityBaseUnits);
+    if (input.type === MovementType.SALE && input.stockState === StockState.AVAILABLE && resultingBalanceBigInt < 0n) {
+      const available = balanceRows[0]?.quantityBaseUnits ?? 0n;
+      throw new ConflictException(`Insufficient stock for ${variant.sku || input.variantId}. Available units: ${available > 0n ? available : 0n}.`);
+    }
     if (
       resultingBalanceBigInt > BigInt(Number.MAX_SAFE_INTEGER)
       || resultingBalanceBigInt < BigInt(Number.MIN_SAFE_INTEGER)

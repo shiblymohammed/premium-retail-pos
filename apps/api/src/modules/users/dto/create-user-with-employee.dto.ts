@@ -1,7 +1,11 @@
-import { IsDateString, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, IsArray, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ValidateNested } from 'class-validator';
+import { InitialPermissionsDto } from './initial-permissions.dto';
+import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, IsArray, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { Role } from '@prisma/client';
+import { EmployeeProfileDto } from './employee-profile.dto';
 
-export class CreateUserWithEmployeeDto {
+export class CreateUserWithEmployeeDto extends EmployeeProfileDto {
   @IsEmail() @IsNotEmpty() @MaxLength(254)
   email: string;
 
@@ -14,20 +18,13 @@ export class CreateUserWithEmployeeDto {
   @IsArray() @IsString({ each: true }) @IsOptional()
   locationIds?: string[];
 
-  @IsString() @IsNotEmpty() @MinLength(2) @MaxLength(32)
-  employeeCode: string;
-
-  @IsString() @IsNotEmpty() @MinLength(1) @MaxLength(80)
-  firstName: string;
-
-  @IsString() @IsNotEmpty() @MinLength(1) @MaxLength(80)
-  lastName: string;
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InitialPermissionsDto)
+  initialPermissions?: InitialPermissionsDto;
 
   @IsUUID()
   locationId: string;
-
-  @IsDateString()
-  hireDate: string;
 
   @IsOptional() @IsUUID()
   reportingToId?: string;

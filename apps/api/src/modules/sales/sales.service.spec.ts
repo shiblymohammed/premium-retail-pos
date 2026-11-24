@@ -14,6 +14,7 @@ describe('SalesService Phase 6 rules', () => {
       idempotencyRecord: { deleteMany: jest.fn(), findUnique: jest.fn().mockResolvedValue(null), create: jest.fn() },
       invoice: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
       invoicePayment: { create: jest.fn() },
+      cashDrawerSession: { findFirst: jest.fn().mockResolvedValue(null) },
       invoiceRefund: { create: jest.fn() },
       saleReturn: { findUnique: jest.fn().mockResolvedValue(null), count: jest.fn().mockResolvedValue(0), create: jest.fn() },
       saleReturnLine: { aggregate: jest.fn().mockResolvedValue({ _sum: { quantityBaseUnits: 0, refundAmount: new Prisma.Decimal(0) } }) },
@@ -103,16 +104,29 @@ describe('SalesService Phase 6 rules', () => {
     expect(tx.invoice.create).not.toHaveBeenCalled();
   });
 
-  it('blocks non-cashier roles from finalizing sales even with a valid location scope', async () => {
+  it('blocks floor staff from finalizing sales even with a valid location scope', async () => {
     const { tx, service } = createHarness();
-    tx.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ role: Role.STORE_MANAGER, isActive: true, discountLimitPercent: new Prisma.Decimal(10) }]);
+    tx.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ role: Role.STAFF, isActive: true, discountLimitPercent: new Prisma.Decimal(0) }]);
 
     await expect(service.createSale({
       lines: [{ variantId: 'v-1', quantity: 1, enteredUnit: 'BASE_UNIT' as any }],
       paymentMethod: 'CARD' as any,
       paymentAmount: 10,
-    }, { ...actor, role: Role.STORE_MANAGER }, 'manager-sale-key')).rejects.toBeInstanceOf(ForbiddenException);
+    }, { ...actor, role: Role.STAFF }, 'staff-sale-key')).rejects.toBeInstanceOf(ForbiddenException);
     expect(tx.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it('honors a 5% line discount when cent rounding makes the effective rate higher', async () => {
+    const { tx, service } = createHarness();
+    tx.$queryRaw.mockResolvedValueOnce(cashierRow('5')).mockResolvedValueOnce([]);
+    tx.variant.findMany.mockResolvedValue([
+      { id: 'v-1', sku: 'SKU-1', name: 'Default', product: { name: 'One', baseUnit: 'packet', unitsPerCarton: 10, sellingPrice: new Prisma.Decimal('2.50') } },
+    ]);
+    const result = await service.quoteSale({
+      lines: [{ variantId: 'v-1', quantity: 1, enteredUnit: 'BASE_UNIT' as any, discountPercent: 5 }],
+    }, actor);
+    expect(result.discountTotal.toFixed(2)).toBe('0.13');
+    expect(result.netTotal.toFixed(2)).toBe('2.37');
   });
 
   it('calculates partial refunds from the saved sale-time net line amount', async () => {

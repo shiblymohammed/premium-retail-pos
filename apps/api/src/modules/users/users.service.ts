@@ -1,11 +1,40 @@
+import { InitialPermissionsDto } from './dto/initial-permissions.dto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocationType, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { EmployeeProfileDto } from './dto/employee-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserWithEmployeeDto } from './dto/create-user-with-employee.dto';
 
 type UserActor = { userId: string; role: string; locationIds: string[] };
+
+const employeeProfileSelect = {
+  id: true, employeeCode: true, firstName: true, lastName: true, locationId: true, isActive: true,
+  phone: true, address: true, designation: true, hireDate: true, monthlyBaseSalary: true,
+} satisfies Prisma.EmployeeSelect;
+
+function employeeProfileFields(profile: EmployeeProfileDto) {
+  return {
+    employeeCode: profile.employeeCode.trim(),
+    firstName: profile.firstName.trim(),
+    lastName: profile.lastName.trim(),
+    hireDate: new Date(profile.hireDate),
+    phone: profile.phone,
+    address: profile.address?.trim() ?? profile.address,
+    designation: profile.designation?.trim() ?? profile.designation,
+    monthlyBaseSalary: profile.monthlyBaseSalary,
+  };
+}
+
+function roleDefaults(role: Role) {
+  return {
+    discountLimitPercent: role === Role.ADMIN ? 100 : role === Role.STORE_MANAGER ? 10 : role === Role.CASHIER ? 5 : 0,
+    canProcessReturns: role === Role.ADMIN || role === Role.STORE_MANAGER,
+    canCancelSales: role === Role.ADMIN,
+    canCountStockAudits: role === Role.INVENTORY,
+  };
+}
 
 @Injectable()
 export class UsersService {
@@ -111,12 +140,35 @@ export class UsersService {
   /**
    * Create a new user with a hashed password and validated location scopes.
    */
+  getRolePresets() {
+    return Object.fromEntries(Object.values(Role).filter((role) => role !== Role.SUPER_ADMIN)
+      .map((role) => [role, roleDefaults(role)]));
+  }
+
+  private initialPermissions(role: Role, actor: UserActor, overrides?: InitialPermissionsDto) {
+    if (overrides && actor.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException('Only a Super Admin can set permission overrides');
+    }
+    if (overrides && role === Role.SUPER_ADMIN) {
+      throw new BadRequestException('Super Admin permissions are built in');
+    }
+    const defaults = roleDefaults(role);
+    return {
+      discountLimitPercent: overrides?.discountLimitPercent ?? defaults.discountLimitPercent,
+      canCancelSales: overrides?.canCancelSales ?? defaults.canCancelSales,
+      canProcessReturns: overrides?.canProcessReturns ?? defaults.canProcessReturns,
+      canCountStockAudits: overrides?.canCountStockAudits ?? defaults.canCountStockAudits,
+    };
+  }
+
   async createUser(data: {
     email: string;
     password: string;
     role: Role;
     locationIds?: string[];
+    initialPermissions?: InitialPermissionsDto;
   }, actor: UserActor) {
+    const permissions = this.initialPermissions(data.role, actor, data.initialPermissions);
     const email = normalizeEmail(data.email);
     if (Buffer.byteLength(data.password, 'utf8') > 72) {
       throw new BadRequestException('Password exceeds the supported maximum length');
@@ -162,6 +214,7 @@ export class UsersService {
           email,
           passwordHash,
           role: data.role,
+          ...permissions,
           locationScopes: locationIds.length
             ? { create: locationIds.map((locationId) => ({ locationId })) }
             : undefined,
@@ -173,6 +226,7 @@ export class UsersService {
           discountLimitPercent: true,
           canCancelSales: true,
           canProcessReturns: true,
+          canCountStockAudits: true,
           isActive: true,
           createdAt: true,
           locationScopes: { select: { locationId: true } },
@@ -187,6 +241,7 @@ export class UsersService {
   }
 
   async createUserWithEmployee(data: CreateUserWithEmployeeDto, actor: UserActor) {
+    const permissions = this.initialPermissions(data.role, actor, data.initialPermissions);
     const email = normalizeEmail(data.email);
     if (Buffer.byteLength(data.password, 'utf8') > 72) {
       throw new BadRequestException('Password exceeds the supported maximum length');
@@ -224,14 +279,12 @@ export class UsersService {
             email,
             passwordHash,
             role: data.role,
+            ...permissions,
             locationScopes: { create: locationIds.map((locationId) => ({ locationId })) },
             employee: {
               create: {
-                employeeCode: data.employeeCode,
-                firstName: data.firstName,
-                lastName: data.lastName,
+                ...employeeProfileFields(data),
                 locationId: data.locationId,
-                hireDate: new Date(data.hireDate),
                 ...(data.reportingToId ? { reportingToId: data.reportingToId } : {}),
               },
             },
@@ -241,7 +294,7 @@ export class UsersService {
             canCancelSales: true, canProcessReturns: true, canCountStockAudits: true,
             isActive: true, createdAt: true,
             locationScopes: { select: { locationId: true } },
-            employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, locationId: true } },
+            employee: { select: employeeProfileSelect },
           },
         });
         if (data.reportingToId) {
@@ -297,7 +350,7 @@ export class UsersService {
           select: { locationId: true },
         },
         employee: {
-          select: { id: true, employeeCode: true, firstName: true, lastName: true, locationId: true, isActive: true },
+          select: employeeProfileSelect,
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -363,6 +416,21 @@ export class UsersService {
         }
       }
 
+      if (data.employeeProfile) {
+        const workplace = locationIds[0];
+        if (!workplace || nextRole === Role.SUPER_ADMIN) throw new BadRequestException('An employee profile requires an assigned workplace');
+        const profile = employeeProfileFields(data.employeeProfile);
+        const existing = await tx.employee.findUnique({ where: { userId }, select: { locationId: true, reportingToId: true } });
+        if (existing?.reportingToId && existing.locationId !== workplace) {
+          throw new BadRequestException('Clear the reporting manager before moving this employee to a different workplace');
+        }
+        await tx.employee.upsert({
+          where: { userId },
+          create: { ...profile, userId, locationId: workplace, isActive: current.isActive },
+          update: { ...profile, locationId: workplace },
+        });
+      }
+
       return tx.user.update({
         where: { id: userId },
         data: {
@@ -378,11 +446,18 @@ export class UsersService {
           discountLimitPercent: true,
           canCancelSales: true,
           canProcessReturns: true,
+          canCountStockAudits: true,
+          employee: { select: employeeProfileSelect },
           isActive: true,
           createdAt: true,
           locationScopes: { select: { locationId: true } },
         },
       });
+    }).catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Employee code is already in use');
+      }
+      throw error;
     });
   }
 
@@ -456,6 +531,7 @@ export class UsersService {
     input: { discountLimitPercent: number; reason: string },
     actor: UserActor,
   ) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can change discount limits');
     const requestedLimit = new Prisma.Decimal(input.discountLimitPercent);
     const reason = input.reason.trim();
     if (reason.length < 3) throw new BadRequestException('A reason of at least 3 characters is required');
@@ -482,17 +558,8 @@ export class UsersService {
         throw new BadRequestException('Super Admin accounts are uncapped and cannot be assigned a discount limit');
       }
 
-      if (assigningUser.role === Role.ADMIN) {
-        if (target.role === Role.ADMIN || target.locationScopes.length === 0 ||
-            target.locationScopes.some((scope) => !actor.locationIds.includes(scope.locationId))) {
-          throw new ForbiddenException('You can assign discount limits only to users within your authorized scope');
-        }
-        if (requestedLimit.greaterThan(assigningUser.discountLimitPercent)) {
-          throw new ForbiddenException('You cannot assign a discount limit higher than your own');
-        }
-      } else if (assigningUser.role !== Role.SUPER_ADMIN) {
-        throw new ForbiddenException('Only an Admin or Super Admin can assign discount limits');
-      }
+      if (assigningUser.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can change discount limits');
+
 
       if (target.discountLimitPercent.equals(requestedLimit)) {
         return tx.user.findUniqueOrThrow({
@@ -527,6 +594,7 @@ export class UsersService {
     input: { canCancelSales: boolean; canProcessReturns: boolean; reason: string },
     actor: UserActor,
   ) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can change sales permissions');
     const reason = input.reason.trim();
     if (reason.length < 3) throw new BadRequestException('A reason of at least 3 characters is required');
 
@@ -551,14 +619,8 @@ export class UsersService {
         throw new BadRequestException('Super Admin permissions are inherent and cannot be reassigned');
       }
 
-      if (assigningUser.role === Role.ADMIN) {
-        if (target.role === Role.ADMIN || target.locationScopes.length === 0 ||
-            target.locationScopes.some((scope) => !actor.locationIds.includes(scope.locationId))) {
-          throw new ForbiddenException('You can assign sales permissions only to users within your authorized scope');
-        }
-      } else if (assigningUser.role !== Role.SUPER_ADMIN) {
-        throw new ForbiddenException('Only an Admin or Super Admin can assign sales permissions');
-      }
+      if (assigningUser.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can change sales permissions');
+
 
       const before = { canCancelSales: target.canCancelSales, canProcessReturns: target.canProcessReturns };
       const after = { canCancelSales: input.canCancelSales, canProcessReturns: input.canProcessReturns };
@@ -596,6 +658,7 @@ export class UsersService {
   }
 
   async assignStockAuditPermission(userId: string, input: { canCountStockAudits: boolean; reason: string }, actor: UserActor) {
+    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can change stock count permissions');
     const reason = input.reason.trim();
     if (reason.length < 3) throw new BadRequestException('A reason of at least 3 characters is required');
     return this.prisma.$transaction(async (tx) => {
@@ -610,11 +673,8 @@ export class UsersService {
       if (!assigningUser?.isActive) throw new ForbiddenException('The assigning account is inactive');
       if (!target.isActive) throw new BadRequestException('Permission can only be assigned to active users');
       if (target.role === Role.SUPER_ADMIN) throw new BadRequestException('Super Admin permission is inherent');
-      if (assigningUser.role === Role.ADMIN) {
-        if (target.role === Role.ADMIN || target.locationScopes.length === 0 || target.locationScopes.some((s) => !actor.locationIds.includes(s.locationId))) {
-          throw new ForbiddenException('You can assign this permission only to users within your authorized scope');
-        }
-      } else if (assigningUser.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only an Admin or Super Admin can assign this permission');
+      if (assigningUser.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can change stock count permissions');
+
       const before = { canCountStockAudits: target.canCountStockAudits };
       const after = { canCountStockAudits: input.canCountStockAudits };
       if (before.canCountStockAudits === after.canCountStockAudits) return tx.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, email: true, role: true, canCountStockAudits: true, isActive: true } });

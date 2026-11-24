@@ -106,7 +106,7 @@ export class ProductsController {
   }
 
   private hidePurchasePrice<T extends { purchasePrice: unknown }>(product: T, role?: string): Omit<T, 'purchasePrice'> | T {
-    if (role === Role.SUPER_ADMIN) return product;
+    if (role === Role.SUPER_ADMIN || role === Role.ADMIN || role === Role.INVENTORY) return product;
     const { purchasePrice: _purchasePrice, ...visible } = product;
     return visible;
   }

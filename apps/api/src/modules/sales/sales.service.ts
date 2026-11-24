@@ -3,6 +3,7 @@ import { InvoiceStatus, LocationType, MovementType, PaymentMethod, Prisma, Refun
 import { createHash } from 'crypto';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CHECKOUT_ROLES, checkoutLocationId } from '../pos/checkout-access';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreateSaleDto, SaleUnit } from './dto/create-sale.dto';
 import { CancelSaleDto } from './dto/cancel-sale.dto';
@@ -47,16 +48,12 @@ export class SalesService {
           FROM "users" WHERE "id" = ${actor.userId} FOR SHARE
         `);
         const cashier = cashierRows[0];
-        if (!cashier?.isActive || cashier.role !== Role.CASHIER) throw new ForbiddenException('An active cashier account is required');
-        const scopes = await tx.userLocationScope.findMany({ where: { userId: actor.userId }, select: { locationId: true } });
-        if (scopes.length !== 1 || actor.locationIds.length !== 1 || scopes[0].locationId !== actor.locationIds[0]) {
-          throw new ForbiddenException('Cashier must be bound to exactly one retail store');
-        }
+        const locationId = await this.authorizeCheckout(tx, actor, cashier, dto.locationId);
         const location = await tx.location.findUnique({
-          where: { id: scopes[0].locationId },
+          where: { id: locationId },
           select: { id: true, name: true, type: true, companyId: true, isActive: true, isAuditLocked: true },
         });
-        if (!location?.isActive || location.type !== LocationType.RETAIL_STORE) throw new ForbiddenException('Cashier is not bound to an active retail store');
+        if (!location?.isActive || location.type !== LocationType.RETAIL_STORE) throw new ForbiddenException('Choose an active retail store for checkout');
         if (location.isAuditLocked) throw new ConflictException('Location is locked for a stock audit');
 
         const lineVariantIds = dto.lines.map((line) => line.variantId);
@@ -79,15 +76,12 @@ export class SalesService {
         const lines = dto.lines.map((input) => {
           const variant = variantById.get(input.variantId)!;
           const ratio = variant.product.unitsPerCarton;
-          if (input.enteredUnit === SaleUnit.CARTON && (!ratio || ratio < 1)) throw new BadRequestException(`${variant.product.name} is not sold by carton`);
-          const quantityBaseUnits = input.quantity * (input.enteredUnit === SaleUnit.CARTON ? ratio! : 1);
-          if (!Number.isSafeInteger(quantityBaseUnits) || quantityBaseUnits < 1 || quantityBaseUnits > 2147483647) {
-            throw new BadRequestException('Sale quantity exceeds the supported range');
-          }
+          const quantityBaseUnits = this.saleQuantity(input, ratio, variant.product.name);
           const gross = variant.product.sellingPrice.mul(quantityBaseUnits).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
           const discountPercent = new Prisma.Decimal(input.discountPercent ?? 0);
-          const discount = gross.mul(discountPercent).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-          return { input, variant, quantityBaseUnits, gross, discount, billDiscount: new Prisma.Decimal(0), lineNet: gross.sub(discount) };
+          const requestedDiscount = gross.mul(discountPercent).div(100);
+          const discount = requestedDiscount.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+          return { input, variant, quantityBaseUnits, gross, discount, requestedDiscount, billDiscount: new Prisma.Decimal(0), lineNet: gross.sub(discount) };
         });
 
         const grossTotal = lines.reduce((sum, line) => sum.add(line.gross), new Prisma.Decimal(0)).toDecimalPlaces(2);
@@ -105,12 +99,9 @@ export class SalesService {
           line.lineNet = line.gross.sub(line.discount).sub(line.billDiscount).toDecimalPlaces(2);
         });
         const discountTotal = lineDiscountTotal.add(billDiscountTotal).toDecimalPlaces(2);
-        // This route is cashier-only; Super Admin sales use the cashier account assigned to the terminal.
-        const maxDiscountPercent = new Prisma.Decimal(cashier.discountLimitPercent);
+        const maxDiscountPercent = cashier.role === Role.SUPER_ADMIN ? new Prisma.Decimal(100) : new Prisma.Decimal(cashier.discountLimitPercent);
         if (grossTotal.isZero()) throw new BadRequestException('Sale total must be greater than zero');
-        if (discountTotal.mul(100).gt(grossTotal.mul(maxDiscountPercent))) {
-          throw new ForbiddenException(`Discount exceeds the cashier's ${maxDiscountPercent.toFixed(2)}% limit`);
-        }
+        this.assertDiscountLimit(grossTotal, lines, dto.billDiscountPercent, maxDiscountPercent);
         const netTotal = grossTotal.sub(discountTotal).toDecimalPlaces(2);
         if (netTotal.lte(0)) throw new BadRequestException('Sale total after discount must be greater than zero');
         const submittedPaymentAmount = new Prisma.Decimal(dto.paymentAmount).toDecimalPlaces(2);
@@ -159,8 +150,8 @@ export class SalesService {
             lines: { create: lines.map((line) => ({
               variantId: line.variant.id,
               quantityBaseUnits: line.quantityBaseUnits,
-              enteredUnit: line.input.enteredUnit === SaleUnit.CARTON ? 'carton' : line.variant.product.baseUnit,
-              conversionRatioUsed: line.input.enteredUnit === SaleUnit.CARTON ? line.variant.product.unitsPerCarton : null,
+              enteredUnit: line.input.enteredUnit === SaleUnit.CARTON ? 'carton' : line.input.cartonQuantity ? 'mixed' : line.variant.product.baseUnit,
+              conversionRatioUsed: (line.input.enteredUnit === SaleUnit.CARTON || line.input.cartonQuantity) ? line.variant.product.unitsPerCarton : null,
               unitPriceAtSale: line.variant.product.sellingPrice,
               discountAmount: line.discount,
               billDiscountAmount: line.billDiscount,
@@ -169,6 +160,12 @@ export class SalesService {
           },
           select: { id: true, invoiceNumber: true },
         });
+        if (dto.cashDrawerId) {
+          const drawer = await tx.cashDrawerSession.findFirst({
+            where: { id: dto.cashDrawerId, operatorId: actor.userId, locationId: location.id, closedAt: null }, select: { id: true },
+          });
+          if (!drawer) throw new ConflictException('The sale’s cash drawer is closed or unavailable. Review the payment before retrying.');
+        }
         await tx.invoicePayment.create({ data: {
           invoiceId: invoice.id,
           method: paymentMethod,
@@ -177,6 +174,7 @@ export class SalesService {
           changeGivenAmount: changeGiven,
           transactionReference,
           recordedByUserId: actor.userId,
+          ...(dto.cashDrawerId ? { cashDrawerId: dto.cashDrawerId } : {}),
         } });
         for (const line of lines) {
           await this.inventory.recordMovement(tx, {
@@ -242,9 +240,11 @@ export class SalesService {
         data: { status: InvoiceStatus.CANCELLED, cancelledAt, cancelledByUserId: actor.userId, cancellationReason: reason },
         select: { id: true, invoiceNumber: true, status: true, cancelledAt: true, cancelledByUserId: true, cancellationReason: true },
       });
+      const cashDrawerId = await this.findRefundDrawer(tx, actor.userId, invoice.locationId);
       const refund = await tx.invoiceRefund.create({ data: {
         invoiceId: invoice.id,
         type: RefundType.SALE_CANCELLATION,
+        cashDrawerId,
         method: dto.refundMethod,
         amount: invoice.netTotal,
         transactionReference: reference,
@@ -292,13 +292,9 @@ export class SalesService {
         FROM "users" WHERE "id" = ${actor.userId} FOR SHARE
       `);
       const user = users[0];
-      if (!user?.isActive || user.role !== Role.CASHIER) throw new ForbiddenException('An active cashier account is required');
-      const scopes = await tx.userLocationScope.findMany({ where: { userId: actor.userId }, select: { locationId: true } });
-      if (scopes.length !== 1 || actor.locationIds.length !== 1 || scopes[0].locationId !== actor.locationIds[0]) {
-        throw new ForbiddenException('Cashier must be bound to exactly one retail store');
-      }
-      const location = await tx.location.findUnique({ where: { id: scopes[0].locationId }, select: { id: true, type: true, isActive: true, isAuditLocked: true } });
-      if (!location?.isActive || location.type !== LocationType.RETAIL_STORE) throw new ForbiddenException('Cashier is not bound to an active retail store');
+      const locationId = await this.authorizeCheckout(tx, actor, user, dto.locationId);
+      const location = await tx.location.findUnique({ where: { id: locationId }, select: { id: true, type: true, isActive: true, isAuditLocked: true } });
+      if (!location?.isActive || location.type !== LocationType.RETAIL_STORE) throw new ForbiddenException('Choose an active retail store for checkout');
       if (location.isAuditLocked) throw new ConflictException('Location is locked for a stock audit');
       await tx.$queryRaw(Prisma.sql`
         SELECT v."id" FROM "variants" v JOIN "products" p ON p."id" = v."product_id"
@@ -313,20 +309,17 @@ export class SalesService {
       const byId = new Map(variants.map((variant) => [variant.id, variant]));
       const lines = dto.lines.map((input) => {
         const variant = byId.get(input.variantId)!;
-        if (input.enteredUnit === SaleUnit.CARTON && !variant.product.unitsPerCarton) throw new BadRequestException(`${variant.product.name} is not sold by carton`);
-        const quantityBaseUnits = input.quantity * (input.enteredUnit === SaleUnit.CARTON ? variant.product.unitsPerCarton! : 1);
-        if (!Number.isSafeInteger(quantityBaseUnits) || quantityBaseUnits > 2147483647) throw new BadRequestException('Sale quantity exceeds the supported range');
+        const quantityBaseUnits = this.saleQuantity(input, variant.product.unitsPerCarton, variant.product.name);
         const gross = variant.product.sellingPrice.mul(quantityBaseUnits).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-        const discount = gross.mul(input.discountPercent ?? 0).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-        return { variantId: variant.id, sku: variant.sku, name: variant.name, productName: variant.product.name, baseUnit: variant.product.baseUnit, quantityBaseUnits, unitPrice: variant.product.sellingPrice, gross, discount };
+        const requestedDiscount = gross.mul(input.discountPercent ?? 0).div(100);
+        const discount = requestedDiscount.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+        return { variantId: variant.id, sku: variant.sku, name: variant.name, productName: variant.product.name, baseUnit: variant.product.baseUnit, quantityBaseUnits, unitPrice: variant.product.sellingPrice, gross, discount, requestedDiscount };
       });
       const grossTotal = lines.reduce((sum, line) => sum.add(line.gross), new Prisma.Decimal(0)).toDecimalPlaces(2);
       const lineDiscountTotal = lines.reduce((sum, line) => sum.add(line.discount), new Prisma.Decimal(0)).toDecimalPlaces(2);
       const billDiscountTotal = grossTotal.sub(lineDiscountTotal).mul(dto.billDiscountPercent ?? 0).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
       const discountTotal = lineDiscountTotal.add(billDiscountTotal).toDecimalPlaces(2);
-      if (discountTotal.mul(100).gt(grossTotal.mul(user.discountLimitPercent))) {
-        throw new ForbiddenException(`Discount exceeds the cashier's ${user.discountLimitPercent.toFixed(2)}% limit`);
-      }
+      this.assertDiscountLimit(grossTotal, lines, dto.billDiscountPercent, user.role === Role.SUPER_ADMIN ? new Prisma.Decimal(100) : user.discountLimitPercent);
       const netTotal = grossTotal.sub(discountTotal).toDecimalPlaces(2);
       if (netTotal.lte(0)) throw new BadRequestException('Sale total after discount must be greater than zero');
       const billDiscountShares = this.allocateBillDiscount(lines.map((line) => ({ variantId: line.variantId, netBeforeBillDiscount: line.gross.sub(line.discount) })), billDiscountTotal);
@@ -486,10 +479,12 @@ export class SalesService {
       }, include: { lines: true } });
       let refund = null;
       if (refundAmount.gt(0)) {
+        const cashDrawerId = await this.findRefundDrawer(tx, actor.userId, invoice.locationId);
         refund = await tx.invoiceRefund.create({ data: {
           invoiceId: invoice.id,
           saleReturnId: saleReturn.id,
           type: RefundType.SALE_RETURN,
+          cashDrawerId,
           method: dto.refundMethod!,
           amount: refundAmount,
           transactionReference: reference,
@@ -520,6 +515,40 @@ export class SalesService {
       } });
       return { ...saleReturn, refund };
     });
+  }
+
+  private async authorizeCheckout(tx: Tx, actor: SaleActor, current: { role: Role; isActive: boolean } | undefined, requestedLocationId?: string) {
+    if (!current?.isActive || current.role !== actor.role || !CHECKOUT_ROLES.includes(current.role)) {
+      throw new ForbiddenException('An active account with checkout access is required');
+    }
+    const locationId = checkoutLocationId(actor, requestedLocationId);
+    if (current.role !== Role.SUPER_ADMIN) {
+      const scopes = await tx.userLocationScope.findMany({ where: { userId: actor.userId }, select: { locationId: true } });
+      if (!scopes.some((scope) => scope.locationId === locationId) || (current.role === Role.CASHIER && scopes.length !== 1)) {
+        throw new ForbiddenException('You are not authorized to check out at this store');
+      }
+    }
+    return locationId;
+  }
+
+  private saleQuantity(input: { quantity: number; enteredUnit: SaleUnit; cartonQuantity?: number }, ratio: number | null, name: string): number {
+    const byCarton = input.enteredUnit === SaleUnit.CARTON;
+    if (byCarton && input.cartonQuantity) throw new BadRequestException('Enter extra cartons only alongside a base-unit quantity');
+    const cartons = byCarton ? input.quantity : input.cartonQuantity ?? 0;
+    if (cartons && (!ratio || ratio <= 1)) throw new BadRequestException(`${name} is not sold by carton`);
+    const quantity = (byCarton ? 0 : input.quantity) + cartons * (ratio ?? 0);
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 2147483647) {
+      throw new BadRequestException('Sale quantity exceeds the supported range');
+    }
+    return quantity;
+  }
+
+  private assertDiscountLimit(gross: Prisma.Decimal, lines: Array<{ requestedDiscount: Prisma.Decimal }>, billPercent: number | undefined, limit: Prisma.Decimal): void {
+    // Compare the requested rate before rounding each line to currency precision.
+    const requested = lines.reduce((sum, line) => sum.add(line.requestedDiscount), gross.mul(billPercent ?? 0).div(100));
+    if (requested.mul(100).gt(gross.mul(limit))) {
+      throw new ForbiddenException(`Discount exceeds the assigned ${limit.toFixed(2)}% limit`);
+    }
   }
 
   private requireIdempotencyKey(value?: string) {
@@ -569,6 +598,13 @@ export class SalesService {
       }
       throw error;
     }
+  }
+
+  private async findRefundDrawer(tx: Tx, operatorId: string, locationId: string) {
+    const drawer = await tx.cashDrawerSession.findFirst({
+      where: { operatorId, locationId, closedAt: null }, select: { id: true },
+    });
+    return drawer?.id;
   }
 
   private async requireSalePermission(

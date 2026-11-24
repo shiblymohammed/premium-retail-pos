@@ -19,6 +19,7 @@ export class SupplierReceivingController {
     Role.CENTRAL_MANAGER,
     Role.SUB_WAREHOUSE_MANAGER,
     Role.STORE_MANAGER,
+    Role.INVENTORY,
   )
   async receive(
     @Body() dto: SupplierReceiptDto,

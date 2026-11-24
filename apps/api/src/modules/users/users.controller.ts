@@ -33,6 +33,12 @@ class AssignStockAuditPermissionDto {
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Get('role-presets')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  rolePresets() {
+    return { data: this.usersService.getRolePresets() };
+  }
+
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async create(@Body() dto: CreateUserDto, @CurrentUser() actor: RequestUser) {
@@ -41,6 +47,7 @@ export class UsersController {
       password: dto.password,
       role: dto.role,
       locationIds: dto.locationIds,
+      initialPermissions: dto.initialPermissions,
     }, actor);
     return { message: 'User created', data: user };
   }
@@ -106,7 +113,7 @@ export class UsersController {
   }
 
   @Patch(':id/discount-limit')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   async assignDiscountLimit(
     @Param('id') id: string,
     @Body() dto: AssignDiscountLimitDto,
@@ -117,7 +124,7 @@ export class UsersController {
   }
 
   @Patch(':id/sales-permissions')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   async assignSalesPermissions(
     @Param('id') id: string,
     @Body() dto: AssignSalesPermissionsDto,
@@ -128,7 +135,7 @@ export class UsersController {
   }
 
   @Patch(':id/stock-audit-permission')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(Role.SUPER_ADMIN)
   async assignStockAuditPermission(@Param('id') id: string, @Body() dto: AssignStockAuditPermissionDto, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.assignStockAuditPermission(id, dto, actor);
     return { message: 'Stock audit count permission assigned', data: user };

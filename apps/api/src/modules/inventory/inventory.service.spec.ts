@@ -51,7 +51,7 @@ describe('InventoryService ledger balances', () => {
       .rejects.toBeInstanceOf(InternalServerErrorException);
   });
 
-  it('serializes a stock movement on the location row and returns the negative-stock warning', async () => {
+  it('serializes a stock movement on the location row and retains negative-stock warnings for non-sale adjustments', async () => {
     const tx = {
       $queryRaw: jest.fn()
         .mockResolvedValueOnce([{ id: 'location-id', isActive: true, isAuditLocked: false }])
@@ -66,7 +66,7 @@ describe('InventoryService ledger balances', () => {
       locationId: 'location-id',
       variantId: 'variant-id',
       actorId: 'user-id',
-      type: MovementType.SALE,
+      type: MovementType.STOCK_ADJUSTMENT,
       stockState: StockState.AVAILABLE,
       quantityBaseUnits: -3,
     });
@@ -74,16 +74,33 @@ describe('InventoryService ledger balances', () => {
     expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     expect(String(tx.$queryRaw.mock.calls[0][0].sql)).toContain('FOR UPDATE');
     expect(tx.inventoryMovement.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ quantityBaseUnits: -3, type: MovementType.SALE }),
+      data: expect.objectContaining({ quantityBaseUnits: -3, type: MovementType.STOCK_ADJUSTMENT }),
     });
     expect(result).toEqual(expect.objectContaining({
       balanceBaseUnits: -2,
       formattedBalance: '-2 packets = -2 packets',
       negativeAvailable: true,
-      type: MovementType.SALE,
+      type: MovementType.STOCK_ADJUSTMENT,
       actorId: 'user-id',
       warning: expect.stringContaining('WARNING:'),
     }));
+  });
+
+  it('rejects a sale that would overdraw stock after locking the location', async () => {
+    const tx = {
+      $queryRaw: jest.fn()
+        .mockResolvedValueOnce([{ id: 'location-id', isActive: true, isAuditLocked: false }])
+        .mockResolvedValueOnce([{ id: 'variant-id' }])
+        .mockResolvedValueOnce([{ quantityBaseUnits: 1n }]),
+      variant: { findFirst: jest.fn().mockResolvedValue({ sku: 'TEST', product: { baseUnit: 'packet' } }) },
+      inventoryMovement: { create: jest.fn() },
+    };
+    const service = new InventoryService({} as any);
+    await expect(service.recordMovement(tx as any, {
+      locationId: 'location-id', variantId: 'variant-id', actorId: 'user-id',
+      type: MovementType.SALE, stockState: StockState.AVAILABLE, quantityBaseUnits: -2,
+    })).rejects.toThrow('Insufficient stock for TEST');
+    expect(tx.inventoryMovement.create).not.toHaveBeenCalled();
   });
 
   it('rejects every stock movement while a location audit is active', async () => {

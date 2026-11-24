@@ -63,7 +63,7 @@ export class AuditLoggingInterceptor implements NestInterceptor {
 function redactSensitiveValues(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactSensitiveValues);
   if (!value || typeof value !== 'object') return value;
-  const sensitiveField = /password|token|secret|authorization|api[_-]?key|private[_-]?key|access[_-]?key|credit[_-]?card|card[_-]?(number|cvv)|ssn|tax[_-]?id|email|phone|mobile|address/i;
+  const sensitiveField = /password|token|secret|authorization|api[_-]?key|private[_-]?key|access[_-]?key|credit[_-]?card|card[_-]?(number|cvv)|ssn|tax[_-]?id|email|phone|mobile|address|salary/i;
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) =>
       sensitiveField.test(key)

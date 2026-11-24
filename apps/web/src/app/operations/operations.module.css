@@ -398,3 +398,18 @@ button.summaryCard { cursor: pointer; }
   .route > span { flex: 1; white-space: normal; overflow-wrap: anywhere; overflow: visible; }
   .rowActions .menu { left: 0; right: auto; width: min(260px, calc(100vw - 48px)); }
 }
+
+.receiptLine {
+  margin: 0 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.receiptLine legend { padding-inline: 0.35rem; font-weight: 650; }
+.receiptLine label { display: grid; gap: 0.35rem; }
+.receiptLine input { width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 0.4rem 0.5rem; }
+
+.nextStep { display: block; margin-top: 4px; color: var(--muted); line-height: 1.4; }
