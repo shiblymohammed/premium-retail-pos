@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocationType, Prisma, Role, TransferStatus } from '@prisma/client';
+import { UpdateLocationDto } from './dto/update-location.dto';
 
 @Injectable()
 export class LocationsService {
@@ -19,6 +20,7 @@ export class LocationsService {
     longitude?: number;
     geofenceRadius?: number;
     parentId?: string;
+    managerId?: string;
   }, actor: { userId: string; role: string; locationIds: string[] }) {
     if (actor.role !== Role.SUPER_ADMIN && data.type === LocationType.MAIN_WAREHOUSE) {
       throw new ForbiddenException('Only a Super Admin can create a Main Warehouse');
@@ -28,6 +30,20 @@ export class LocationsService {
       select: { id: true },
     });
     if (!company) throw new NotFoundException('Company not found');
+
+    if (data.managerId) {
+      const manager = await this.prisma.user.findUnique({
+        where: { id: data.managerId },
+        select: { id: true, role: true, isActive: true },
+      });
+      if (!manager || !manager.isActive) {
+        throw new BadRequestException('Choose an active user as the location manager.');
+      }
+      const managerRoles: Role[] = [Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER];
+      if (!managerRoles.includes(manager.role)) {
+        throw new BadRequestException('The location manager must have a manager role.');
+      }
+    }
 
     if (data.type === LocationType.MAIN_WAREHOUSE && data.parentId) {
       throw new BadRequestException('Main Warehouse cannot have a parent location');
@@ -64,6 +80,12 @@ export class LocationsService {
 
     return this.prisma.$transaction(async (tx) => {
       const location = await tx.location.create({ data });
+      if (data.managerId) {
+        await tx.userLocationScope.createMany({
+          data: [{ userId: data.managerId, locationId: location.id }],
+          skipDuplicates: true,
+        });
+      }
       if (actor.role === Role.ADMIN) {
         await tx.userLocationScope.create({
           data: { userId: actor.userId, locationId: location.id },
@@ -102,6 +124,54 @@ export class LocationsService {
       parent: location.parent && allowed.has(location.parent.id) ? location.parent : null,
       children: location.children.filter((child) => allowed.has(child.id)),
     }));
+  }
+
+  async update(id: string, data: UpdateLocationDto) {
+    const current = await this.prisma.location.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Location not found');
+
+    const type = data.type ?? current.type;
+    const parentId = data.parentId === undefined ? current.parentId : data.parentId;
+    if (type === LocationType.MAIN_WAREHOUSE && parentId) {
+      throw new BadRequestException('Main Warehouse cannot have a parent location');
+    }
+    if (type !== LocationType.MAIN_WAREHOUSE && !parentId) {
+      throw new BadRequestException('This location type must have a parent warehouse');
+    }
+    if (parentId) {
+      if (parentId === id) throw new BadRequestException('A location cannot be its own parent');
+      const parent = await this.prisma.location.findUnique({ where: { id: parentId } });
+      if (!parent) throw new NotFoundException('Parent location not found');
+      if (!parent.isActive) throw new BadRequestException('Cannot place a location under an inactive parent');
+      if (parent.companyId !== current.companyId) throw new BadRequestException('Parent location must belong to the same company');
+      if (type === LocationType.SUB_WAREHOUSE && parent.type !== LocationType.MAIN_WAREHOUSE) {
+        throw new BadRequestException('Sub-Warehouse must be under a Main Warehouse');
+      }
+      if (type === LocationType.RETAIL_STORE && parent.type !== LocationType.SUB_WAREHOUSE && parent.type !== LocationType.MAIN_WAREHOUSE) {
+        throw new BadRequestException('Retail Store must be under a Warehouse');
+      }
+      let ancestorId: string | null = parent.parentId;
+      while (ancestorId) {
+        if (ancestorId === id) throw new BadRequestException('A location cannot be moved under one of its own descendants');
+        const ancestor = await this.prisma.location.findUnique({ where: { id: ancestorId }, select: { parentId: true } });
+        ancestorId = ancestor?.parentId ?? null;
+      }
+    }
+
+    if (data.managerId) {
+      const manager = await this.prisma.user.findUnique({ where: { id: data.managerId }, select: { id: true, role: true, isActive: true } });
+      if (!manager || !manager.isActive) throw new BadRequestException('Choose an active user as the location manager.');
+      const managerRoles: Role[] = [Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER];
+      if (!managerRoles.includes(manager.role)) throw new BadRequestException('The location manager must have a manager role.');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const location = await tx.location.update({ where: { id }, data });
+      if (data.managerId) {
+        await tx.userLocationScope.createMany({ data: [{ userId: data.managerId, locationId: id }], skipDuplicates: true });
+      }
+      return location;
+    });
   }
 
   /**
@@ -185,6 +255,17 @@ export class LocationsService {
 
       return tx.location.update({ where: { id }, data: { isActive: false } });
     });
+  }
+
+  async reactivate(id: string) {
+    const location = await this.prisma.location.findUnique({ where: { id } });
+    if (!location) throw new NotFoundException('Location not found');
+    if (location.isActive) return location;
+    if (location.parentId) {
+      const parent = await this.prisma.location.findUnique({ where: { id: location.parentId }, select: { isActive: true } });
+      if (!parent?.isActive) throw new BadRequestException('Reactivate the parent warehouse before this location.');
+    }
+    return this.prisma.location.update({ where: { id }, data: { isActive: true } });
   }
 
   /**

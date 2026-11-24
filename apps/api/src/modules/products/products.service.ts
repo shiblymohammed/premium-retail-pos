@@ -47,6 +47,7 @@ export class ProductsService {
           data: {
             name,
             description: dto.description?.trim() || null,
+            imageUrl: dto.imageUrl?.trim() || null,
             baseUnit: this.normalizeBaseUnit(dto.baseUnit),
             unitsPerCarton: dto.unitsPerCarton ?? null,
             reorderLevel: dto.reorderLevel ?? null,
@@ -123,6 +124,7 @@ export class ProductsService {
     const data: Prisma.ProductUpdateInput = {};
     if (dto.name !== undefined) data.name = this.requireTrimmed(dto.name, 'Product name', 2);
     if (dto.description !== undefined) data.description = dto.description?.trim() || null;
+    if (dto.imageUrl !== undefined) data.imageUrl = dto.imageUrl?.trim() || null;
     if (dto.baseUnit !== undefined) data.baseUnit = this.normalizeBaseUnit(dto.baseUnit);
     if (dto.unitsPerCarton !== undefined) data.unitsPerCarton = dto.unitsPerCarton;
     if (dto.reorderLevel !== undefined) data.reorderLevel = dto.reorderLevel;

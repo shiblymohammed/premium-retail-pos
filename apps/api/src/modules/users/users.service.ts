@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LocationType, Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { CreateUserWithEmployeeDto } from './dto/create-user-with-employee.dto';
 
 type UserActor = { userId: string; role: string; locationIds: string[] };
 
@@ -185,6 +186,79 @@ export class UsersService {
     }
   }
 
+  async createUserWithEmployee(data: CreateUserWithEmployeeDto, actor: UserActor) {
+    const email = normalizeEmail(data.email);
+    if (Buffer.byteLength(data.password, 'utf8') > 72) {
+      throw new BadRequestException('Password exceeds the supported maximum length');
+    }
+    if (data.role === Role.SUPER_ADMIN || data.role === Role.ADMIN) {
+      throw new BadRequestException('Administrative accounts cannot have employee profiles through this flow');
+    }
+    const locationIds = [...new Set(data.locationIds ?? [])];
+    if (!locationIds.includes(data.locationId)) {
+      throw new BadRequestException('The employee workplace must be included in the account location assignments');
+    }
+    if (locationIds.length === 0) throw new BadRequestException('At least one allowed location is required for this role');
+    if (actor.role !== Role.SUPER_ADMIN && locationIds.some((id) => !actor.locationIds.includes(id))) {
+      throw new ForbiddenException('You can only assign locations within your own authorized scope');
+    }
+    const validLocations = await this.prisma.location.findMany({
+      where: { id: { in: locationIds }, isActive: true },
+      select: { id: true, type: true },
+    });
+    if (validLocations.length !== locationIds.length) {
+      throw new BadRequestException('Every assigned location must exist and be active');
+    }
+    this.validateCashierLocations(data.role, locationIds, validLocations);
+    const location = validLocations.find((item) => item.id === data.locationId);
+    if (!location) throw new BadRequestException('Employee workplace must be an active assigned location');
+    if (await this.prisma.user.findUnique({ where: { email }, select: { id: true } })) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, this.BCRYPT_ROUNDS);
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            email,
+            passwordHash,
+            role: data.role,
+            locationScopes: { create: locationIds.map((locationId) => ({ locationId })) },
+            employee: {
+              create: {
+                employeeCode: data.employeeCode,
+                firstName: data.firstName,
+                lastName: data.lastName,
+                locationId: data.locationId,
+                hireDate: new Date(data.hireDate),
+                ...(data.reportingToId ? { reportingToId: data.reportingToId } : {}),
+              },
+            },
+          },
+          select: {
+            id: true, email: true, role: true, discountLimitPercent: true,
+            canCancelSales: true, canProcessReturns: true, canCountStockAudits: true,
+            isActive: true, createdAt: true,
+            locationScopes: { select: { locationId: true } },
+            employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, locationId: true } },
+          },
+        });
+        if (data.reportingToId) {
+          const manager = await tx.employee.findUnique({ where: { id: data.reportingToId }, select: { id: true, locationId: true, isActive: true } });
+          if (!manager?.isActive) throw new NotFoundException('Active reporting manager not found');
+          if (manager.locationId !== data.locationId) throw new BadRequestException('Reporting manager must be assigned to the same workplace');
+        }
+        return created;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('A user email or employee code is already in use');
+      }
+      throw error;
+    }
+  }
+
   /**
    * List all users with optional role filter.
    */
@@ -221,6 +295,9 @@ export class UsersService {
             ? { where: { locationId: { in: actor.locationIds } } }
             : {}),
           select: { locationId: true },
+        },
+        employee: {
+          select: { id: true, employeeCode: true, firstName: true, lastName: true, locationId: true, isActive: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -347,6 +424,30 @@ export class UsersService {
         });
       }
       return inactive;
+    });
+  }
+
+  async reactivateUser(userId: string, actor: UserActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        include: { locationScopes: { select: { locationId: true } }, employee: { select: { id: true } } },
+      });
+      if (!user) throw new NotFoundException('User not found');
+      if (actor.role !== Role.SUPER_ADMIN && (
+        user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN || user.locationScopes.length === 0 ||
+        user.locationScopes.some((scope) => !actor.locationIds.includes(scope.locationId))
+      )) {
+        throw new ForbiddenException('You are not authorized to reactivate this user');
+      }
+      if (user.role !== Role.SUPER_ADMIN) {
+        const activeLocations = await tx.location.count({ where: { id: { in: user.locationScopes.map((scope) => scope.locationId) }, isActive: true } });
+        if (activeLocations === 0) throw new BadRequestException('Assign this user to an active location before reactivating the account.');
+      }
+      const active = await tx.user.update({ where: { id: userId }, data: { isActive: true } });
+      if (user.employee) await tx.employee.update({ where: { id: user.employee.id }, data: { isActive: true } });
+      return active;
     });
   }
 

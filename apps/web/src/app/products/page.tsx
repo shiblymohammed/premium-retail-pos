@@ -43,6 +43,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/
 interface ProductItem {
   id: number;
   name: string;
+  imageUrl?: string | null;
   variant: string;
   sku: string;
   barcode: string;
@@ -125,15 +126,9 @@ export default function ProductsPage() {
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
 
-  // Modal States
-  const [replenishModalOpen, setReplenishModalOpen] = useState(false);
-  const [selectedProductForReplenish, setSelectedProductForReplenish] = useState<ProductItem | null>(null);
-  const [replenishCartons, setReplenishCartons] = useState(5);
-  const [replenishUrgency, setReplenishUrgency] = useState<'Standard' | 'Urgent' | 'Emergency'>('Standard');
-  const [replenishNote, setReplenishNote] = useState('');
-
   const [addProductModalOpen, setAddProductModalOpen] = useState(false);
   const [newProdName, setNewProdName] = useState('');
+  const [newProdImageUrl, setNewProdImageUrl] = useState('');
   const [newProdVariant, setNewProdVariant] = useState('');
   const [newProdBaseUnit, setNewProdBaseUnit] = useState('');
   const [newProdSku, setNewProdSku] = useState('');
@@ -203,6 +198,7 @@ export default function ProductsPage() {
           })(),
           id: productIndex * 1000 + variantIndex + 1,
           name: product.name,
+          imageUrl: product.imageUrl || null,
           variant: variant.name || 'Default',
           sku: variant.sku,
           barcode: variant.barcode || '',
@@ -379,21 +375,9 @@ export default function ProductsPage() {
     showToast(`Inventory catalogue exported for ${filteredProducts.length} items.`, 'success');
   };
 
-  // Open Replenishment Modal
-  const openReplenish = (product: ProductItem) => {
-    setSelectedProductForReplenish(product);
-    setReplenishCartons(product.packaging.includes('Carton') ? 5 : 20);
-    setReplenishUrgency('Standard');
-    setReplenishNote('');
-    setReplenishModalOpen(true);
-  };
-
-  // Submit Replenishment Request
-  const handleReplenishSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedProductForReplenish) return;
-    showToast('No request was created. Create a stock transfer from the Transfers page.', 'info');
-  };
+  // Replenishment drafts are generated from location-wide reorder thresholds
+  // in the Transfers console; this product list does not support line-level requests.
+  const openReplenish = () => { window.location.assign('/operations'); };
 
   // Add New Product Variant
   const handleAddProductSubmit = async (e: React.FormEvent) => {
@@ -408,12 +392,12 @@ export default function ProductsPage() {
     try {
       const response = await fetch(`${API_BASE}/products`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newProdName.trim(), baseUnit: newProdBaseUnit.trim() || 'unit', unitsPerCarton: newProdCartonRatio > 1 ? newProdCartonRatio : undefined, hasVariants: true, variants: [{ name: newProdVariant.trim() || 'Default', sku: newProdSku.trim().toUpperCase(), barcode: newProdBarcode.trim() || undefined }], sellingPrice: Number(newProdPrice), purchasePrice: 0, priceChangeReason: 'Initial catalogue setup' }),
+        body: JSON.stringify({ name: newProdName.trim(), imageUrl: newProdImageUrl.trim() || undefined, baseUnit: newProdBaseUnit.trim() || 'unit', unitsPerCarton: newProdCartonRatio > 1 ? newProdCartonRatio : undefined, hasVariants: true, variants: [{ name: newProdVariant.trim() || 'Default', sku: newProdSku.trim().toUpperCase(), barcode: newProdBarcode.trim() || undefined }], sellingPrice: Number(newProdPrice), purchasePrice: 0, priceChangeReason: 'Initial catalogue setup' }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'The server could not create this product.');
       setAddProductModalOpen(false); setReloadKey((value) => value + 1);
-      setNewProdName(''); setNewProdVariant(''); setNewProdBaseUnit(''); setNewProdSku(''); setNewProdBarcode(''); setNewProdPrice(0); setNewProdCartonRatio(1);
+      setNewProdName(''); setNewProdImageUrl(''); setNewProdVariant(''); setNewProdBaseUnit(''); setNewProdSku(''); setNewProdBarcode(''); setNewProdPrice(0); setNewProdCartonRatio(1);
       showToast('Product saved to the catalogue. Add opening stock separately to set quantities.', 'success');
     } catch (error) { showToast(error instanceof Error ? error.message : 'Product could not be saved.', 'info'); }
   };
@@ -638,7 +622,9 @@ export default function ProductsPage() {
                 return (
                   <div key={product.id} className={`${styles.rowGrid} ${styles.productRow}`}>
                     <div className={styles.productCell}>
-                      <span className={`${styles.thumb} ${styles[CATEGORY_TONE[product.category] ?? 'toneTeal']}`}>{product.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>
+                      {product.imageUrl
+                        ? <img className={`${styles.thumb} ${styles.productImage}`} src={product.imageUrl} alt={`${product.name} product`} loading="lazy" />
+                        : <span className={`${styles.thumb} ${styles[CATEGORY_TONE[product.category] ?? 'toneTeal']}`}>{product.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>}
                       <span className={styles.productText}>
                         <strong>{product.name}</strong>
                         <small>{product.variant} · {product.category}</small>
@@ -672,13 +658,13 @@ export default function ProductsPage() {
                     <div><span className={`${styles.pill} ${statusTone(product.status)}`}>{product.status === 'Negative' ? 'Negative' : product.status}</span></div>
 
                     <div className={styles.actionsCell}>
-                      <button type="button" className={styles.iconAction} onClick={() => openReplenish(product)} title="Request replenishment" aria-label={`Request replenishment for ${product.name}`}><Icon name="truck" size={15} /></button>
+                      <button type="button" className={styles.iconAction} onClick={openReplenish} title="Open replenishment tools" aria-label="Open replenishment tools"><Icon name="truck" size={15} /></button>
                       <button type="button" className={styles.iconAction} onClick={() => copySku(product)} title="Copy SKU" aria-label={`Copy SKU ${product.sku}`}><Icon name="copy" size={15} /></button>
                       <div className={styles.menuWrap} data-row-menu>
                         <button type="button" className={styles.iconAction} onClick={() => setMenuFor(menuFor === product.id ? null : product.id)} aria-haspopup="menu" aria-expanded={menuFor === product.id} aria-label="More actions"><Icon name="more" size={15} /></button>
                         {menuFor === product.id && (
                           <div className={styles.rowMenu} role="menu">
-                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openReplenish(product); }}><Icon name="truck" size={14} /> Request replenishment</button>
+                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openReplenish(); }}><Icon name="truck" size={14} /> Open replenishment tools</button>
                             <button type="button" role="menuitem" onClick={() => { setMenuFor(null); copySku(product); }}><Icon name="copy" size={14} /> Copy SKU</button>
                             <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setSelectedCategory(product.category); setCurrentPage(1); }}><Icon name="tag" size={14} /> Show {product.category}</button>
                             <a role="menuitem" href="/reports?tab=stock"><Icon name="fileText" size={14} /> Open stock report</a>
@@ -697,7 +683,9 @@ export default function ProductsPage() {
                 return (
                   <article key={product.id} className={styles.gridCard}>
                     <div className={styles.gridTop}>
-                      <span className={`${styles.thumb} ${styles.thumbLg} ${styles[CATEGORY_TONE[product.category] ?? 'toneTeal']}`}>{product.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>
+                      {product.imageUrl
+                        ? <img className={`${styles.thumb} ${styles.thumbLg} ${styles.productImage}`} src={product.imageUrl} alt={`${product.name} product`} loading="lazy" />
+                        : <span className={`${styles.thumb} ${styles.thumbLg} ${styles[CATEGORY_TONE[product.category] ?? 'toneTeal']}`}>{product.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}</span>}
                       <span className={`${styles.pill} ${statusTone(product.status)}`}>{product.status}</span>
                     </div>
                     <div className={styles.gridTitle}>
@@ -712,7 +700,7 @@ export default function ProductsPage() {
                     <div className={styles.gridHealth}><Gauge product={product} /><span>{product.packaging.includes('Carton') && !isNegative ? `${product.availableStock.cartons} ctn + ${product.availableStock.loose} loose` : product.packaging}</span></div>
                     <div className={styles.gridFoot}>
                       <span className={styles.withIcon}><Icon name="mapPin" size={12} />{product.location}</span>
-                      <button type="button" onClick={() => openReplenish(product)} className={styles.smallPrimary}><Icon name="truck" size={13} /> Replenish</button>
+                      <button type="button" onClick={openReplenish} className={styles.smallPrimary}><Icon name="truck" size={13} /> Transfers</button>
                     </div>
                   </article>
                 );
@@ -736,108 +724,6 @@ export default function ProductsPage() {
           )}
         </section>
       </div>
-      {/* MODAL 1: Request Replenishment Drawer/Modal */}
-      {replenishModalOpen && selectedProductForReplenish && (
-        <div className={styles.modalOverlay} onClick={() => setReplenishModalOpen(false)}>
-          <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div className={styles.modalTitleGroup}>
-                <div className={styles.modalIconWrap}>
-                  <Icon name="truck" size={20} />
-                </div>
-                <div>
-                  <h2>Draft Stock Replenishment Transfer</h2>
-                  <p>Request stock transfer from Central Warehouse</p>
-                </div>
-              </div>
-              <button onClick={() => setReplenishModalOpen(false)} className={styles.modalCloseBtn}>
-                <Icon name="x" size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleReplenishSubmit} className={styles.modalBody}>
-              <div className={styles.modalItemDetails}>
-                <div><strong>Product:</strong> {selectedProductForReplenish.name} ({selectedProductForReplenish.variant})</div>
-                <div><strong>SKU:</strong> {selectedProductForReplenish.sku} &nbsp;|&nbsp; <strong>Packaging:</strong> {selectedProductForReplenish.packaging}</div>
-                <div><strong>Destination Store:</strong> {selectedProductForReplenish.location}</div>
-                <div><strong>Current On Hand:</strong> {selectedProductForReplenish.totalUnits} packs (In-transit: {selectedProductForReplenish.inTransit})</div>
-              </div>
-
-              <div className={styles.formGroup}>
-                <label>
-                  Quantity to Request ({selectedProductForReplenish.packaging.includes('Carton') ? 'Cartons' : 'Base Packs'}):
-                </label>
-                <div className={styles.stepperWrap}>
-                  <button
-                    type="button"
-                    onClick={() => setReplenishCartons(c => Math.max(1, c - 1))}
-                    className={styles.stepBtn}
-                  >
-                    -
-                  </button>
-                  <input
-                    type="number"
-                    min="1"
-                    value={replenishCartons}
-                    onChange={(e) => setReplenishCartons(Math.max(1, parseInt(e.target.value) || 1))}
-                    className={styles.stepInput}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setReplenishCartons(c => c + 1)}
-                    className={styles.stepBtn}
-                  >
-                    <Plus size="1em" className="inline-icon" aria-hidden="true" />
-                  </button>
-                </div>
-                <small className={styles.fieldHint}>
-                  {selectedProductForReplenish.packaging.includes('Carton')
-                    ? `Total equivalent units: ${replenishCartons * selectedProductForReplenish.unitsPerCarton} loose packs.`
-                    : `${replenishCartons} units total.`}
-                </small>
-              </div>
-
-              <div className={styles.formGroup}>
-                <label>Dispatch Urgency Level:</label>
-                <select
-                  value={replenishUrgency}
-                  onChange={(e) => setReplenishUrgency(e.target.value as any)}
-                  className={styles.modalSelect}
-                >
-                  <option value="Standard">Standard Warehouse Run (24-48 hrs)</option>
-                  <option value="Urgent">Urgent Priority (Same Day)</option>
-                  <option value="Emergency">Emergency Critical Stockout (Immediate)</option>
-                </select>
-              </div>
-
-              <div className={styles.formGroup}>
-                <label>Internal Audit / Warehouse Notes:</label>
-                <textarea
-                  rows={2}
-                  value={replenishNote}
-                  onChange={(e) => setReplenishNote(e.target.value)}
-                  placeholder="e.g., Weekend surge replenishment or promotional event..."
-                  className={styles.modalTextarea}
-                />
-              </div>
-
-              <div className={styles.modalFooter}>
-                <button
-                  type="button"
-                  onClick={() => setReplenishModalOpen(false)}
-                  className={styles.btnSecondary}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className={styles.btnPrimary}>
-                  <Icon name="check" size={16} />
-                  <span>Confirm Transfer Order</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* MODAL 2: Add Product Modal */}
       {addProductModalOpen && (
@@ -880,6 +766,15 @@ export default function ProductsPage() {
                     onChange={(e) => setNewProdVariant(e.target.value)}
                     className={styles.modalInput}
                   />
+                </div>
+              </div>
+
+              <div className={styles.formRow}>
+                <div className={styles.formGroup}>
+                  <label htmlFor="product-image-url">Product image URL</label>
+                  <input id="product-image-url" type="url" inputMode="url" placeholder="https://example.com/product-image.jpg" value={newProdImageUrl} onChange={(e) => setNewProdImageUrl(e.target.value)} className={styles.modalInput} />
+                  <small className={styles.fieldHint}>Use a public HTTPS image link. You can leave this blank and add an image later.</small>
+                  {newProdImageUrl.trim() && <img className={styles.imagePreview} src={newProdImageUrl.trim()} alt="Product image preview" />}
                 </div>
               </div>
 

@@ -29,3 +29,32 @@ describe('ReportsService authorization', () => {
     expect(prisma.inAppNotification.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'notification-id', userId: 'caller-id' } }));
   });
 });
+
+describe('ReportsService financial summaries', () => {
+  it('uses complete decimal aggregates rather than the capped invoice preview', async () => {
+    const prisma = {
+      invoice: {
+        count: jest.fn().mockResolvedValue(12001),
+        findMany: jest.fn().mockResolvedValue(Array.from({ length: 500 }, (_, index) => ({
+          id: `invoice-${index}`, invoiceNumber: `INV-${index}`, locationId: 'store-a', status: 'FINALIZED',
+          netTotal: { toFixed: () => '1.00' }, createdAt: new Date('2026-01-01T10:00:00.000Z'), cancelledAt: null,
+        }))),
+      },
+      location: { findMany: jest.fn().mockResolvedValue([{ id: 'store-a', name: 'Store A', company: { timezone: 'Asia/Kolkata' } }]) },
+      $queryRaw: jest.fn().mockResolvedValue([
+        { locationId: 'store-a', date: '2026-01-01', invoices: 12000, cancelled: 0, netSales: '11999.99' },
+        { locationId: 'store-a', date: '2026-01-02', invoices: 1, cancelled: 0, netSales: '1.00' },
+      ]),
+    };
+    const service = new ReportsService(prisma as any, {} as any);
+
+    const summary = await service.salesSummary({
+      locationId: 'store-a', from: '2026-01-01T00:00:00.000Z', to: '2026-01-03T00:00:00.000Z',
+    }, { userId: 'admin-1', email: 'admin@example.test', role: Role.SUPER_ADMIN, locationIds: [] });
+
+    expect(summary.totals).toEqual({ netSales: '12000.99', completedInvoices: 12001, cancelledInvoices: 0 });
+    expect(summary.daily).toHaveLength(2);
+    expect(summary.invoices).toHaveLength(500);
+    expect(summary.truncated).toBe(true);
+  });
+});

@@ -22,8 +22,8 @@ export class UpdateLocationDto {
   geofenceRadius?: number;
 
   @IsOptional() @IsUUID()
-  parentId?: string;
+  parentId?: string | null;
 
   @IsOptional() @IsUUID()
-  managerId?: string;
+  managerId?: string | null;
 }
