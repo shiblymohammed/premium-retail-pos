@@ -1,7 +1,9 @@
 'use client';
 
+import { CameraScanner } from '@/components/ui/camera-scanner';
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { InfoHint } from '@/components/ui/info-hint';
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, ChevronRight, Clock, Info, MapPin, Power, QrCode, Timer } from 'lucide-react';
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, Camera, Check, ChevronRight, Clock, Info, MapPin, QrCode, Timer } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import styles from './attendance.module.css';
@@ -76,10 +78,11 @@ export default function AttendancePage() {
   const [today, setToday] = useState<Today | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [profileMissing, setProfileMissing] = useState(false);
   const [apiToken, setApiToken] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
   const [qrToken, setQrToken] = useState('');
   const [clockNow, setClockNow] = useState<Date | null>(null);
   const [history, setHistory] = useState<HistoryDay[]>([]);
@@ -93,6 +96,7 @@ export default function AttendancePage() {
     const code = new URLSearchParams(window.location.hash.slice(1)).get('qr');
     if (code) {
       setQrToken(code);
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
       setNotice('Attendance QR link received. The server will verify it when you record your punch.');
     }
 
@@ -147,7 +151,6 @@ export default function AttendancePage() {
           const message = caught instanceof Error ? caught.message : 'Could not load your attendance.';
           if (message.toLowerCase().includes('employee profile')) {
             setApiToken('');
-            setProfileMissing(true);
             setToday(null);
             setNotice('An administrator must link an employee profile to this account before attendance can be recorded.');
           } else {
@@ -194,69 +197,37 @@ export default function AttendancePage() {
   }
 
   async function handlePunch() {
-    if (!today) return;
+    if (!today?.nextAction || !apiToken || busy || (today.qrRequired && !qrToken)) return;
     setBusy(true);
     setError('');
 
-    if (apiToken) {
-      try {
-        const response = await fetch(`${API_BASE}/attendance/me/punch`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(qrToken ? { qrToken } : {}),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.message || 'Could not record attendance. Please try again.');
-        const result = payload.data;
-        const next: Today = {
-          ...today,
-          employee: result.employee || today.employee,
-          location: result.location || today.location,
-          status: result.status,
-          nextAction: result.nextAction,
-          punches: [...today.punches, result.punch],
-        };
-        setToday(next);
-        updateTodayPattern(next.punches);
-        setNotice(`${result.punch.punchType === 'IN' ? 'Clock-in' : 'Clock-out'} recorded at ${formatTime(result.punch.punchTimestamp, today.timezone)}${result.punch.isLate ? ` · Late after ${result.punch.targetStartTime}` : ''}.`);
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Could not record attendance. Please try again.');
-      } finally {
-        setBusy(false);
-      }
-      return;
+    try {
+      const response = await fetch(`${API_BASE}/attendance/me/punch`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(qrToken ? { qrToken } : {}),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'Could not record attendance. Please try again.');
+      const result = payload.data;
+      const next: Today = {
+        ...today,
+        employee: result.employee || today.employee,
+        location: result.location || today.location,
+        status: result.status,
+        nextAction: result.nextAction,
+        punches: [...today.punches, result.punch],
+      };
+      setToday(next);
+      setClockNow(new Date());
+      updateTodayPattern(next.punches);
+      setNotice(`${result.punch.punchType === 'IN' ? 'Clock-in' : 'Clock-out'} recorded at ${formatTime(result.punch.punchTimestamp, today.timezone)}${result.punch.isLate ? ` · Late after ${result.punch.targetStartTime}` : ''}.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not record attendance. Please try again.');
+    } finally {
+      setQrToken('');
+      setBusy(false);
     }
-
-    const now = new Date();
-    const action = today.nextAction || 'IN';
-    let isLate = false;
-    if (action === 'IN' && today.targetStartTime) {
-      const [targetH, targetM] = today.targetStartTime.split(':').map(Number);
-      const localParts = new Intl.DateTimeFormat('en-GB', { timeZone: today.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
-      const localMinutes = Number(localParts.find((part) => part.type === 'hour')?.value || 0) * 60 + Number(localParts.find((part) => part.type === 'minute')?.value || 0);
-      isLate = localMinutes > targetH * 60 + targetM;
-    }
-
-    const newPunch: Punch = {
-      id: `punch_${Date.now()}`,
-      punchType: action,
-      punchTimestamp: now.toISOString(),
-      isLate,
-      targetStartTime: today.targetStartTime,
-      qrVerified: Boolean(qrToken) || !today.qrRequired,
-      originalTimestamp: null,
-      correctionReason: null,
-    };
-
-    const nextStatus = action === 'IN' ? 'WORKING' : 'COMPLETED';
-    const punches = [...today.punches, newPunch];
-    setToday({ ...today, status: nextStatus, nextAction: action === 'IN' ? 'OUT' : null, punches });
-    updateTodayPattern(punches);
-    setNotice(action === 'IN'
-      ? `Clock-in recorded at ${formatTime(now.toISOString())}${isLate ? ` · Marked late after ${today.targetStartTime}` : ' · On time'}.`
-      : `Clock-out recorded at ${formatTime(now.toISOString())}.`);
-    setClockNow(now);
-    setBusy(false);
   }
 
   if (loading) return <main className={`${styles.page} app-page`}><div className={styles.loading}>Loading your attendance…</div></main>;
@@ -303,37 +274,57 @@ export default function AttendancePage() {
           <article className={styles.summaryCard}><span className={styles.summaryIcon}><Check size="1em" className="inline-icon" aria-hidden="true" /></span><div><small>LAST 6 MONTHS</small><strong>{historySummary.shifts} shifts</strong><em>{historySummary.late} late arrivals</em></div></article>
         </section>
 
-        {(error || notice) && <div className={`${styles.feedback} ${profileMissing ? styles.feedbackPreview : error ? styles.feedbackError : styles.feedbackSuccess}`} role={error ? 'alert' : 'status'}>{error || notice}</div>}
+        {(error || notice) && <div className={`${styles.feedback} ${error ? styles.feedbackError : styles.feedbackSuccess}`} role={error ? 'alert' : 'status'}>{error || notice}</div>}
 
         <section className={styles.mainGrid}>
-          <article className={styles.actionPanel}>
-            <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><div className="heading-with-info"><h2>Shift check-in</h2><InfoHint label="About shift check-in">Attendance entries are recorded against your assigned location. Scan the store QR code when the screen asks for it.</InfoHint></div><p>Clock in when you’re ready to begin, then clock out at the end of your shift.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
+          <article id="shift" className={styles.actionPanel}>
+            <div className={styles.panelHeading}><div><span className={styles.sectionLabel}>TODAY · {today.localDate}</span><div className="heading-with-info"><h2>Shift check-in</h2><InfoHint label="About shift check-in">Attendance entries are recorded against your assigned location. Scan the store QR code when the screen asks for it.</InfoHint></div><p>Manage your punches for today.</p></div><span className={`${styles.statusPill} ${statusClass}`}><i />{statusLabel}</span></div>
 
-            {!profileMissing && today.qrRequired && today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}><span className={styles.qrIcon}>{qrToken ? <Check size="1em" className="inline-icon" aria-hidden="true" /> : <QrCode size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{qrToken ? 'Store verification ready' : 'Store QR check required'}</strong><small>{qrToken ? 'The current counter code will be checked by the server.' : 'Open this page from the current attendance QR displayed at your store.'}</small></div></div>}
+            {today.status !== 'COMPLETED' && <div className={`${styles.qrNotice} ${qrToken ? styles.qrVerified : ''}`}>
+              <span className={styles.qrIcon}>{qrToken ? <Check size={18} /> : <QrCode size={18} />}</span>
+              <div><strong>{qrToken ? 'Attendance code ready' : today.qrRequired ? 'Scan the location QR to continue' : 'Location verification'}</strong>
+              <small>{qrToken ? 'The code is verified when you record your punch.' : 'Use the current attendance code displayed at your location.'}</small></div>
+              <button className="admin-secondary" type="button" onClick={() => setScannerOpen(true)}><Camera size={17} /> {qrToken ? 'Scan again' : 'Scan QR'}</button>
+              {qrToken && <button className="admin-secondary" type="button" onClick={() => setQrToken('')}>Clear code</button>}
+            </div>}
 
-            <div className={styles.shiftControls}>
+            <div className={styles.shiftSummary}>
               {today.status === 'NOT_STARTED' && <>
-                <div className={styles.localClock}><span>LOCAL TIME</span><strong>{clockValue}</strong><small>{today.targetStartTime ? `Scheduled start · ${today.targetStartTime}` : 'Ready when you are'}</small></div>
-                <button className={styles.attendanceOrb} type="button" disabled={busy || Boolean(apiToken && today.qrRequired && !qrToken)} onClick={handlePunch} aria-label="Clock in and start your shift">
-                  <span className={styles.orbIcon} aria-hidden="true"><Power size={22} strokeWidth={1.8} aria-hidden="true" /></span>
-                  <strong>{busy ? 'Saving…' : 'Clock in'}</strong><small>Start shift</small>
+                <div><small>Local time</small><strong>{clockValue}</strong><p>{today.targetStartTime ? `Scheduled start ${today.targetStartTime}` : 'Clock in when you’re ready to start.'}</p></div>
+                <button className="admin-primary" type="button" disabled={busy || (today.qrRequired && !qrToken)} onClick={handlePunch}>
+                  <ArrowUpRight size={18} /> {busy ? 'Saving…' : 'Clock in'}
                 </button>
-                {profileMissing && <div className={styles.profileNotice}><span>i</span><div><strong>Attendance unavailable</strong><small>No employee profile is linked to this account. Ask an administrator to create or link your employee record before clocking in.</small></div></div>}
               </>}
-
-              {today.status === 'WORKING' && <div className={styles.activeShift}>
-                <div className={styles.timerCircle}><span className={styles.timerLive}><i /> SHIFT IN PROGRESS</span><strong>{elapsed}</strong><small>HOURS : MINUTES</small><em>Clocked in at {clockIn ? formatTime(clockIn.punchTimestamp) : '—'}</em></div>
-                <button className={styles.clockOutAction} type="button" disabled={busy} onClick={handlePunch}><span aria-hidden="true"><ArrowDownLeft size="1em" className="inline-icon" aria-hidden="true" /></span><strong>{busy ? 'Saving…' : 'Clock out'}</strong><small>Finish today’s shift</small></button>
+              {today.status === 'WORKING' && <>
+                <div><small>Time on shift</small><strong>{elapsed}</strong><p>Clocked in at {clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'}</p></div>
+                <button className="admin-secondary" type="button" disabled={busy || (today.qrRequired && !qrToken)} onClick={() => setConfirmOut(true)}>
+                  <ArrowDownLeft size={18} /> {busy ? 'Saving…' : 'Clock out'}
+                </button>
+              </>}
+              {today.status === 'COMPLETED' && <div>
+                <small>Total time</small><strong>{elapsed}</strong>
+                <p>{clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'} to {clockOut ? formatTime(clockOut.punchTimestamp, today.timezone) : '—'}</p>
               </div>}
-
-              {today.status === 'COMPLETED' && <div className={styles.completedShift}><span className={styles.completedIcon}><Check size="1em" className="inline-icon" aria-hidden="true" /></span><small>SHIFT COMPLETE</small><strong>{elapsed}</strong><p>{clockIn ? `Clocked in ${formatTime(clockIn.punchTimestamp)}` : 'Clock-in recorded'} · {clockOut ? `Clocked out ${formatTime(clockOut.punchTimestamp)}` : 'Clock-out recorded'}</p></div>}
             </div>
-
-            {!profileMissing && <div className={styles.policyNote}><span><Info size="1em" className="inline-icon" aria-hidden="true" /></span><p>{today.targetStartTime ? `Scheduled start is ${today.targetStartTime}. A later clock-in is recorded as late.` : 'Your manager has not set a shift start time yet.'} All times use the store’s local time.</p></div>}
+            {scannerOpen && <CameraScanner kind="qr" onClose={() => setScannerOpen(false)} onScan={(value) => {
+              try {
+                const url = new URL(value);
+                const code = new URLSearchParams(url.hash.slice(1)).get('qr');
+                if (url.origin !== window.location.origin || url.pathname !== '/attendance' || !code) return false;
+                setQrToken(code);
+                setError('');
+                setScannerOpen(false);
+                return true;
+              } catch { return false; }
+            }} />}
+            {confirmOut && <ConfirmAction title="Clock out now?" confirmLabel="Yes, clock out" cancelLabel="No, stay on shift"
+              onCancel={() => setConfirmOut(false)} onConfirm={() => { setConfirmOut(false); void handlePunch(); }}>
+              This records the end of today’s shift at {today.location.name}.
+            </ConfirmAction>}
 
             <div className={styles.todayTimeline}>
               <div className={styles.subheading}><div><span className={styles.sectionLabel}>PUNCH RECORD</span><h3>Today’s activity</h3></div><span>{today.punches.length} {today.punches.length === 1 ? 'entry' : 'entries'}</span></div>
-              {today.punches.length ? today.punches.slice().reverse().map((punch) => <div className={styles.punchRow} key={punch.id}><span className={`${styles.punchMarker} ${punch.punchType === 'OUT' ? styles.punchMarkerOut : ''}`}>{punch.punchType === 'IN' ? <ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /> : <ArrowDownLeft size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{punch.punchType === 'IN' ? 'Clocked in' : 'Clocked out'}{punch.isLate && <em className={styles.lateBadge}>Late</em>}</strong><small>{punch.isLate ? `After scheduled start at ${punch.targetStartTime}` : punch.qrVerified ? 'Store verification recorded' : 'Time recorded on this device'}{punch.correctionReason ? ` · Corrected: ${punch.correctionReason}` : ''}</small></div><time>{formatTime(punch.punchTimestamp)}</time></div>) : <div className={styles.noPunches}><span><Clock size="1em" className="inline-icon" aria-hidden="true" /></span><p>No punches yet today. Your clock-in and clock-out will appear here.</p></div>}
+              {today.punches.length ? today.punches.slice().reverse().map((punch) => <div className={styles.punchRow} key={punch.id}><span className={`${styles.punchMarker} ${punch.punchType === 'OUT' ? styles.punchMarkerOut : ''}`}>{punch.punchType === 'IN' ? <ArrowUpRight size="1em" className="inline-icon" aria-hidden="true" /> : <ArrowDownLeft size="1em" className="inline-icon" aria-hidden="true" />}</span><div><strong>{punch.punchType === 'IN' ? 'Clocked in' : 'Clocked out'}{punch.isLate && <em className={styles.lateBadge}>Late</em>}</strong><small>{punch.isLate ? `After scheduled start at ${punch.targetStartTime}` : punch.qrVerified ? 'Store verification recorded' : 'Time recorded on this device'}{punch.correctionReason ? ` · Corrected: ${punch.correctionReason}` : ''}</small></div><time>{formatTime(punch.punchTimestamp, today.timezone)}</time></div>) : <div className={styles.noPunches}><span><Clock size="1em" className="inline-icon" aria-hidden="true" /></span><p>No punches yet today. Your clock-in and clock-out will appear here.</p></div>}
             </div>
           </article>
 

@@ -13,6 +13,7 @@ import {
   Plus,
   Settings,
   Store,
+  TriangleAlert,
   Warehouse,
   X,
 } from 'lucide-react';
@@ -104,9 +105,6 @@ export default function CompanySettingsPage() {
   const [nodeName, setNodeName] = useState(selectedNode?.name || '');
   const [nodeType, setNodeType] = useState<LocationNode['type']>(selectedNode?.type || 'RETAIL_STORE');
   const [nodeParent, setNodeParent] = useState(selectedNode?.parentId || '');
-  const [nodeLat, setNodeLat] = useState(String(selectedNode?.latitude || '12.9716'));
-  const [nodeLng, setNodeLng] = useState(String(selectedNode?.longitude || '77.5946'));
-  const [nodeRadius, setNodeRadius] = useState(String(selectedNode?.geofenceRadiusMeters || '50'));
   const [nodeManager, setNodeManager] = useState(selectedNode?.managerId || '');
   const [nodeAddress, setNodeAddress] = useState(selectedNode?.address || '');
 
@@ -175,9 +173,6 @@ export default function CompanySettingsPage() {
       setNodeName(selectedNode.name);
       setNodeType(selectedNode.type);
       setNodeParent(selectedNode.parentId || '');
-      setNodeLat(String(selectedNode.latitude));
-      setNodeLng(String(selectedNode.longitude));
-      setNodeRadius(String(selectedNode.geofenceRadiusMeters));
       setNodeManager(selectedNode.managerId || '');
       setNodeAddress(selectedNode.address);
     }
@@ -292,9 +287,6 @@ export default function CompanySettingsPage() {
           type: nodeType === 'CENTRAL_WAREHOUSE' ? 'MAIN_WAREHOUSE' : nodeType,
           parentId: nodeParent || null,
           address: nodeAddress.trim() || undefined,
-          latitude: Number(nodeLat),
-          longitude: Number(nodeLng),
-          geofenceRadius: Number(nodeRadius),
           managerId: nodeManager || null,
         }),
       });
@@ -397,7 +389,7 @@ export default function CompanySettingsPage() {
   };
 
   const copyLocationInfo = (n: LocationNode) => {
-    const text = `Facility: ${n.name} (${n.code}) | Type: ${n.type} | Address: ${n.address} | GPS: ${n.latitude}, ${n.longitude}`;
+    const text = `Facility: ${n.name} (${n.code}) | Type: ${n.type} | Address: ${n.address}`;
     navigator.clipboard.writeText(text);
     setNotice(`Coordinates & details for ${n.name} copied to clipboard!`);
   };
@@ -718,7 +710,7 @@ export default function CompanySettingsPage() {
             }}
           >
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: '960px', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+              <table style={{ width: '100%', minWidth: '740px', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr
                     style={{
@@ -730,17 +722,16 @@ export default function CompanySettingsPage() {
                       letterSpacing: '0.06em',
                     }}
                   >
-                    <th style={{ padding: '14px 20px', width: '32%' }}>FACILITY IDENTITY</th>
-                    <th style={{ padding: '14px 16px', width: '18%' }}>TYPE & HIERARCHY</th>
-                    <th style={{ padding: '14px 16px', width: '20%' }}>FACILITY MANAGER</th>
-                    <th style={{ padding: '14px 16px', width: '18%' }}>GEOFENCE</th>
-                    <th style={{ padding: '14px 20px', width: '12%', textAlign: 'right' }}>ACTIONS</th>
+                    <th style={{ padding: '14px 20px', width: '35%' }}>FACILITY IDENTITY</th>
+                    <th style={{ padding: '14px 16px', width: '20%' }}>TYPE & HIERARCHY</th>
+                    <th style={{ padding: '14px 16px', width: '25%' }}>FACILITY MANAGER</th>
+                    <th style={{ padding: '14px 20px', width: '20%', textAlign: 'right' }}>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredNodes.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
+                      <td colSpan={4} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
                         <div style={{ fontSize: '32px', marginBottom: '8px' }}><Building2 size="1em" className="inline-icon" aria-hidden="true" /></div>
                         <strong>{profileState === 'loading' ? 'Loading locations…' : profileState === 'error' ? 'Could not load locations' : nodes.length ? 'No locations match these filters' : 'No locations yet'}</strong>
                         <p style={{ margin: '4px 0 0', fontSize: '12px' }}>{profileState === 'ready' && (nodes.length ? 'Try changing the search or filters.' : companyId ? 'Add a store or warehouse to get started.' : 'Complete the company profile to add your first location.')}</p>
@@ -841,6 +832,7 @@ export default function CompanySettingsPage() {
 
                           {/* Col 3: FACILITY MANAGER */}
                           <td style={{ padding: '13px 16px' }}>
+                            {n.assignedManager ? (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <div
                                 style={{
@@ -863,26 +855,11 @@ export default function CompanySettingsPage() {
                                 {n.assignedManager.split('(')[0].trim()}
                               </span>
                             </div>
-                          </td>
-
-                          {/* Col 4: GEOFENCE */}
-                          <td style={{ padding: '13px 16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                              <span
-                                style={{
-                                  padding: '2px 6px',
-                                  borderRadius: '6px',
-                                  background: 'var(--retail-raised)',
-                                  border: '1px solid var(--retail-edge)',
-                                  color: 'var(--retail-muted)',
-                                  fontSize: '10.5px',
-                                  fontWeight: 600,
-                                }}
-                                title={`GPS: ${n.latitude}, ${n.longitude} (Radius: ${n.geofenceRadiusMeters}m)`}
-                              >
-                                <MapPin size="1em" className="inline-icon" aria-hidden="true" /> {n.geofenceRadiusMeters}m Geofence
-                              </span>
-                            </div>
+                            ) : (
+                              <button type="button" className="admin-secondary manager-missing" onClick={() => { setSelectedNodeId(n.id); setIsEditModalOpen(true); }}>
+                                <TriangleAlert size={15} aria-hidden="true" /> Assign manager
+                              </button>
+                            )}
                           </td>
 
                           {/* Col 5: ACTIONS */}
@@ -906,7 +883,7 @@ export default function CompanySettingsPage() {
                                   display: 'grid',
                                   placeItems: 'center',
                                 }}
-                                title="Copy Coordinates & Details"
+                                title="Copy location details"
                               >
                                 <Link2 size="1em" className="inline-icon" aria-hidden="true" />
                               </button>
@@ -1223,10 +1200,10 @@ export default function CompanySettingsPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
                 <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>
-                  Configure Facility Node
+                  Configure location
                 </h2>
                 <small style={{ color: 'var(--retail-muted)' }}>
-                  Dual-axis physical store binding, GPS geofencing & terminal lanes.
+                  Edit the address, warehouse relationship, or manager.
                 </small>
               </div>
               <button
@@ -1280,14 +1257,14 @@ export default function CompanySettingsPage() {
                     }}
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px', background: 'var(--retail-card)' }}
                   >
-                    <option value="RETAIL_STORE">RETAIL_STORE (Point of Sale)</option>
-                    <option value="SUB_WAREHOUSE">SUB_WAREHOUSE (Regional Depot)</option>
-                    <option value="CENTRAL_WAREHOUSE">CENTRAL_WAREHOUSE (Primary Hub)</option>
+                    <option value="RETAIL_STORE">Retail store</option>
+                    <option value="SUB_WAREHOUSE">Sub-warehouse</option>
+                    <option value="CENTRAL_WAREHOUSE">Central warehouse</option>
                   </select>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                    Parent Logistics Node
+                    Parent warehouse
                   </label>
                   <select
                     value={nodeParent}
@@ -1312,7 +1289,7 @@ export default function CompanySettingsPage() {
 
               <div style={{ marginBottom: '14px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                  Physical Facility Address *
+                  Address *
                 </label>
                 <input
                   type="text"
@@ -1321,46 +1298,6 @@ export default function CompanySettingsPage() {
                   onChange={(e) => setNodeAddress(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px' }}
                 />
-              </div>
-
-              {/* GPS Geofence */}
-              <div style={{ padding: '12px', background: 'var(--retail-raised)', borderRadius: '8px', border: '1px solid var(--retail-edge)', marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '8px' }}>
-                  <MapPin size="1em" className="inline-icon" aria-hidden="true" /> GPS Geofence & Mobile Check-in (OD-12)
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                  <div>
-                    <span style={{ fontSize: '11px', color: 'var(--retail-muted)' }}>Latitude</span>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={nodeLat}
-                      onChange={(e) => setNodeLat(e.target.value)}
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--retail-edge-strong)', fontSize: '12.5px' }}
-                    />
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '11px', color: 'var(--retail-muted)' }}>Longitude</span>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      value={nodeLng}
-                      onChange={(e) => setNodeLng(e.target.value)}
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--retail-edge-strong)', fontSize: '12.5px' }}
-                    />
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '11px', color: 'var(--retail-muted)' }}>Radius (Meters)</span>
-                    <input
-                      type="number"
-                      min="10"
-                      max="500"
-                      value={nodeRadius}
-                      onChange={(e) => setNodeRadius(e.target.value)}
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid var(--retail-edge-strong)', fontSize: '12.5px' }}
-                    />
-                  </div>
-                </div>
               </div>
 
               <div style={{ marginBottom: '16px' }}>
@@ -1570,7 +1507,7 @@ export default function CompanySettingsPage() {
 
               <div style={{ marginBottom: '22px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                  Physical Facility Address *
+                  Address *
                 </label>
                 <input
                   type="text"

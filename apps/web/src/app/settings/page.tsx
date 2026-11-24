@@ -3,7 +3,7 @@
 import { Compass } from 'lucide-react';
 import { OPEN_WORKSPACE_TOUR } from '@/components/layout/workspace-tour';
 import { AdminModal } from '@/components/admin';
-import { DEVICE_LOCK_CHANGED, hasDevicePin, setDeviceLocked } from '@/lib/device-lock';
+import { DEVICE_LOCK_CHANGED, hasDevicePin, REQUEST_DEVICE_LOCK } from '@/lib/device-lock';
 import { Feedback } from '@/components/ui/feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -39,11 +39,11 @@ export default function SettingsPage() {
   const [toast, setToast] = useState('');
   const [pinSet, setPinSet] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     const current = getStoredSession();
     setSession(current);
+    if (new URLSearchParams(window.location.search).get('panel') === 'pin') setOpenId('pin');
     if (current?.user) {
       try {
         const saved = window.localStorage.getItem(`${SETTINGS_STORAGE_PREFIX}${current.user.role}`);
@@ -94,8 +94,7 @@ export default function SettingsPage() {
 
   function lockNow() {
     if (!session?.user.id || !pinSet) return;
-    try { setDeviceLocked(session.user.id, true); }
-    catch { setError('Could not lock the screen on this device.'); }
+    window.dispatchEvent(new Event(REQUEST_DEVICE_LOCK));
   }
 
   const close = useCallback(() => setOpenId(null), []);
@@ -194,7 +193,6 @@ export default function SettingsPage() {
         <button type="button" className="admin-secondary" onClick={() => setResetOpen(false)}>Cancel</button>
         <button type="button" className="admin-primary" onClick={() => { save(DEFAULT_PREFERENCES, 'Settings reset to defaults'); setResetOpen(false); }}>Reset preferences</button>
       </>}><p>Restore the default settings for this role on this device. Your unlock PIN stays saved.</p></AdminModal>}
-      {error && <Feedback toast tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
       {toast && <Feedback toast tone="success">{toast}</Feedback>}
     </div>
   );

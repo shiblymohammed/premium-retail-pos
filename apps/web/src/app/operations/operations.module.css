@@ -250,29 +250,6 @@ button.summaryCard { cursor: pointer; }
 .tableFoot { display: flex; justify-content: space-between; gap: 12px; padding: 12px 18px; font-size: 12.5px; color: var(--muted); }
 .tableFoot b { color: var(--ink); }
 
-/* ---------- Developer tools ---------- */
-.devTools { border: 1px dashed var(--retail-edge-strong); border-radius: 16px; background: transparent; }
-.devTools summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; font-size: 13px; font-weight: 600; color: var(--retail-muted); cursor: pointer; list-style: none; }
-.devTools summary::-webkit-details-marker { display: none; }
-.devTools summary > span { display: inline-flex; align-items: center; gap: 8px; }
-.devTools summary > svg { transition: transform 0.2s ease; }
-.devTools[open] summary > svg { transform: rotate(180deg); }
-.devTools[open] { background: var(--surface); border-style: solid; border-color: var(--line); }
-.devBody { display: flex; flex-direction: column; gap: 12px; padding: 0 18px 18px; }
-.benchForm { display: flex; flex-direction: column; gap: 10px; }
-.benchRow { display: flex; align-items: center; border: 1px solid var(--retail-edge-strong); border-radius: 12px; overflow: hidden; background: var(--retail-card); }
-.benchRow:focus-within { border-color: var(--accent); }
-.benchRow select { height: 42px; padding: 0 12px; border: none; border-right: 1px solid var(--line); background: var(--retail-raised); font: inherit; font-size: 12.5px; font-weight: 700; color: var(--accent-deep); outline: none; }
-.benchBase { padding: 0 2px 0 12px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--retail-subtle); white-space: nowrap; }
-.benchRow input { flex: 1; min-width: 120px; height: 42px; border: none; outline: none; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
-.benchForm textarea { padding: 10px 12px; border: 1px solid var(--retail-edge-strong); border-radius: 12px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; outline: none; resize: vertical; }
-.benchOut { border-radius: 12px; overflow: hidden; }
-.benchOutHead { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: var(--retail-dark); color: #cbd5e1; font-size: 12px; font-weight: 600; }
-.okCode, .errCode { padding: 2px 8px; border-radius: 6px; font-size: 11.5px; }
-.okCode { background: rgba(74, 222, 128, 0.15); color: #86efac; }
-.errCode { background: rgba(248, 113, 113, 0.15); color: #fca5a5; }
-.benchOut pre { margin: 0; padding: 14px; max-height: 360px; overflow: auto; background: var(--retail-dark); color: #d1e3f8; font-size: 12.5px; line-height: 1.5; }
-
 /* ---------- Modals ---------- */
 .backdrop { position: fixed; inset: 0; z-index: 250; display: grid; place-items: center; padding: 20px; background: rgba(17, 24, 39, 0.45); backdrop-filter: blur(3px); }
 .modal { width: min(540px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; background: var(--retail-card); border-radius: 20px; box-shadow: 0 30px 60px -20px rgba(17, 24, 39, 0.45); overflow: hidden; }

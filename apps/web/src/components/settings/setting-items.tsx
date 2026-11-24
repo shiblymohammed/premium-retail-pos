@@ -143,41 +143,24 @@ export function getSettingGroups(role: string): SettingGroup[] {
   // Cashier and staff clock in with the QR code on the Staff Attendance page
   if (!(isStoreManager || isWarehouse || isAdmin)) {
     groups.push({
-      id: 'shift', title: 'Shift & clock-in', description: 'Camera and reminders for clocking in.',
+      id: 'shift', title: 'Shift & clock-in', description: 'Choose the camera you use for attendance.',
       items: [
-        { id: 'shift', icon: 'clock', title: 'QR clock-in & reminders', description: 'Which camera to scan with and when to remind you', summary: (p) => `${p.qrCameraFacing === 'environment' ? 'Back' : 'Front'} camera · ${p.shiftReminderAdvanceMinutes} min before` },
+        { id: 'shift', icon: 'clock', title: 'Attendance camera', description: 'Choose a camera for scanning QR codes', summary: (p) => p.qrCameraFacing === 'user' ? 'Front camera' : 'Back camera' },
       ],
     });
   }
 
-  const alertKeys = getAlertKeys(role);
-  groups.push({
+  if (isAdmin || isStoreManager || (isWarehouse && role !== 'SUB_WAREHOUSE_MANAGER')) groups.push({
     id: 'alerts',
     title: 'Notifications',
-    description: 'Choose what you want to hear about.',
+    description: 'Review operational alerts for your authorized locations.',
     items: [
-      { id: 'notifications', icon: 'bell', title: 'Alerts', description: cap(alertKeys.map((k) => ALERTS[k].short).join(', ')), summary: (p) => countOn(...alertKeys.map((k) => p[k])) },
+      { id: 'notifications', icon: 'bell', title: 'Operational alerts', description: 'Transfer discrepancies, replenishment approvals and stock counts', summary: () => 'Open', href: '/reports?alerts=1' },
     ],
   });
 
   return groups;
 }
-
-// ---------- Alerts, shown only where they matter for the role ----------
-type AlertKey = 'notifyLowStockEmail' | 'notifyShipmentDiscrepancies' | 'notifyShiftStart' | 'notifySalesRefunds';
-const ALERTS: Record<AlertKey, { title: string; detail: string; short: string }> = {
-  notifyLowStockEmail: { title: 'Low stock', detail: 'When an item reaches its low-stock level.', short: 'low stock' },
-  notifyShipmentDiscrepancies: { title: 'Shipment problems', detail: 'Damaged cartons or items missing from a delivery.', short: 'shipment problems' },
-  notifyShiftStart: { title: 'Shift reminders', detail: 'A reminder before the clock-in cut-off time.', short: 'shift reminders' },
-  notifySalesRefunds: { title: 'Voids & refunds', detail: 'When a supervisor cancels a bill or approves a return.', short: 'voids & refunds' },
-};
-function getAlertKeys(role: string): AlertKey[] {
-  if (role === 'CASHIER') return ['notifyShiftStart', 'notifySalesRefunds'];
-  if (role === 'STAFF') return ['notifyShiftStart'];
-  if (role === 'CENTRAL_MANAGER' || role === 'WAREHOUSE_MANAGER' || role === 'SUB_WAREHOUSE_MANAGER') return ['notifyLowStockEmail', 'notifyShipmentDiscrepancies'];
-  return ['notifyLowStockEmail', 'notifyShipmentDiscrepancies', 'notifyShiftStart', 'notifySalesRefunds'];
-}
-function cap(s: string) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
 
 // ---------- Panel content for each item ----------
 export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: string; role: string; prefs: UserPreferences; onUpdate: UpdatePref; onSaved: (msg: string) => void }) {
@@ -341,22 +324,9 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
             options={[{ value: 'environment', label: 'Back camera', detail: 'Usual choice on a phone' }, { value: 'user', label: 'Front camera', detail: 'Laptop or kiosk screen' }]}
             value={prefs.qrCameraFacing} onChange={(v) => onUpdate('qrCameraFacing', v)} columns={2}
           />
-          <ChoiceList
-            name="reminder" label="Remind me before my shift"
-            options={[{ value: 15, label: '15 minutes before' }, { value: 30, label: '30 minutes before', detail: 'Recommended' }, { value: 60, label: '1 hour before' }]}
-            value={prefs.shiftReminderAdvanceMinutes} onChange={(v) => onUpdate('shiftReminderAdvanceMinutes', v)}
-          />
         </>
       );
 
-    case 'notifications':
-      return (
-        <div className={styles.section}>
-          {getAlertKeys(role).map((k) => (
-            <ToggleRow key={k} title={ALERTS[k].title} detail={ALERTS[k].detail} checked={prefs[k]} onChange={(v) => onUpdate(k, v)} />
-          ))}
-        </div>
-      );
     default:
       return null;
   }
@@ -408,6 +378,7 @@ function PasswordPanel({ onSaved }: { onSaved: (msg: string) => void }) {
 // ---------- Quick unlock PIN ----------
 function PinPanel({ onSaved }: { onSaved: (msg: string) => void }) {
   const [pin, setPin] = useState('');
+  const [showPin, setShowPin] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -434,11 +405,14 @@ function PinPanel({ onSaved }: { onSaved: (msg: string) => void }) {
       <label className={styles.field}>
         <span>4-digit PIN</span>
         <input
-          className={styles.pinInput} type="password" inputMode="numeric" maxLength={4} autoComplete="new-password"
+          className={styles.pinInput} type={showPin ? 'text' : 'password'} inputMode="numeric" maxLength={4} autoComplete="new-password"
           name="new-device-pin" value={pin} disabled={saving} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
         />
         <small>Numbers only. Avoid easy ones like 0000 or your birthday.</small>
       </label>
+      <button className="admin-secondary" type="button" aria-pressed={showPin} disabled={saving} onClick={() => setShowPin(!showPin)}>
+        {showPin ? 'Hide PIN' : 'Show PIN'}
+      </button>
       {error && <p className={styles.error}><Icon name="alert" size={15} /> {error}</p>}
       <div className={styles.infoBox}>
         <Icon name="info" size={16} />

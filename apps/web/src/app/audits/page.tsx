@@ -1,7 +1,6 @@
 'use client';
 
 import { ReasonDialog, type ReasonAction } from '@/components/admin/reason-dialog';
-import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
 import {
   Check,
@@ -493,8 +492,8 @@ export default function AuditsPage() {
       {/* ---------- Header ---------- */}
       <header className={styles.header}>
         <div>
-          <h1>Stock Audits</h1>
-          <p>Count what&apos;s on your shelves and fix any stock differences.</p>
+          <h1>Stock counts</h1>
+          <p>Choose a location to start, resume or review a stock count.</p>
         </div>
         <div className={styles.headerActions}>
         {capabilities.canManage && <a className={styles.settingsJump} href="#count-settings" onClick={() => {
@@ -523,86 +522,21 @@ export default function AuditsPage() {
       {error && <Feedback tone="error" onDismiss={() => setError('')} action={!token && <a href="/login?returnUrl=%2Faudits">Sign in</a>}>{error}</Feedback>}
       {notice && !error && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
-      {/* ---------- At-a-glance tiles ---------- */}
-      <section className={styles.tiles} aria-label="Stock count overview">
-        <div className={styles.tile}>
-          <span className={`${styles.tileIcon} ${styles.tileBlue}`}><Icon name="box" size={18} /></span>
-          <div>
-            <small>Products on the sheet</small>
-            <strong>{session ? <>{countedCount}<em> / {items.length} counted</em></> : <>—<em> loaded when audit starts</em></>}</strong>
-          </div>
-        </div>
-        <div className={styles.tile}>
-          <span className={`${styles.tileIcon} ${styles.tileGreen}`}><Icon name="check" size={18} /></span>
-          <div>
-            <small>Last count</small>
-            <strong>{lastAudit ? fmtDate(lastAudit.startedAt) : '—'}</strong>
-            {lastAudit && <span className={styles.tileSub}>{duration(lastAudit.startedAt, lastAudit.completedAt)} · approved</span>}
-          </div>
-        </div>
-        <div className={styles.tile}>
-          <span className={`${styles.tileIcon} ${styles.tileViolet}`}><Icon name="clipboard" size={18} /></span>
-          <div>
-            <small>Counts recorded</small>
-            <strong>{sessions.filter((row) => row.status === 'APPROVED' || row.status === 'CLOSED').length}<em> completed</em></strong>
-            <span className={styles.tileSub}>{sessions.reduce((s, r) => s + r._count.countItems, 0)} product lines in history</span>
-          </div>
-        </div>
-        <div className={styles.tile}>
-          <span className={`${styles.tileIcon} ${isLocationFrozen ? styles.tileAmber : styles.tileBlue}`}><Icon name={isLocationFrozen ? 'lock' : 'clock'} size={18} /></span>
-          <div>
-            <small>{isLocationFrozen ? 'Location status' : 'Audit window'}</small>
-            <strong>{isLocationFrozen ? 'Movements paused' : schedule?.startTime || '19:00'}</strong>
-            <span className={styles.tileSub}>{isLocationFrozen ? 'until manager approval or abort' : `${schedule?.allowedDays ?? 'Schedule loading'} · ${schedule?.timezone ?? ''}`}</span>
-          </div>
-        </div>
-      </section>
-
       <div className={styles.layout}>
         {loading && <div className={styles.card} role="status">Loading authorized audit data…</div>}
         <main className={styles.main}>
-          {/* ---------- "What to do now" card ---------- */}
-          <section className={`${styles.hero} ${hero.tone} ${!session || isFinished ? styles.heroWithArt : ''}`}>
-            {/* Decorative shelf + checklist illustration (start / finished screens only) */}
-            {(!session || isFinished) && (
-            <svg className={styles.heroArt} viewBox="0 0 220 160" aria-hidden="true">
-              <rect x="18" y="20" width="132" height="122" rx="10" fill="#ffffff" opacity="0.75" />
-              <rect x="18" y="58" width="132" height="5" fill="#c8d6ea" />
-              <rect x="18" y="100" width="132" height="5" fill="#c8d6ea" />
-              <rect x="30" y="32" width="22" height="26" rx="4" fill="#a9bfdf" />
-              <rect x="56" y="38" width="18" height="20" rx="4" fill="#d4dfef" />
-              <rect x="78" y="30" width="26" height="28" rx="4" fill="#7f9cc9" />
-              <rect x="108" y="40" width="20" height="18" rx="4" fill="#c3d2e8" />
-              <rect x="30" y="74" width="28" height="26" rx="4" fill="#d4dfef" />
-              <rect x="62" y="80" width="20" height="20" rx="4" fill="#a9bfdf" />
-              <rect x="86" y="72" width="24" height="28" rx="4" fill="#c3d2e8" />
-              <rect x="114" y="78" width="24" height="22" rx="4" fill="#7f9cc9" />
-              <rect x="30" y="114" width="40" height="22" rx="4" fill="#c3d2e8" />
-              <rect x="74" y="118" width="22" height="18" rx="4" fill="#a9bfdf" />
-              <g transform="translate(128 56)">
-                <rect width="74" height="92" rx="10" fill="#ffffff" stroke="#c8d6ea" strokeWidth="2" />
-                <rect x="24" y="-6" width="26" height="12" rx="4" fill="#5a7fb8" />
-                {[18, 38, 58].map((y, n) => (
-                  <g key={y}>
-                    <rect x="12" y={y} width="12" height="12" rx="3" fill={n < 2 ? '#2f9e5b' : '#e5e9ef'} />
-                    {n < 2 && <path d={`M15 ${y + 6}l2.5 2.5 4-5`} stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />}
-                    <rect x="30" y={y + 3} width={n === 1 ? 26 : 32} height="6" rx="3" fill="#dce5f2" />
-                  </g>
-                ))}
-              </g>
-            </svg>
-            )}
+          <section className={`${styles.hero} ${hero.tone}`}>
             <div className={styles.heroBody}>
               <span className={styles.heroIcon}><Icon name={hero.icon} size={24} /></span>
               <div className={styles.heroText}>
-                <span className={styles.eyebrow}>{hero.eyebrow}</span>
+                <span className={styles.eyebrow}>{locationName}</span>
                 <h2>{hero.title}</h2>
                 <p>{hero.text}</p>
               </div>
             </div>
 
             {/* simple 3-step progress */}
-            <ol className={styles.steps} aria-label="Progress">
+            <ol className={styles.steps} aria-label="Stock count progress">
               {steps.map((label, idx) => {
                 const state = idx < currentStep ? styles.stepDone : idx === currentStep ? styles.stepNow : '';
                 return (
@@ -619,10 +553,10 @@ export default function AuditsPage() {
               {(!session || isFinished) && (
                 <>
                   <button type="button" onClick={handleStartAudit} disabled={busy || loading || !capabilities.canManage || !schedule?.canStartNow} className={styles.primaryButton}>
-                    <Icon name="play" size={16} /> {isFinished ? 'Start a new count' : schedule?.canStartNow ? 'Start counting' : 'Audit window closed'}
+                    <Icon name="play" size={16} /> {isFinished ? 'Start a new count' : 'Start stock count'}
                   </button>
                   <span className={styles.heroHint}>
-                    {!capabilities.canManage ? 'A manager starts audits during the scheduled window.' : lastAudit ? <>Last approved count: <b>{fmtDate(lastAudit.startedAt)}</b> · {plural(lastAudit._count.countItems, 'product')}</> : 'No approved audits yet'}
+                    {!capabilities.canManage ? 'A manager starts the count.' : !schedule ? 'Schedule unavailable.' : !schedule.canStartNow ? `Count window: ${schedule.allowedDays} from ${schedule.startTime} (${schedule.timezone}).` : lastAudit ? <>Last approved count: <b>{fmtDate(lastAudit.startedAt)}</b> · {plural(lastAudit._count.countItems, 'product')}</> : 'No approved audits yet'}
                   </span>
                 </>
               )}
@@ -751,31 +685,6 @@ export default function AuditsPage() {
             </section>
           )}
 
-          {/* ---------- Preview of the count sheet (before starting) ---------- */}
-          {!session && !loading && (
-            <section className={styles.card}>
-              <div className={styles.cardHead}>
-                <div>
-                  <div className="heading-with-info"><h3>Audit scope</h3><InfoHint label="About the audit scope">This identifies the location and the stock included in the selected count.</InfoHint></div>
-                  <p className={styles.cardSub}>The count sheet is created from active product variants when an authorized manager starts the audit.</p>
-                </div>
-                <span className={styles.hiddenChip}><Icon name="eyeOff" size={13} /> Blind count</span>
-              </div>
-              <p className={styles.cardSub}>Store audits can start daily after 7:00 PM local time. Warehouse audits can start Sundays after 7:00 PM. Starting the audit pauses stock movements for this location.</p>
-            </section>
-          )}
-
-          {/* ---------- How it works (only before the first step) ---------- */}
-          {!session && (
-            <section className={styles.card}>
-              <div className={styles.cardHead}><h3>How a stock count works</h3></div>
-              <ol className={styles.howTo}>
-                <li><span>1</span><div><strong>Start</strong><p>Sales and transfers pause so stock doesn&apos;t change while you count.</p></div></li>
-                <li><span>2</span><div><strong>Count</strong><p>Enter what you see on the shelf for each product.</p></div></li>
-                <li><span>3</span><div><strong>Review &amp; finish</strong><p>Check any differences, add a note and approve. Stock updates and sales resume.</p></div></li>
-              </ol>
-            </section>
-          )}
         </main>
 
         {/* ---------- Side: history + settings ---------- */}
@@ -800,15 +709,15 @@ export default function AuditsPage() {
             </ul>
           </section>
 
-          <section className={`${styles.card} ${styles.tips}`}>
-            <div className={styles.cardHead}><h3>Tips for an accurate count</h3></div>
+          <details className={`${styles.card} ${styles.tips}`}>
+            <summary>Counting tips</summary>
             <ul>
               <li><Icon name="box" size={15} /><span>Check the back room and display shelves, not just the front.</span></li>
               <li><Icon name="edit" size={15} /><span>Count single packs, not cartons. Open cartons and count what&apos;s inside.</span></li>
               <li><Icon name="alert" size={15} /><span>Damaged items still count. Mention them in the final note.</span></li>
               <li><Icon name="check" size={15} /><span>Save each product as you go, so nothing is lost if you&apos;re interrupted.</span></li>
             </ul>
-          </section>
+          </details>
 
         </aside>
       </div>

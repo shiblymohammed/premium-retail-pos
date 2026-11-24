@@ -1,8 +1,11 @@
 'use client';
 
-import { ArrowLeftRight, ArrowRight, Bell, Check, ChevronDown, CircleHelp, Lock, LogOut, MapPin, Search, Settings } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Bell, Check, ChevronDown, CircleHelp, Lock, LockKeyhole, LogOut, MapPin, Search, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ConfirmAction } from '@/components/ui/confirm-action';
+import { Feedback } from '@/components/ui/feedback';
+import { hasDevicePin, REQUEST_DEVICE_LOCK, setDeviceLocked } from '@/lib/device-lock';
 import type { AuthSession } from '@/lib/auth';
 import type { NavLink } from './nav-data';
 
@@ -28,6 +31,18 @@ export function WorkspaceTools({
   userInitials, rawRole, isProfileOpen, setIsProfileOpen, handleSignOut, links,
 }: WorkspaceToolsProps) {
   const [localPanel, setLocalPanel] = useState<'search' | 'notifications' | null>(null);
+  const [confirmLock, setConfirmLock] = useState(false);
+  const [lockNotice, setLockNotice] = useState<'setup' | 'error' | null>(null);
+  const userId = session?.user.id;
+  useEffect(() => {
+    const request = () => {
+      if (!userId) return;
+      if (hasDevicePin(userId)) setConfirmLock(true);
+      else setLockNotice('setup');
+    };
+    window.addEventListener(REQUEST_DEVICE_LOCK, request);
+    return () => window.removeEventListener(REQUEST_DEVICE_LOCK, request);
+  }, [userId]);
   const [query, setQuery] = useState('');
   const toolsRef = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -117,6 +132,11 @@ export function WorkspaceTools({
             </> : <p>Operational alerts require access to Reports.</p>}
           </div>}
         </div>
+        {userId && <button type="button" className="utility-button" data-tip="Lock this screen" aria-label="Lock screen" onClick={() => {
+          closePanels();
+          setLockNotice(null);
+          window.dispatchEvent(new Event(REQUEST_DEVICE_LOCK));
+        }}><LockKeyhole size={18} aria-hidden="true" /></button>}
       </div>
       {session && <div className="drive-profile-wrap utility-wrap">
         <button type="button" className="utility-profile" data-tool="profile" data-tip="Manage your account" aria-label="Account" aria-expanded={panel === 'profile'} onClick={() => toggle('profile')}>
@@ -132,6 +152,16 @@ export function WorkspaceTools({
           <button type="button" className="utility-option utility-signout" onClick={handleSignOut}><LogOut size={16} aria-hidden="true" /><span>Sign out</span></button>
         </div>}
       </div>}
+      {lockNotice && <Feedback toast tone={lockNotice === 'error' ? 'error' : 'info'} onDismiss={() => setLockNotice(null)}
+        action={lockNotice === 'setup' ? <a className="ui-feedback-action" href="/settings?panel=pin">Create PIN</a> : undefined}>
+        {lockNotice === 'setup' ? 'Create a device PIN to lock this screen.' : 'Could not lock this screen on this device.'}
+      </Feedback>}
+      {confirmLock && <ConfirmAction title="Lock this screen?" confirmLabel="Yes, lock" cancelLabel="No, keep working"
+        onCancel={() => setConfirmLock(false)} onConfirm={() => {
+          setConfirmLock(false);
+          if (!userId) return;
+          try { setDeviceLocked(userId, true); } catch { setLockNotice('error'); }
+        }}>You’ll need your device PIN to continue.</ConfirmAction>}
     </div>
   );
 }

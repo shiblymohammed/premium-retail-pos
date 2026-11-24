@@ -338,3 +338,7 @@
   .recentGrid { grid-template-columns: minmax(0, 1fr); }
   .findForm input { min-width: 0; width: 100%; }
 }
+
+.explainer { align-self: start; }
+.explainer summary { cursor: pointer; font-weight: 700; }
+.explainer p { margin: 12px 0 0; }

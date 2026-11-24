@@ -29,6 +29,33 @@ import {
 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
+import { getStoredSession } from '@/lib/auth';
+import { LOCATION_KEY } from '@/components/layout/nav-data';
+
+const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+
+async function attendanceRequest<T>(route: string, signal?: AbortSignal, body?: object): Promise<T> {
+  const token = getStoredSession()?.accessToken;
+  if (!token) throw new Error('Sign in again to access attendance.');
+  const response = await fetch(API + route, {
+    cache: 'no-store', signal,
+    method: body ? 'PATCH' : 'GET',
+    headers: { Authorization: `Bearer ${token}`, ...(body && { 'Content-Type': 'application/json' }) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const { data, message } = await response.json();
+  if (!response.ok) throw new Error(message || 'Could not load attendance.');
+  return data;
+}
+
+type ReportEntry = {
+  date: string; clockInAt: string | null; clockOutAt: string | null;
+  targetStartTime: string | null; isLate: boolean; workMinutes: number;
+};
+type AttendanceReport = {
+  timezone: string;
+  employees: Array<{ employee: AttendanceRow['employee']; entries: ReportEntry[]; presentDays: number; lateDays: number; workMinutes: number }>;
+};
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './oversight.module.css';
 
@@ -76,20 +103,13 @@ type Employee = { id: string; name: string; employeeCode: string; role: string; 
 const TIMEZONE = 'Asia/Kolkata';
 const HISTORY_DAYS = 26 * 7; // ~6 months shown in the attendance grid
 
-const blankRow = (emp: Employee): AttendanceRow => ({
-  employee: { id: emp.id, name: emp.name, employeeCode: emp.employeeCode },
-  status: 'NOT_STARTED', clockInId: null, clockOutId: null, clockInAt: null, clockOutAt: null,
-  isLate: false, targetStartTime: null, qrVerified: false, clockInCorrectionReason: null, clockOutCorrectionReason: null,
-});
-
 // ---------- time helpers ----------
-const localParts = (d: Date) => {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
+const localParts = (d: Date, timezone = TIMEZONE) => {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(d);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
   return { date: `${get('year')}-${get('month')}-${get('day')}`, minutes: (Number(get('hour')) % 24) * 60 + Number(get('minute')) };
 };
-const todayLocal = () => localParts(new Date()).date;
-const minutesOf = (iso: string | null) => (iso ? localParts(new Date(iso)).minutes : null);
+const minutesOf = (iso: string | null, timezone: string) => iso ? localParts(new Date(iso), timezone).minutes : null;
 const hhmmToMin = (v: string | null) => {
   if (!v) return null;
   const [h, m] = v.split(':').map(Number);
@@ -113,10 +133,10 @@ const prettyDate = (iso: string, opts: Intl.DateTimeFormatOptions = { weekday: '
 const initials = (name: string) => name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 
 /** Today's record from a live attendance row. */
-function recordFromLive(row: AttendanceRow | undefined, today: string, targetMin: number | null): DayRecord {
+function recordFromLive(row: AttendanceRow | undefined, today: string, targetMin: number | null, timezone: string): DayRecord {
   if (!row || !row.clockInAt) return { date: today, status: 'pending', inMin: null, outMin: null, workMin: 0, lateBy: 0 };
-  const inMin = minutesOf(row.clockInAt);
-  const outMin = minutesOf(row.clockOutAt);
+  const inMin = minutesOf(row.clockInAt, timezone);
+  const outMin = minutesOf(row.clockOutAt, timezone);
   const endMs = row.clockOutAt ? new Date(row.clockOutAt).getTime() : Date.now();
   const workMin = Math.max(0, Math.round((endMs - new Date(row.clockInAt).getTime()) / 60000));
   const lateBy = row.isLate && inMin !== null && targetMin !== null ? Math.max(1, inMin - targetMin) : 0;
@@ -160,19 +180,28 @@ const STATUS_LABEL: Record<DayStatus, string> = {
 };
 
 export default function AttendanceManagerPage() {
-  const today = useMemo(() => todayLocal(), []);
-  const [locations] = useState<Location[]>([]);
+  const initialDate = useMemo(() => localParts(new Date()).date, []);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [locationId, setLocationId] = useState('');
+  const [loadingLocations, setLoadingLocations] = useState(true);
+  const [error, setError] = useState('');
+  const [reportError, setReportError] = useState('');
+  const [historyStatus, setHistoryStatus] = useState('');
+  const [revision, setRevision] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [monthHistory, setMonthHistory] = useState<AttendanceReport | null>(null);
+  const [report, setReport] = useState<AttendanceReport | null>(null);
   const [day, setDay] = useState<LocationDay>({
     location: { id: '', name: '' },
-    localDate: today,
+    localDate: initialDate,
     timezone: TIMEZONE,
     targetStartTime: null,
     qrRequired: true,
     employees: [],
   });
 
-  const [selectedDate, setSelectedDate] = useState(today);
+  const today = day.localDate;
+  const [selectedDate, setSelectedDate] = useState(initialDate);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [viewing, setViewing] = useState<Employee | null>(null);
@@ -186,38 +215,119 @@ export default function AttendanceManagerPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('weekly');
-  const [reportDate, setReportDate] = useState(today);
+  const [reportDate, setReportDate] = useState(initialDate);
 
   const [punchEdit, setPunchEdit] = useState<PunchEdit | null>(null);
   const [correctionReason, setCorrectionReason] = useState('');
   const [notice, setNotice] = useState('');
 
-  // Follow the store chosen in the top bar
   useEffect(() => {
-    const apply = (_name: string | null) => {};
-    apply(window.localStorage.getItem('premium-retail-location-scope'));
-    const sync = (event: Event) => apply((event as CustomEvent<string>).detail);
+    const controller = new AbortController();
+    setLoadingLocations(true);
+    void attendanceRequest<Location[]>('/locations?isActive=true', controller.signal).then((available) => {
+      setLocations(available);
+      const scope = window.localStorage.getItem(LOCATION_KEY);
+      setLocationId(available.find((item) => item.name === scope)?.id ?? available[0]?.id ?? '');
+    }).catch((caught: Error) => {
+      if (!controller.signal.aborted) setError(caught.message);
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoadingLocations(false);
+    });
+    return () => controller.abort();
+  }, [revision]);
+
+  useEffect(() => {
+    const sync = (event: Event) => {
+      const name = (event as CustomEvent<string>).detail;
+      const next = locations.find((item) => item.name === name);
+      if (next) setLocationId(next.id);
+    };
     window.addEventListener('premium-retail-location-change', sync);
     return () => window.removeEventListener('premium-retail-location-change', sync);
-  }, []);
+  }, [locations]);
 
-  // Rotating check-in QR (same behaviour as before: new code every 25 s, valid 60 s)
-  const refreshQr = useCallback(async () => {
-    const expires = new Date(Date.now() + 60 * 1000).toISOString();
-    const token = `QR_${locationId}_${Date.now()}`;
-    const qrUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/attendance#qr=${token}`;
+  useEffect(() => {
+    if (!locationId) return;
+    const controller = new AbortController();
+    let initialize = true;
+    async function loadDay() {
+      try {
+        const result = await attendanceRequest<LocationDay>(`/attendance/locations/${locationId}/today`, controller.signal);
+        if (controller.signal.aborted) return;
+        setDay(result);
+        if (initialize) {
+          initialize = false;
+          setSelectedDate(result.localDate);
+          setReportDate(result.localDate);
+          setTargetStartTime(result.targetStartTime || '');
+          setQrRequired(result.qrRequired);
+        }
+      } catch (caught) {
+        if (!controller.signal.aborted) setError((caught as Error).message);
+      }
+    }
+    setError('');
+    setViewing(null);
+    setPunchEdit(null);
+    setSettingsOpen(false);
+    void loadDay();
+    const timer = window.setInterval(loadDay, 30000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, [locationId, revision]);
+
+  const monthDate = selectedDate.slice(0, 7) + '-01';
+  useEffect(() => {
+    if (!locationId) return;
+    const controller = new AbortController();
+    setMonthHistory(null);
+    setHistoryStatus('Loading attendance records…');
+    void attendanceRequest<AttendanceReport>(`/attendance/locations/${locationId}/reports?period=monthly&date=${monthDate}`, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setMonthHistory(result);
+      setHistoryStatus('');
+    }).catch((caught: Error) => {
+      if (!controller.signal.aborted) setHistoryStatus(caught.message);
+    });
+    return () => controller.abort();
+  }, [locationId, monthDate, revision]);
+
+  useEffect(() => {
+    if (!locationId || day.location.id !== locationId) return;
+    const controller = new AbortController();
+    setReport(null);
+    setReportError('');
+    void attendanceRequest<AttendanceReport>(`/attendance/locations/${locationId}/reports?period=${reportPeriod}&date=${reportDate}`, controller.signal).then((result) => {
+      if (!controller.signal.aborted) setReport(result);
+    }).catch((caught: Error) => {
+      if (!controller.signal.aborted) setReportError(caught.message);
+    });
+    return () => controller.abort();
+  }, [locationId, day.location.id, reportPeriod, reportDate, revision]);
+
+  const refreshQr = useCallback(async (signal: AbortSignal) => {
     try {
-      setQrImage(await QRCode.toDataURL(qrUrl, { width: 180, margin: 1, color: { dark: '#1f2f4d', light: '#ffffff' } }));
-      setQrExpiresAt(expires);
-    } catch {
-      // QR generation failed; keep the previous code
+      const result = await attendanceRequest<{ token: string; expiresAt: string }>(`/attendance/locations/${locationId}/qr-code`, signal);
+      const qrUrl = `${window.location.origin}/attendance#qr=${encodeURIComponent(result.token)}`;
+      const image = await QRCode.toDataURL(qrUrl, { width: 280, margin: 4 });
+      if (signal.aborted) return;
+      setQrImage(image);
+      setQrExpiresAt(result.expiresAt);
+    } catch (caught) {
+      if (!signal.aborted) setError((caught as Error).message);
     }
   }, [locationId]);
+
+  const [qrRevision, setQrRevision] = useState(0);
   useEffect(() => {
-    void refreshQr();
-    const interval = window.setInterval(() => void refreshQr(), 25000);
-    return () => window.clearInterval(interval);
-  }, [refreshQr]);
+    setQrImage('');
+    setQrExpiresAt('');
+    setSecondsLeft(0);
+    if (!locationId || !settingsOpen) return;
+    const controller = new AbortController();
+    void refreshQr(controller.signal);
+    const interval = window.setInterval(() => void refreshQr(controller.signal), 25000);
+    return () => { controller.abort(); window.clearInterval(interval); };
+  }, [locationId, refreshQr, settingsOpen, qrRevision]);
   useEffect(() => {
     const tick = () => setSecondsLeft(qrExpiresAt ? Math.max(0, Math.round((new Date(qrExpiresAt).getTime() - Date.now()) / 1000)) : 0);
     tick();
@@ -241,17 +351,22 @@ export default function AttendanceManagerPage() {
 
   const targetMin = hhmmToMin(day.targetStartTime);
   const location = locations.find((l) => l.id === locationId) ?? locations[0];
-  const staff: Employee[] = [];
+  const staff: Employee[] = day.employees.map(({ employee }) => ({ ...employee, role: 'Employee', locationId }));
 
-  // Full history per employee (past days generated + today from the live register)
-  const histories = useMemo(() => {
-    const map: Record<string, DayRecord[]> = {};
-    for (const emp of staff) {
-      const live = day.employees.find((r) => r.employee.id === emp.id);
-      map[emp.id] = [recordFromLive(live, today, targetMin)];
-    }
-    return map;
-  }, [day.employees, targetMin, today]);
+  const histories: Record<string, DayRecord[]> = {};
+  for (const emp of staff) {
+    const entries: DayRecord[] = (monthHistory?.employees.find((row) => row.employee.id === emp.id)?.entries ?? []).map((entry) => {
+      const inMin = minutesOf(entry.clockInAt, day.timezone);
+      const target = hhmmToMin(entry.targetStartTime);
+      return {
+        date: entry.date, status: !entry.clockInAt ? 'pending' : entry.isLate ? 'late' : 'ontime',
+        inMin, outMin: minutesOf(entry.clockOutAt, day.timezone), workMin: entry.workMinutes,
+        lateBy: entry.isLate && target !== null && inMin !== null ? Math.max(1, inMin - target) : 0,
+      };
+    });
+    const live = day.employees.find((row) => row.employee.id === emp.id);
+    histories[emp.id] = [...entries.filter((entry) => entry.date !== today), recordFromLive(live, today, hhmmToMin(live?.targetStartTime ?? day.targetStartTime), day.timezone)];
+  }
 
   // ---------- Register for the selected date ----------
   const isToday = selectedDate === today;
@@ -287,20 +402,31 @@ export default function AttendanceManagerPage() {
     const next = new Date(`${start}T12:00:00Z`); next.setUTCMonth(next.getUTCMonth() + 1); next.setUTCDate(0);
     return { start, end: next.toISOString().slice(0, 10) };
   }, [reportPeriod, reportDate]);
-  const reportRows = staff.map((emp) => {
-    const recs = histories[emp.id].filter((r) => r.date >= reportRange.start && r.date <= reportRange.end && r.date <= today);
-    const presentDays = recs.filter((r) => r.inMin !== null).length;
-    const lateDays = recs.filter((r) => r.status === 'late').length;
-    const absentDays = recs.filter((r) => r.status === 'absent').length;
-    const workDays = presentDays + absentDays;
-    const workMinutes = recs.reduce((s, r) => s + r.workMin, 0);
-    return { emp, presentDays, lateDays, absentDays, workMinutes, rate: workDays ? Math.round((presentDays / workDays) * 100) : 0, punctual: presentDays ? Math.round(((presentDays - lateDays) / presentDays) * 100) : 0 };
-  });
+  const reportRows = (report?.employees ?? []).map((row) => ({
+    emp: { ...row.employee, role: 'Employee', locationId },
+    presentDays: row.presentDays, lateDays: row.lateDays, workMinutes: row.workMinutes,
+    punctual: row.presentDays ? Math.round((row.presentDays - row.lateDays) / row.presentDays * 100) : null,
+  }));
 
-  // ---------- actions ----------
-  function handleSaveSettings() {
-    setDay((d) => ({ ...d, targetStartTime: targetStartTime || null, qrRequired }));
-    setNotice(`Saved: shift starts at ${targetStartTime ? fmtMin(hhmmToMin(targetStartTime)) : 'no fixed time'}, QR scan ${qrRequired ? 'required' : 'optional'}.`);
+  async function handleSaveSettings() {
+    setSaving(true);
+    setError('');
+    try {
+      const route = `/attendance/locations/${locationId}`;
+      if ((targetStartTime || null) !== day.targetStartTime) {
+        await attendanceRequest(route + '/target-time', undefined, { startTime: targetStartTime || null });
+        setDay((current) => ({ ...current, targetStartTime: targetStartTime || null }));
+      }
+      if (qrRequired !== day.qrRequired) {
+        await attendanceRequest(route + '/qr-settings', undefined, { required: qrRequired });
+        setDay((current) => ({ ...current, qrRequired }));
+      }
+      setNotice('Shift and QR settings saved.');
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function beginCorrection(row: AttendanceRow, type: 'IN' | 'OUT') {
@@ -313,31 +439,29 @@ export default function AttendanceManagerPage() {
     setCorrectionReason('');
   }
 
-  function handleSubmitCorrection(e: FormEvent) {
+  async function handleSubmitCorrection(e: FormEvent) {
     e.preventDefault();
-    if (!punchEdit || correctionReason.trim().length < 5) return;
-    const newIso = new Date(punchEdit.value).toISOString();
-    setDay((d) => ({
-      ...d,
-      employees: d.employees.map((row) => {
-        if ((punchEdit.type === 'IN' && row.clockInId === punchEdit.id) || (punchEdit.type === 'OUT' && row.clockOutId === punchEdit.id)) {
-          const updated = punchEdit.type === 'IN'
-            ? { ...row, clockInAt: newIso, clockInCorrectionReason: correctionReason.trim() }
-            : { ...row, clockOutAt: newIso, clockOutCorrectionReason: correctionReason.trim() };
-          // Re-check lateness against the shift start, as the server does after a correction
-          if (punchEdit.type === 'IN' && targetMin !== null) updated.isLate = (minutesOf(newIso) ?? 0) > targetMin;
-          return updated;
-        }
-        return row;
-      }),
-    }));
-    setPunchEdit(null);
-    setNotice(`${punchEdit.type === 'IN' ? 'Clock-in' : 'Clock-out'} corrected for ${punchEdit.employeeName}. The reason is saved in the audit trail.`);
+    if (!punchEdit || correctionReason.trim().length < 5 || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await attendanceRequest(`/attendance/punches/${punchEdit.id}/correct`, undefined, {
+        punchTimestamp: new Date(punchEdit.value).toISOString(), reason: correctionReason.trim(),
+      });
+      setPunchEdit(null);
+      setRevision((value) => value + 1);
+      setNotice('Attendance correction saved.');
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function exportReport() {
-    const header = ['Employee', 'Code', 'Role', 'Location', 'Days present', 'Late days', 'Absent days', 'Attendance %', 'On-time %', 'Hours worked'];
-    const rows = reportRows.map((r) => [r.emp.name, r.emp.employeeCode, r.emp.role, location.name, r.presentDays, r.lateDays, r.absentDays, r.rate, r.punctual, (r.workMinutes / 60).toFixed(1)]);
+    if (!report || !location) return;
+    const header = ['Employee', 'Code', 'Location', 'Days present', 'Late days', 'On-time %', 'Hours worked'];
+    const rows = reportRows.map((r) => [r.emp.name, r.emp.employeeCode, location.name, r.presentDays, r.lateDays, r.punctual ?? '', (r.workMinutes / 60).toFixed(1)]);
     const csv = [header, ...rows].map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
@@ -373,8 +497,9 @@ export default function AttendanceManagerPage() {
         <section className={styles.tableCard}>
           <div className={styles.empty} role="status">
             <Icon name="users" size={24} />
-            <strong>Attendance data unavailable</strong>
-            <p>No location data is available in this view.</p>
+            <strong>{loadingLocations ? 'Loading locations…' : error ? 'Could not load locations' : 'No active locations in your scope'}</strong>
+            {error && <p>{error}</p>}
+            {error && <button type="button" className="admin-secondary" onClick={() => setRevision((value) => value + 1)}>Try again</button>}
           </div>
         </section>
       </div>
@@ -405,13 +530,16 @@ export default function AttendanceManagerPage() {
             ariaLabel="Location"
             icon={<Icon name="store" size={14} />}
             options={locations.map((l) => ({ value: l.id, label: l.name }))}
-            onChange={setLocationId}
+            disabled={saving}
+            onChange={(id) => { setReport(null); setLocationId(id); }}
           />
           <button type="button" className={styles.ghostButton} onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}><Icon name="settings" size={15} /> Shift &amp; QR</button>
-          <button type="button" className={styles.primaryButton} onClick={exportReport}><Icon name="download" size={15} /> Export report</button>
+          <button type="button" className={styles.primaryButton} onClick={exportReport} disabled={!report || day.location.id !== locationId}><Icon name="download" size={15} /> Export report</button>
         </div>
       </header>
 
+      {error && <Feedback tone="error" onDismiss={() => setError('')}>{error} <button type="button" className="admin-secondary" onClick={() => setRevision((value) => value + 1)}>Reload attendance</button></Feedback>}
+      {day.location.id !== locationId ? <p role="status">{error ? 'Attendance unavailable for this location.' : 'Loading location attendance…'}</p> : <>
       {notice && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
       {/* ---------- Summary cards ---------- */}
@@ -428,12 +556,12 @@ export default function AttendanceManagerPage() {
         <article className={`${styles.summaryCard} ${styles.cardAmber}`}>
           <div className={styles.summaryTop}><span>Late arrivals</span><i><Icon name="clock" size={16} /></i></div>
           <strong className={styles.summaryValue}>{late.length}</strong>
-          <div className={styles.split}><span>{late.length ? <>avg <b>{avgLate} min</b> after {fmtMin(targetMin)}</> : 'Everyone arrived on time'}</span></div>
+          <div className={styles.split}><span>{late.length ? <>avg <b>{avgLate} min</b> after {fmtMin(targetMin)}</> : 'No late arrivals recorded'}</span></div>
         </article>
         <article className={`${styles.summaryCard} ${styles.cardRed}`}>
-          <div className={styles.summaryTop}><span>{isToday ? 'Not clocked in' : 'Absent'}</span><i><Icon name="userX" size={16} /></i></div>
+          <div className={styles.summaryTop}><span>{isToday ? 'Not clocked in' : 'No recorded punch'}</span><i><Icon name="userX" size={16} /></i></div>
           <strong className={styles.summaryValue}>{missing.length}</strong>
-          <div className={styles.split}><span>{missing.length ? missing.map((m) => m.emp.name.split(' ')[0]).join(', ') : 'Full team present'}</span></div>
+          <div className={styles.split}><span>{missing.length ? missing.map((m) => m.emp.name.split(' ')[0]).join(', ') : 'No missing punches'}</span></div>
         </article>
         <article className={styles.summaryCard}>
           <div className={styles.summaryTop}><span>Hours worked</span><i><Icon name="hours" size={16} /></i></div>
@@ -450,18 +578,18 @@ export default function AttendanceManagerPage() {
             <p>Clock-ins after this time count as <b>late</b>.</p>
             <div className={styles.inline}>
               <input type="time" value={targetStartTime} onChange={(e) => setTargetStartTime(e.target.value)} aria-label="Shift start time" />
-              <label className={styles.switch}><input type="checkbox" checked={qrRequired} onChange={(e) => setQrRequired(e.target.checked)} /><i aria-hidden="true" /><span>Require QR scan to clock in</span></label>
+              <label className={styles.switch}><input type="checkbox" checked={qrRequired} onChange={(e) => setQrRequired(e.target.checked)} /><i aria-hidden="true" /><span>Require QR for clock-in and clock-out</span></label>
             </div>
-            <button type="button" className={styles.primaryButton} onClick={handleSaveSettings}><Icon name="check" size={15} /> Save settings</button>
+            <button type="button" className={styles.primaryButton} onClick={handleSaveSettings} disabled={saving}><Icon name="check" size={15} /> Save settings</button>
           </div>
           <div className={styles.qrBlock}>
-            {qrImage ? <img src={qrImage} alt={`Clock-in QR code for ${location.name}`} /> : <span className={styles.qrPlaceholder}><Icon name="qr" size={40} /></span>}
+            {qrImage && secondsLeft > 0 ? <img src={qrImage} alt={`Clock-in QR code for ${location.name}`} /> : <span className={styles.qrPlaceholder}><Icon name="qr" size={40} /></span>}
             <div>
               <h3><Icon name="qr" size={15} /> Clock-in QR · {location.name}</h3>
               <p>Show this at the counter. Staff scan it with the Attendance page to clock in or out.</p>
               <div className={styles.qrTimer}><span style={{ width: `${(secondsLeft / 60) * 100}%` }} /></div>
               <small>New code in {Math.max(0, secondsLeft - 35)}s · expires in {secondsLeft}s</small>
-              <button type="button" className={styles.linkButton} onClick={() => void refreshQr()}><Icon name="refresh" size={13} /> New code now</button>
+              <button type="button" className={styles.linkButton} onClick={() => setQrRevision((value) => value + 1)}><Icon name="refresh" size={13} /> New code now</button>
             </div>
           </div>
         </section>
@@ -543,6 +671,7 @@ export default function AttendanceManagerPage() {
       </section>
 
       {/* ---------- Report ---------- */}
+      {!isToday && historyStatus && <p role="status">{historyStatus}</p>}
       <section className={styles.reportCard}>
         <div className={styles.reportHead}>
           <div><div className="heading-with-info"><h2>Attendance report</h2><InfoHint label="About the attendance report">Review staff attendance for the selected location and date range.</InfoHint></div><p>{location.name} · {prettyDate(reportRange.start, { day: 'numeric', month: 'short' })} – {prettyDate(reportRange.end, { day: 'numeric', month: 'short', year: 'numeric' })}</p></div>
@@ -551,33 +680,30 @@ export default function AttendanceManagerPage() {
               {(['daily', 'weekly', 'monthly'] as ReportPeriod[]).map((p) => <button key={p} type="button" className={reportPeriod === p ? styles.segOn : ''} onClick={() => setReportPeriod(p)}>{p[0].toUpperCase() + p.slice(1)}</button>)}
             </div>
             <input type="date" className={styles.dateInput} value={reportDate} max={today} onChange={(e) => e.target.value && setReportDate(e.target.value)} aria-label="Report date" />
-            <button type="button" className={styles.iconButton} onClick={exportReport} title="Download CSV" aria-label="Download CSV"><Icon name="download" size={16} /></button>
+            <button type="button" className={styles.iconButton} onClick={exportReport} disabled={!report || day.location.id !== locationId} title="Download CSV" aria-label="Download CSV"><Icon name="download" size={16} /></button>
           </div>
         </div>
         <div className={styles.reportTable}>
-          <div className={styles.reportRowHead}><span>Employee</span><span>Attendance</span><span className={styles.num}>Present</span><span className={styles.num}>Late</span><span className={styles.num}>Absent</span><span className={styles.num}>Hours</span></div>
+          <div className={styles.reportRowHead}><span>Employee</span><span>On time</span><span className={styles.num}>Present</span><span className={styles.num}>Late</span><span className={styles.num}>Hours</span></div>
           {reportRows.map((r) => (
             <div key={r.emp.id} className={styles.reportRow}>
               <button type="button" className={styles.person} onClick={() => setViewing(r.emp)}>
                 <span className={`${styles.avatar} ${styles.avatarSm} ${styles[`av${Number(r.emp.id.slice(4)) % 5}`]}`}>{initials(r.emp.name)}</span>
                 <span><strong>{r.emp.name}</strong><small>{r.emp.role}</small></span>
               </button>
-              <span className={styles.rateCell}>
-                <span className={styles.rateBar}><i style={{ width: `${r.rate}%` }} className={r.rate >= 90 ? styles.rateGood : r.rate >= 75 ? styles.rateMid : styles.rateBad} /></span>
-                <b>{r.rate}%</b>
-              </span>
+              <span>{r.punctual === null ? '—' : `${r.punctual}%`}</span>
               <span className={styles.num}>{r.presentDays}</span>
               <span className={`${styles.num} ${r.lateDays ? styles.lateText : ''}`}>{r.lateDays}</span>
-              <span className={`${styles.num} ${r.absentDays ? styles.absentText : ''}`}>{r.absentDays}</span>
               <span className={styles.num}>{(r.workMinutes / 60).toFixed(1)}</span>
             </div>
           ))}
-          {!reportRows.length && <div className={styles.empty}><p>No staff at this location.</p></div>}
+          {reportError ? <Feedback tone="error">{reportError}</Feedback> : !report ? <p role="status">Loading report…</p> : !reportRows.length && <div className={styles.empty}><p>No staff at this location.</p></div>}
         </div>
       </section>
 
       {/* ---------- Employee attendance view ---------- */}
-      {viewing && <EmployeeView emp={viewing} history={histories[viewing.id]} today={today} targetMin={targetMin} live={day.employees.find((r) => r.employee.id === viewing.id) ?? null} location={locations.find((l) => l.id === viewing.locationId)?.name ?? ''} onClose={() => setViewing(null)} onCorrect={beginCorrection} />}
+      </>}
+      {viewing && <EmployeeView emp={viewing} history={histories[viewing.id] ?? []} today={today} targetMin={targetMin} live={day.employees.find((r) => r.employee.id === viewing.id) ?? null} location={locations.find((l) => l.id === viewing.locationId)?.name ?? ''} onClose={() => setViewing(null)} onCorrect={beginCorrection} />}
 
       {/* ---------- Correction dialog ---------- */}
       {punchEdit && (

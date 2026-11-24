@@ -2,6 +2,8 @@ const PIN_PREFIX = 'premium-retail-device-pin:';
 const LOCK_PREFIX = 'premium-retail-device-locked:';
 export const DEVICE_LOCK_CHANGED = 'premium-retail-device-lock-change';
 
+export const REQUEST_DEVICE_LOCK = 'premium-retail-request-device-lock';
+
 type PinVerifier = { salt: number[]; digest: string };
 
 function verifier(userId: string): PinVerifier | null {

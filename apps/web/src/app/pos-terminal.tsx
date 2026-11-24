@@ -22,8 +22,8 @@ import {
   X,
 } from 'lucide-react';
 import { Feedback } from '@/components/ui/feedback';
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { clearStoredSession, decodeJwt, getStoredSession, setStoredSession } from '@/lib/auth';
+import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clearStoredSession, getStoredSession } from '@/lib/auth';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -265,8 +265,8 @@ function parsePercent(value: string) {
 
 export default function PosTerminal() {
   const [token, setToken] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [opening, setOpening] = useState(true);
+  const [terminalRetry, setTerminalRetry] = useState(0);
   const [terminal, setTerminal] = useState<TerminalContext | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [query, setQuery] = useState('');
@@ -638,7 +638,7 @@ export default function PosTerminal() {
     window.setTimeout(() => searchRef.current?.focus(), 0);
   }
 
-  async function loadTerminalSession(accessToken: string, cashierEmail = '') {
+  async function loadTerminalSession(accessToken: string) {
     const contextResponse = await fetch(`${API_BASE}/pos/terminal/context`, {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
@@ -668,52 +668,16 @@ export default function PosTerminal() {
 
   useEffect(() => {
     const existing = getStoredSession();
-    if (existing?.accessToken) {
-      void loadTerminalSession(existing.accessToken, existing.user?.email).catch((caught: Error) => {
-        setError(caught.message || 'Could not load the cashier terminal. Please sign in again.');
-        setTerminal(null);
-        setToken('');
-      });
-    } else {
+    if (!existing?.accessToken) {
+      setOpening(false);
+      return;
+    }
+    void loadTerminalSession(existing.accessToken).catch((caught: Error) => {
+      setError(caught.message || 'Could not open checkout.');
       setTerminal(null);
-    }
-  }, []);
-
-  async function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      const response = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const payload = await response.json();
-      const accessToken: string = payload.data.accessToken;
-      await loadTerminalSession(accessToken, email);
-      const identity = decodeJwt(accessToken);
-      if (!identity?.id || !identity.role || !identity.email) throw new Error('The server returned an invalid sign-in response.');
-      setStoredSession({
-        accessToken,
-        user: {
-          id: identity.id,
-          email: identity.email,
-          role: identity.role,
-          name: identity.email.split('@')[0].toUpperCase(),
-          locationIds: identity.locationIds || [],
-        },
-        expiresAt: Date.now() + 86400 * 1000,
-      });
-      setPassword('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to sign in');
-    } finally {
-      setBusy(false);
-    }
-  }
+      setToken('');
+    }).finally(() => setOpening(false));
+  }, [terminalRetry]);
 
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== 'Enter') return;
@@ -1024,43 +988,29 @@ export default function PosTerminal() {
     setStockBalances({});
     setStockError('');
     setQuery('');
-    setEmail('');
-    setPassword('');
     setError('');
     setNotice('');
     setOfflineDrawerOpen(false);
     window.location.href = '/login';
   }
 
-  if (!terminal) {
-    return (
-      <main className="login-shell">
-        <div className="login-card">
-          <div className="brand-mark">P</div>
-          <div className="eyebrow">PREMIUM RETAIL POS</div>
-          <h1>Cashier Terminal</h1>
-          <p className="muted">Sign in with your cashier credentials to unlock Lane POS-T01.</p>
-          <form className="login-form" onSubmit={login}>
-            <label htmlFor="email">Cashier Email</label>
-            <input id="email" autoComplete="username" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="cashier@premiumretail.com" required />
-            <label htmlFor="password">Password</label>
-            <input id="password" autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••••••" required />
-            {error && <Feedback tone="error">{error}</Feedback>}
-            <button className="primary-button full-width" disabled={busy} type="submit">{busy ? 'Opening Terminal…' : 'Unlock POS Terminal'} <span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
-          </form>
-          <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <a
-              href="/login?returnUrl=/"
-              style={{ textAlign: 'center', fontSize: '12px', color: 'light-dark(#2563eb, #a7bff4)', textDecoration: 'none', fontWeight: 600, padding: '6px' }}
-            >
-              Open Unified Login Gateway <ArrowRight size="1em" className="inline-icon" aria-hidden="true" />
-            </a>
-          </div>
-          <div className="secure-note"><span className="status-dot" /> Verified offline cache and store ledger check</div>
+  if (!terminal) return (
+    <main className="app-page">
+      <h1>Checkout</h1>
+      {opening ? <p role="status">Opening checkout…</p> : <>
+        <Feedback tone="error">{error || 'Sign in to open checkout.'}</Feedback>
+        <div className="device-lock-actions">
+          {error && <button type="button" className="admin-secondary" onClick={() => {
+            setOpening(true);
+            setError('');
+            setTerminalRetry((value) => value + 1);
+          }}>Try again</button>}
+          {error ? <button type="button" className="admin-primary" onClick={logout}>Sign out</button>
+            : <a className="admin-primary" href="/login?returnUrl=%2Fpos-terminal">Sign in</a>}
         </div>
-      </main>
-    );
-  }
+      </>}
+    </main>
+  );
 
   return (
     <main className="pos-shell">

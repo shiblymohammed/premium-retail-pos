@@ -71,6 +71,13 @@ export function DeviceLock({ userId, role, onSignOut }: { userId: string; role: 
     <p>Enter your device PIN to continue.</p>
     <form onSubmit={unlock}>
       <label>4-digit PIN <input type="password" name="device-unlock-pin" autoComplete="off" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))} maxLength={4} /></label>
+      <div className="device-lock-keypad" aria-label="Numeric keypad">
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'Clear', '0', 'Delete'].map((key) =>
+          <button key={key} type="button" className="admin-secondary" disabled={checking} onClick={() => {
+            setError('');
+            setPin((value) => key === 'Clear' ? '' : key === 'Delete' ? value.slice(0, -1) : (value + key).slice(0, 4));
+          }}>{key}</button>)}
+      </div>
       {error && <Feedback tone="error">{error}</Feedback>}
       <div className="device-lock-actions">
         <button type="button" className="admin-secondary" onClick={async () => {

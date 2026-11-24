@@ -1,6 +1,5 @@
 'use client';
 
-import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
 import {
   Ban,
@@ -503,18 +502,12 @@ export default function SalesControlsPage() {
           </div>
         </div>
 
-        <div className={`${styles.card} ${styles.explainer}`}>
-          <div className={styles.cardHead}><div><div className="heading-with-info"><h2>Return or cancel?</h2><InfoHint label="When to return or cancel">Use a return for items the customer brings back. Use cancellation to void the whole bill.</InfoHint></div><p>Pick the one that matches what happened.</p></div></div>
-          <div className={styles.explainItem}>
-            <span className={styles.toneBlue}><Icon name="return" size={16} /></span>
-            <div><strong>Return items</strong><p>The customer brings back <b>some</b> items. You refund only those items.</p></div>
-          </div>
-          <div className={styles.explainItem}>
-            <span className={styles.toneRed}><Icon name="ban" size={16} /></span>
-            <div><strong>Cancel bill</strong><p>The <b>whole</b> sale is undone, for example a billing mistake. Everything is refunded.</p></div>
-          </div>
-          <p className={styles.explainNote}><Icon name="info" size={13} /> After any return, the bill can&apos;t be fully cancelled.</p>
-        </div>
+        <details className={`${styles.card} ${styles.explainer}`}>
+          <summary>Return or cancel?</summary>
+          <p><strong>Return items</strong> when a customer brings back items. Only the selected items are refunded.</p>
+          <p><strong>Cancel a bill</strong> to reverse the entire sale. Bills with a recorded return can’t be cancelled.</p>
+          <p>By role, Super Admins, Admins and Store Managers handle returns. Super Admins and Admins handle cancellations. This workspace uses the permissions saved for your account.</p>
+        </details>
       </section>
 
       {/* ---------- Selected bill ---------- */}

@@ -8,7 +8,6 @@ import {
   FileText,
   FolderOpen,
   LayoutGrid,
-  Link2,
   List,
   MapPin,
   Package,
@@ -34,6 +33,7 @@ export interface ManagedUser {
   employeeCode: string;
   role: 'SUPER_ADMIN' | 'ADMIN' | 'STORE_MANAGER' | 'CENTRAL_MANAGER' | 'SUB_WAREHOUSE_MANAGER' | 'CASHIER' | 'STAFF';
   assignedLocations: string[];
+  assignedLocationIds: string[];
   discountLimitPercent: number;
   canCancelSales: boolean;
   canProcessReturns: boolean;
@@ -100,6 +100,7 @@ export default function UserManagementPage() {
   // Form Fields
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [locationSearch, setLocationSearch] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formEmployeeCode, setFormEmployeeCode] = useState('');
   const [formRole, setFormRole] = useState<ManagedUser['role']>('CASHIER');
@@ -171,6 +172,7 @@ export default function UserManagementPage() {
           email: user.email,
           employeeCode: user.employee?.employeeCode || '',
           role: user.role,
+          assignedLocationIds: (user.locationScopes || []).map((scope: { locationId: string }) => scope.locationId),
           assignedLocations: (user.locationScopes || []).map((scope: any) => locationNameById.get(scope.locationId) || scope.locationId),
           discountLimitPercent: Number(user.discountLimitPercent) || 0,
           canCancelSales: Boolean(user.canCancelSales),
@@ -222,6 +224,7 @@ export default function UserManagementPage() {
     setFormName('');
     setFormEmail('');
     setFormPassword('');
+    setLocationSearch('');
     setFormEmployeeCode('');
     setFormRole('CASHIER');
     setFormLocations([]);
@@ -235,9 +238,10 @@ export default function UserManagementPage() {
     setFormName(u.name);
     setFormEmail(u.email);
     setFormPassword('');
+    setLocationSearch('');
     setFormEmployeeCode(u.employeeCode);
     setFormRole(u.role);
-    setFormLocations([...u.assignedLocations]);
+    setFormLocations([...u.assignedLocationIds]);
     setIsModalOpen(true);
   };
 
@@ -250,7 +254,8 @@ export default function UserManagementPage() {
   const handleSaveUser = async (e: FormEvent) => {
     e.preventDefault();
     if (savingUser) return;
-    if (!formEmail.trim() || (formRole !== 'SUPER_ADMIN' && !formName.trim())) {
+    const needsEmployee = formRole !== 'SUPER_ADMIN' && formRole !== 'ADMIN';
+    if (!formEmail.trim() || (needsEmployee && !formName.trim())) {
       setFormError('Name and Email are required for employee accounts.');
       return;
     }
@@ -258,16 +263,20 @@ export default function UserManagementPage() {
       setFormError('Choose at least one active location for this role.');
       return;
     }
-    if (!editingUser && formRole !== 'SUPER_ADMIN' && (!formName.trim() || !formEmployeeCode.trim())) {
+    if (!editingUser && needsEmployee && (!formName.trim() || !formEmployeeCode.trim())) {
       setFormError('Enter the employee name and code for this account.');
       return;
     }
     const session = getStoredSession();
     if (!session?.accessToken) { setFormError('Your session has expired. Sign in again.'); return; }
     if (!editingUser && formPassword.length < 12) { setFormError('Set an initial password with at least 12 characters.'); return; }
-    const locationIds = formLocations.map((name) => availableLocations.find((location) => location.name === name)?.id).filter((id): id is string => Boolean(id));
+    const locationIds = formRole === 'SUPER_ADMIN' ? [] : formLocations;
+    if (locationIds.some((id) => !availableLocations.some((location) => location.id === id))) {
+      setFormError('Remove inactive locations before saving this account.');
+      return;
+    }
     const nameParts = formName.trim().split(/\s+/);
-    const createEmployeeProfile = !editingUser && formRole !== 'SUPER_ADMIN';
+    const createEmployeeProfile = !editingUser && needsEmployee;
     setFormError('');
     setSavingUser(true);
     try {
@@ -296,7 +305,8 @@ export default function UserManagementPage() {
         email: saved.email,
         employeeCode: formEmployeeCode.trim(),
         role: saved.role,
-        assignedLocations: formLocations,
+        assignedLocations: locationIds.map((id) => availableLocations.find((location) => location.id === id)?.name ?? id),
+        assignedLocationIds: locationIds,
         discountLimitPercent: Number(saved.discountLimitPercent) || 0,
         canCancelSales: Boolean(saved.canCancelSales),
         canProcessReturns: Boolean(saved.canProcessReturns),
@@ -304,7 +314,7 @@ export default function UserManagementPage() {
         isActive: saved.isActive !== false,
         joinedDate: saved.createdAt ? new Date(saved.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
       };
-      if (editingUser && formRole !== 'SUPER_ADMIN') {
+      if (editingUser && needsEmployee) {
         const employeeResponse = await fetch(`${API_BASE}/employees${editingUser?.employeeId ? `/${editingUser.employeeId}` : ''}`, {
           method: editingUser?.employeeId ? 'PATCH' : 'POST',
           headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
@@ -369,13 +379,6 @@ export default function UserManagementPage() {
     }
   };
 
-  const copyUserQuickInfo = (u: ManagedUser) => {
-    setPermissionReview('');
-    const info = `User: ${u.name} | Email: ${u.email} | Role: ${u.role} | Code: ${u.employeeCode} | Stores: ${u.assignedLocations.join(', ')}`;
-    navigator.clipboard.writeText(info);
-    setNotice(`Credentials and store access for ${u.email} copied to clipboard!`);
-  };
-
   const getRoleIconBadge = (role: ManagedUser['role']) => {
     switch (role) {
       case 'SUPER_ADMIN':
@@ -425,7 +428,6 @@ export default function UserManagementPage() {
       {user.isActive
         ? <button type="button" className="admin-action-danger" onClick={() => setDeactivateUser(user)}><X size={15} aria-hidden="true" /> Deactivate account</button>
         : <button type="button" onClick={() => void handleToggleStatus(user.id)}><Check size={15} aria-hidden="true" /> Reactivate account</button>}
-      <button type="button" onClick={() => copyUserQuickInfo(user)}><Link2 size={15} aria-hidden="true" /> Copy access details</button>
     </AdminActionMenu>;
   }
 
@@ -907,7 +909,6 @@ export default function UserManagementPage() {
                           background: isSelected ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
                           cursor: 'pointer',
                           transition: 'background 0.12s ease',
-                          opacity: u.isActive ? 1 : 0.65,
                         }}
                         onMouseEnter={(e) => {
                           if (!isSelected) e.currentTarget.style.background = '#f8fafd';
@@ -1011,7 +1012,7 @@ export default function UserManagementPage() {
                                 padding: '3px 8px',
                                 borderRadius: '12px',
                                 background: u.discountLimitPercent > 0 ? 'var(--retail-accent-soft)' : 'var(--retail-raised)',
-                                color: u.discountLimitPercent > 0 ? '#1d4ed8' : 'var(--retail-muted)',
+                                color: u.discountLimitPercent > 0 ? 'var(--retail-accent-strong)' : 'var(--retail-muted)',
                                 border: u.discountLimitPercent > 0 ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
                                 fontSize: '11.5px',
                                 fontWeight: 700,
@@ -1036,40 +1037,12 @@ export default function UserManagementPage() {
                                 </span>
                               )}
                             </div>
-                            {u.isActive ? (
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#16a34a' }} title="Active Session"></span>
-                            ) : (
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--retail-subtle)' }} title="Inactive"></span>
-                            )}
+                            <small className={u.isActive ? 'admin-active-label' : 'admin-inactive-label'}>{u.isActive ? 'Active' : 'Inactive'}</small>
                           </div>
                         </td>
 
-                        {/* Column 5: Copy details and more actions */}
                         <td style={{ padding: '13px 20px', textAlign: 'right' }}>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                copyUserQuickInfo(u);
-                              }}
-                              style={{
-                                width: '30px',
-                                height: '30px',
-                                borderRadius: '6px',
-                                border: 'none',
-                                background: 'transparent',
-                                color: 'var(--retail-muted)',
-                                fontSize: '15px',
-                                cursor: 'pointer',
-                                display: 'grid',
-                                placeItems: 'center',
-                              }}
-                              title="Copy User Access Details"
-                            >
-                              <Link2 size="1em" className="inline-icon" aria-hidden="true" />
-                            </button>
-
                             {userActions(u)}
                           </div>
                         </td>
@@ -1140,7 +1113,7 @@ export default function UserManagementPage() {
 
             <form onSubmit={handleSaveUser}>
               {formError && <Feedback tone="error">{formError}</Feedback>}
-              {formRole !== 'SUPER_ADMIN' && (
+              {formRole !== 'SUPER_ADMIN' && formRole !== 'ADMIN' && (
               <div className="admin-form-grid">
                 <div>
                   <label htmlFor="user-name" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
@@ -1195,15 +1168,15 @@ export default function UserManagementPage() {
                     onChange={(e) => setFormRole(e.target.value as any)}
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px', background: 'var(--retail-card)' }}
                   >
-                    <option value="CASHIER">CASHIER (POS Lane)</option>
-                    <option value="STAFF">STAFF (Floor Operations)</option>
-                    <option value="STORE_MANAGER">STORE_MANAGER (Store Lead)</option>
-                    <option value="CENTRAL_MANAGER">CENTRAL_MANAGER (Main WH)</option>
-                    <option value="SUB_WAREHOUSE_MANAGER">SUB_WAREHOUSE_MANAGER (Depot)</option>
+                    <option value="CASHIER">Cashier (POS Lane)</option>
+                    <option value="STAFF">Staff (Floor Operations)</option>
+                    <option value="STORE_MANAGER">Store Manager (Store Lead)</option>
+                    <option value="CENTRAL_MANAGER">Central Manager (Main WH)</option>
+                    <option value="SUB_WAREHOUSE_MANAGER">Sub Warehouse Manager (Depot)</option>
                     {currentUserRole === 'SUPER_ADMIN' && (
                       <>
-                        <option value="ADMIN">ADMIN (Scoped Administrator)</option>
-                        <option value="SUPER_ADMIN">SUPER_ADMIN (Global)</option>
+                        <option value="ADMIN">Admin (Scoped Administrator)</option>
+                        <option value="SUPER_ADMIN">Super Admin (Global)</option>
                       </>
                     )}
                   </select>
@@ -1216,6 +1189,8 @@ export default function UserManagementPage() {
                     Initial Password
                   </label>
                   <input id="user-password"
+                    aria-describedby="password-length"
+                    autoComplete="new-password"
                     type="password"
                     required
                     minLength={12}
@@ -1224,6 +1199,9 @@ export default function UserManagementPage() {
                     onChange={(e) => setFormPassword(e.target.value)}
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px' }}
                   />
+                  <small id="password-length" className={formPassword.length >= 12 ? 'admin-active-label' : 'admin-inactive-label'}>
+                    {formPassword.length >= 12 ? '✓ 12-character minimum met' : `${formPassword.length} of 12 characters`}
+                  </small>
                 </div>
               )}
 
@@ -1236,32 +1214,24 @@ export default function UserManagementPage() {
                 {availableLocations.length === 0 && <Feedback tone="info" action={<Link href="/admin/company">Manage locations</Link>}>
                   Create or reactivate a location before adding a user with this role.
                 </Feedback>}
-                <div className="admin-form-grid">
-                  {availableLocations.map((location) => {
-                    const loc = location.name;
-                    const checked = formLocations.includes(loc);
-                    return (
-                      <label
-                        key={loc}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          fontSize: '12px',
-                          color: 'var(--retail-ink)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => handleToggleLocation(loc)}
-                        />
-                        <span>{loc}</span>
-                      </label>
-                    );
-                  })}
-                </div>
+                {!!availableLocations.length && <>
+                  <input type="search" className="admin-location-search" aria-label="Search assigned locations" placeholder="Search locations by name"
+                    value={locationSearch} onChange={(e) => setLocationSearch(e.target.value)} />
+                  <div className="admin-location-selection" aria-label="Selected locations">
+                    {formLocations.length ? formLocations.map((id) => {
+                      const name = availableLocations.find((location) => location.id === id)?.name ?? 'Inactive location';
+                      return <button type="button" key={id} className="admin-secondary"
+                        aria-label={`Remove ${name}`} onClick={() => handleToggleLocation(id)}>{name} <X size={14} /></button>;
+                    })
+                      : <small>No locations selected</small>}
+                  </div>
+                  {!!locationSearch.trim() && <div className="admin-location-results">
+                    {availableLocations.filter(({ name }) => name.toLowerCase().includes(locationSearch.trim().toLowerCase())).map(({ id, name }) =>
+                      <label key={id}><input type="checkbox" checked={formLocations.includes(id)} onChange={() => handleToggleLocation(id)} />{name}</label>)}
+                    {!availableLocations.some(({ name }) => name.toLowerCase().includes(locationSearch.trim().toLowerCase())) && <small>No matching locations</small>}
+                  </div>}
+                </>}
+
               </div>
               )}
 

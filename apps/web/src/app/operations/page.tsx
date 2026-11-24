@@ -207,14 +207,6 @@ export default function OperationsPage() {
   const [dispatchNow, setDispatchNow] = useState(true);
   const [createError, setCreateError] = useState('');
 
-  // API console (developer tool, collapsed by default)
-  const [method, setMethod] = useState<'GET' | 'POST' | 'PATCH'>('GET');
-  const [path, setPath] = useState('/health/readiness');
-  const [benchBody, setBenchBody] = useState('');
-  const [benchResponse, setBenchResponse] = useState('');
-  const [benchStatus, setBenchStatus] = useState<number | null>(null);
-  const [benchBusy, setBenchBusy] = useState(false);
-
   const locationName = (id: string) => locations.find((location) => location.id === id)?.name ?? id;
 
   const normalizeTransfer = (row: any): StockTransfer => {
@@ -576,26 +568,6 @@ export default function OperationsPage() {
     catch { setNotice(`Tracking number: ${t.trackingNumber}`); }
   }
 
-  async function runBenchRequest(e: FormEvent) {
-    e.preventDefault();
-    setBenchBusy(true);
-    setBenchResponse('');
-    setBenchStatus(null);
-    try {
-      const session = getStoredSession();
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
-      const res = await fetch(`${API_BASE}${path}`, { method, headers, body: method !== 'GET' && benchBody ? benchBody : undefined });
-      setBenchStatus(res.status);
-      const text = await res.text();
-      try { setBenchResponse(JSON.stringify(JSON.parse(text), null, 2)); } catch { setBenchResponse(text || '(empty response)'); }
-    } catch (caught) {
-      setBenchResponse(`Error: ${caught instanceof Error ? caught.message : 'Request failed'}`);
-    } finally {
-      setBenchBusy(false);
-    }
-  }
-
   const statusTabs: Array<{ key: StatusFilter; label: string }> = [
     { key: 'ALL', label: 'All' },
     { key: 'PENDING', label: 'Needs action' },
@@ -855,30 +827,6 @@ export default function OperationsPage() {
           </li>)}</ul>
         )}
       </section>
-
-      {/* ---------- API console (developer tool, collapsed) ---------- */}
-      <details className={styles.devTools}>
-        <summary><span><Icon name="code" size={15} /> Developer tools · API console</span><Icon name="chevron" size={15} /></summary>
-        <div className={styles.devBody}>
-          <form onSubmit={runBenchRequest} className={styles.benchForm}>
-            <div className={styles.benchRow}>
-              <select value={method} onChange={(e) => setMethod(e.target.value as typeof method)} aria-label="HTTP method">
-                <option>GET</option><option>POST</option><option>PATCH</option>
-              </select>
-              <span className={styles.benchBase}>{API_BASE}</span>
-              <input type="text" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/health/readiness" aria-label="Request path" />
-              <button type="submit" disabled={benchBusy} className={styles.smallPrimary}><Icon name="send" size={14} /> {benchBusy ? 'Sending…' : 'Send'}</button>
-            </div>
-            {method !== 'GET' && <textarea rows={4} value={benchBody} onChange={(e) => setBenchBody(e.target.value)} placeholder='{ "key": "value" }' aria-label="Request body" />}
-          </form>
-          {(benchResponse || benchStatus !== null) && (
-            <div className={styles.benchOut}>
-              <div className={styles.benchOutHead}><span>Response</span>{benchStatus !== null && <b className={benchStatus < 400 ? styles.okCode : styles.errCode}>{benchStatus}</b>}</div>
-              <pre>{benchResponse}</pre>
-            </div>
-          )}
-        </div>
-      </details>
 
       {/* ---------- Receive modal ---------- */}
       {receivingTransfer && (

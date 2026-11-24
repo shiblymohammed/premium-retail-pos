@@ -1,10 +1,12 @@
 'use client';
 
+import { CameraScanner } from '@/components/ui/camera-scanner';
 import { Feedback } from '@/components/ui/feedback';
 import {
   ArrowDown,
   ArrowDownUp,
   ArrowUp,
+  Camera,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -134,8 +136,9 @@ export default function ProductsPage() {
   const [newProdBaseUnit, setNewProdBaseUnit] = useState('');
   const [newProdSku, setNewProdSku] = useState('');
   const [newProdBarcode, setNewProdBarcode] = useState('');
-  const [newProdPrice, setNewProdPrice] = useState(0);
-  const [newProdCartonRatio, setNewProdCartonRatio] = useState(1);
+  const [newProdPrice, setNewProdPrice] = useState('');
+  const [barcodeCameraOpen, setBarcodeCameraOpen] = useState(false);
+  const [newProdCartonRatio, setNewProdCartonRatio] = useState('');
 
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
@@ -403,12 +406,12 @@ export default function ProductsPage() {
     try {
       const response = await fetch(`${API_BASE}/products`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newProdName.trim(), imageUrl: newProdImageUrl.trim() || undefined, baseUnit: newProdBaseUnit.trim() || 'unit', unitsPerCarton: newProdCartonRatio > 1 ? newProdCartonRatio : undefined, hasVariants: true, variants: [{ name: newProdVariant.trim() || 'Default', sku: newProdSku.trim().toUpperCase(), barcode: newProdBarcode.trim() || undefined }], sellingPrice: Number(newProdPrice), purchasePrice: 0, priceChangeReason: 'Initial catalogue setup' }),
+        body: JSON.stringify({ name: newProdName.trim(), imageUrl: newProdImageUrl.trim() || undefined, baseUnit: newProdBaseUnit.trim() || 'unit', unitsPerCarton: Number(newProdCartonRatio) > 1 ? Number(newProdCartonRatio) : undefined, hasVariants: true, variants: [{ name: newProdVariant.trim() || 'Default', sku: newProdSku.trim().toUpperCase(), barcode: newProdBarcode.trim() || undefined }], sellingPrice: Number(newProdPrice), purchasePrice: 0, priceChangeReason: 'Initial catalogue setup' }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'The server could not create this product.');
       setAddProductModalOpen(false); setReloadKey((value) => value + 1);
-      setNewProdName(''); setNewProdImageUrl(''); setNewProdVariant(''); setNewProdBaseUnit(''); setNewProdSku(''); setNewProdBarcode(''); setNewProdPrice(0); setNewProdCartonRatio(1);
+      setNewProdName(''); setNewProdImageUrl(''); setNewProdVariant(''); setNewProdBaseUnit(''); setNewProdSku(''); setNewProdBarcode(''); setNewProdPrice(''); setNewProdCartonRatio('');
       showToast('Product saved to the catalogue. Add opening stock separately to set quantities.', 'success');
     } catch (error) { showToast(error instanceof Error ? error.message : 'Product could not be saved.', 'info'); }
   };
@@ -749,7 +752,7 @@ export default function ProductsPage() {
                   <Icon name="package" size={20} />
                 </div>
                 <div>
-                  <h2>Register New Product Variant</h2>
+                  <h2>Add product</h2>
                   <p>Add new SKU, packaging ratio, and retail price</p>
                 </div>
               </div>
@@ -794,8 +797,10 @@ export default function ProductsPage() {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label>Base unit *</label>
-                  <input type="text" required placeholder="e.g. packet, bottle, kg" value={newProdBaseUnit} onChange={(e) => setNewProdBaseUnit(e.target.value)} className={styles.modalInput} />
+                  <label htmlFor="product-base-unit">Base unit *</label>
+                  <input type="text" id="product-base-unit" list="product-base-units" required placeholder="e.g. packet" value={newProdBaseUnit} onChange={(e) => setNewProdBaseUnit(e.target.value)} className={styles.modalInput} />
+                  <datalist id="product-base-units"><option value="packet" /><option value="bottle" /><option value="piece" /></datalist>
+                  <small className={styles.fieldHint}>Use the smallest unit sold or counted individually. Put the number of those units per carton below.</small>
                 </div>
               </div>
 
@@ -812,39 +817,49 @@ export default function ProductsPage() {
                   />
                 </div>
                 <div className={styles.formGroup}>
-                  <label>Barcode (EAN/UPC)</label>
+                  <label htmlFor="product-barcode">Barcode (EAN/UPC)</label>
                   <input
                     type="text"
-                    placeholder="e.g. 8901234567999"
+                    id="product-barcode"
+                    inputMode="numeric"
+                    onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}
+                    placeholder="Scan or enter barcode"
                     value={newProdBarcode}
                     onChange={(e) => setNewProdBarcode(e.target.value)}
                     className={styles.modalInput}
                   />
+                  <small className={styles.fieldHint}>Focus this field to use a USB or Bluetooth barcode scanner.</small>
+                  <button type="button" className="admin-secondary" onClick={() => setBarcodeCameraOpen(true)}><Camera size={16} /> Scan with camera</button>
                 </div>
               </div>
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label>Selling price per base unit{currency ? ` (${currency})` : ''}</label>
+                  <label htmlFor="product-selling-price">Selling price per base unit{currency ? ` (${currency})` : ''}</label>
                   <input
                     type="number"
+                    id="product-selling-price"
                     step="0.01"
                     min="0"
                     required
                     value={newProdPrice}
-                    onChange={(e) => setNewProdPrice(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => setNewProdPrice(e.target.value)}
                     className={styles.modalInput}
                   />
                 </div>
                 <div className={styles.formGroup}>
-                  <label>Units per Carton (1 for Packet-Only)</label>
+                  <label htmlFor="product-carton-units">Base units per carton</label>
                   <input
                     type="number"
-                    min="1"
+                    id="product-carton-units"
+                    min="2"
+                    placeholder="e.g. 10"
+                    step="1"
                     value={newProdCartonRatio}
-                    onChange={(e) => setNewProdCartonRatio(parseInt(e.target.value) || 1)}
+                    onChange={(e) => setNewProdCartonRatio(e.target.value)}
                     className={styles.modalInput}
                   />
+                  <small className={styles.fieldHint}>Leave blank when sold and counted individually only.</small>
                 </div>
               </div>
 
@@ -864,6 +879,12 @@ export default function ProductsPage() {
                 </button>
               </div>
             </form>
+            {barcodeCameraOpen && <CameraScanner kind="barcode" onClose={() => setBarcodeCameraOpen(false)} onScan={(value) => {
+              if (!/^(?:\d{8}|\d{12}|\d{13})$/.test(value)) return false;
+              setNewProdBarcode(value);
+              setBarcodeCameraOpen(false);
+              return true;
+            }} />}
           </div>
         </div>
       )}

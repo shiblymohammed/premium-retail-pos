@@ -1,5 +1,6 @@
 'use client';
 
+import { ConfirmAction } from '@/components/ui/confirm-action';
 import { Feedback } from '@/components/ui/feedback';
 import {
   Ban,
@@ -11,7 +12,6 @@ import {
   FileText,
   Info,
   KeyRound,
-  Link2,
   MapPin,
   Package,
   Pencil,
@@ -133,14 +133,9 @@ export default function SalesPermissionsAdmin() {
 
   // Modals
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
-  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
-  const [bulkRole, setBulkRole] = useState<'CASHIER' | 'STORE_MANAGER' | 'STAFF'>('CASHIER');
-  const [bulkCanCancel, setBulkCanCancel] = useState(true);
-  const [bulkCanReturn, setBulkCanReturn] = useState(true);
-  const [bulkCanAudit, setBulkCanAudit] = useState(false);
-  const [bulkReason, setBulkReason] = useState('Enterprise POS operational role standard update');
 
   // Edit Permissions Modal
+  const [confirmSave, setConfirmSave] = useState(false);
   const [editingUser, setEditingUser] = useState<UserRecord | null>(null);
   const [modalCanCancel, setModalCanCancel] = useState(false);
   const [modalCanReturn, setModalCanReturn] = useState(false);
@@ -187,7 +182,7 @@ export default function SalesPermissionsAdmin() {
           if (authData?.data) setAuthority(authData.data);
           if (Array.isArray(usersData?.data)) {
             setUsers(usersData.data.filter(
-              (u: UserRecord) => u.email.toLowerCase() !== session.user?.email.toLowerCase(),
+              (u: UserRecord) => u.id !== session.user?.id && u.role !== 'SUPER_ADMIN',
             ));
           }
           if (Array.isArray(locsData?.data)) setLocations(locsData.data);
@@ -281,10 +276,17 @@ export default function SalesPermissionsAdmin() {
     setSelectedUserId(u.id);
   };
 
+  function preparePreset(user: UserRecord, cancel: boolean, returns: boolean, count: boolean) {
+    openEditModal(user);
+    setModalCanCancel(cancel);
+    setModalCanReturn(returns);
+    setModalCanAudit(count);
+  }
+
   // Save Modal Permissions
-  const handleSaveModal = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!editingUser) return;
+  const handleSaveModal = async () => {
+    setConfirmSave(false);
+    if (!editingUser || savingUserId) return;
     const reason = modalReason.trim();
 
     setSavingUserId(editingUser.id);
@@ -342,73 +344,6 @@ export default function SalesPermissionsAdmin() {
   };
 
   // Quick Preset Actions from Menu
-  const applyQuickPreset = async (
-    user: UserRecord,
-    cancel: boolean,
-    returns: boolean,
-    audit: boolean,
-    label: string,
-  ) => {
-    const reason = `Fast-assigned ${label} via directory quick action`;
-    setSavingUserId(user.id);
-
-    try {
-      if (!token) throw new Error('No authenticated session. Sign in again and retry.');
-      const responses = await Promise.all([
-          fetch(`${API_BASE}/users/${user.id}/sales-permissions`, {
-            method: 'PATCH',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ canCancelSales: cancel, canProcessReturns: returns, reason }),
-          }),
-          fetch(`${API_BASE}/users/${user.id}/stock-audit-permission`, {
-            method: 'PATCH',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ canCountStockAudits: audit, reason }),
-          }),
-        ]);
-      const failed = responses.find((response) => !response.ok);
-      if (failed) throw new Error(await errorMessage(failed));
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === user.id
-            ? {
-                ...item,
-                canCancelSales: cancel,
-                canProcessReturns: returns,
-                canCountStockAudits: audit,
-                lastReason: reason,
-                lastUpdated: 'Today',
-              }
-            : item,
-        ),
-      );
-      setNotice(`Assigned ${label} to ${user.name || user.email}.`);
-    } catch (saveError: unknown) {
-      setError(saveError instanceof Error ? `Preset was not confirmed by the server. ${saveError.message}` : 'Preset was not saved.');
-    } finally {
-      setSavingUserId('');
-    }
-  };
-
-  // Bulk Apply
-  const handleApplyBulk = (e: FormEvent) => {
-    e.preventDefault();
-    setError('Bulk permission changes are not supported by the API yet. Use the per-user permission editor so each change is recorded by the server.');
-  };
-
-  // Copy User Policy
-  const copyUserPolicy = (u: UserRecord) => {
-    const scopes = (u.locationScopes || [])
-      .map((s) => locationMap.get(s.locationId) || s.locationId)
-      .join(', ') || 'Platform-wide';
-    const voids = u.canCancelSales ? 'Allowed' : 'Blocked';
-    const returns = u.canProcessReturns ? 'Allowed' : 'Blocked';
-    const audits = u.canCountStockAudits ? 'Authorized' : 'Restricted';
-    const text = `Staff: ${u.name || u.email} | Role: ${roleLabels[u.role] || u.role} | Sales Voids: ${voids} | Returns: ${returns} | Audits: ${audits} | Stores: ${scopes} | OD-08 Enforced`;
-    navigator.clipboard.writeText(text);
-    setNotice(`Copied permissions profile for ${u.name || u.email} to clipboard.`);
-  };
-
   return (
     <div className="app-page admin-workspace">
       {/* Alert Notice (Matching users, company, discount-limits) */}
@@ -506,29 +441,6 @@ export default function SalesPermissionsAdmin() {
             <Info size="1em" className="inline-icon" aria-hidden="true" />
           </button>
 
-          {/* Primary Action Button */}
-          <button
-            type="button"
-            onClick={() => setIsBulkModalOpen(true)}
-            disabled={loading || users.length === 0}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 18px',
-              borderRadius: '8px',
-              background: 'var(--retail-accent)',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: 700,
-              fontSize: '13px',
-              cursor: loading || users.length === 0 ? 'not-allowed' : 'pointer',
-              opacity: loading || users.length === 0 ? 0.55 : 1,
-              boxShadow: '0 2px 10px rgba(26, 98, 234, 0.28)',
-            }}
-          >
-            <span style={{ fontSize: '15px' }}><Zap size="1em" className="inline-icon" aria-hidden="true" /></span> Bulk Permissions Preset
-          </button>
         </div>
       </div>
 
@@ -1185,33 +1097,12 @@ export default function SalesPermissionsAdmin() {
                                 Edit
                               </button>
 
-                              {/* Quick Copy Button */}
-                              <button
-                                type="button"
-                                onClick={() => copyUserPolicy(user)}
-                                style={{
-                                  border: 'none',
-                                  background: 'transparent',
-                                  color: 'var(--retail-muted)',
-                                  width: '28px',
-                                  height: '28px',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  display: 'grid',
-                                  placeItems: 'center',
-                                  fontSize: '14px',
-                                }}
-                                title="Copy policy snapshot"
-                              >
-                                <Link2 size="1em" className="inline-icon" aria-hidden="true" />
-                              </button>
-
                               <AdminActionMenu label={`Permission actions for ${user.name || user.email}`}>
                                 <button type="button" onClick={() => openEditModal(user)}><Pencil size={15} aria-hidden="true" /> Configure permissions</button>
-                                <button type="button" onClick={() => void applyQuickPreset(user, true, true, false, 'Full POS Access')}><Zap size={15} aria-hidden="true" /> Grant voids and returns</button>
-                                <button type="button" onClick={() => void applyQuickPreset(user, false, true, false, 'Returns Only')}><Zap size={15} aria-hidden="true" /> Grant returns only</button>
-                                <button type="button" onClick={() => void applyQuickPreset(user, false, false, true, 'Stock Auditor')}><Package size={15} aria-hidden="true" /> Grant stock audit count</button>
-                                <button type="button" className="admin-action-danger" onClick={() => void applyQuickPreset(user, false, false, false, 'Standard Sales (Revoked)')}><Ban size={15} aria-hidden="true" /> Revoke all overrides</button>
+                                <button type="button" onClick={() => preparePreset(user, true, true, false)}><Zap size={15} aria-hidden="true" /> Grant voids and returns</button>
+                                <button type="button" onClick={() => preparePreset(user, false, true, false)}><Zap size={15} aria-hidden="true" /> Grant returns only</button>
+                                <button type="button" onClick={() => preparePreset(user, false, false, true)}><Package size={15} aria-hidden="true" /> Grant stock audit count</button>
+                                <button type="button" className="admin-action-danger" onClick={() => preparePreset(user, false, false, false)}><Ban size={15} aria-hidden="true" /> Revoke all overrides</button>
                                 <button type="button" onClick={async () => {
                                   try {
                                     await navigator.clipboard.writeText(user.email);
@@ -1245,10 +1136,10 @@ export default function SalesPermissionsAdmin() {
               }}
             >
               <span>
-                Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> active staff accounts
+                Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> active accounts available for permission review
               </span>
               <span>
-                Dual-Axis Security Invariant OD-08: Permissions are enforced at register dispatch.
+                Users includes inactive accounts and Super Admins, whose access is built in.
               </span>
             </div>
           </div>
@@ -1269,14 +1160,14 @@ export default function SalesPermissionsAdmin() {
                 <span style={{ fontSize: '12px', fontWeight: 800, color: 'light-dark(#059669, #b5f5e1)', background: 'light-dark(#ecfdf5, #1e352a)', padding: '4px 10px', borderRadius: '20px', border: '1px solid light-dark(#a7f3d0, #31624b)' }}>
                   MANAGEMENT TIER
                 </span>
-                <span style={{ fontSize: '18px', fontWeight: 850, color: 'light-dark(#059669, #b5f5e1)' }}>Full Privilege</span>
+                <span style={{ fontSize: '18px', fontWeight: 850, color: 'light-dark(#059669, #b5f5e1)' }}>Store access</span>
               </div>
               <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: 'var(--retail-ink)' }}>Store Managers</h3>
               <p style={{ fontSize: '13.5px', color: 'var(--retail-muted)', lineHeight: 1.5, margin: '0 0 16px' }}>
-                Store supervisors have full operational authority to void mistake sales, authorize returns with refund voucher generation, and conduct stock audits.
+                The workflow assigns customer returns to store managers. Cancelling a bill requires separate authorization. Review each account’s saved permissions in the directory.
               </p>
               <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
-                <strong>Authorized:</strong> Sales Cancellation <Check size="1em" className="inline-icon" aria-hidden="true" /> · Customer Returns <Check size="1em" className="inline-icon" aria-hidden="true" /> · Stock Audits <Check size="1em" className="inline-icon" aria-hidden="true" />
+                <strong>Workflow:</strong> Customer returns and stock counts at assigned stores.
               </div>
             </div>
 
@@ -1293,7 +1184,7 @@ export default function SalesPermissionsAdmin() {
                 Standard cashiers can execute checkouts. Senior cashiers or returns desk staff can be provisioned with returns handling privileges as needed.
               </p>
               <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
-                <strong>Authorized:</strong> Sales Cancellation (Discretionary) · Customer Returns (Configurable)
+                <strong>Workflow:</strong> Checkout. Sales controls require explicitly granted access.
               </div>
             </div>
 
@@ -1400,21 +1291,22 @@ export default function SalesPermissionsAdmin() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveModal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <form onSubmit={(event) => { event.preventDefault(); if (modalReason.trim()) setConfirmSave(true); else setError('Enter a reason for changing access.'); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               {error && <Feedback tone="error">{error}</Feedback>}
               {/* Permission Toggles List */}
               <div style={{ background: 'var(--retail-raised)', padding: '16px', borderRadius: '12px', border: '1px solid var(--retail-edge-strong)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {/* Toggle 1: Cancel Sales */}
                 <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <div>
-                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Void & Cancel Finalized Sales Invoices</strong>
+                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Cancel finalized bills</strong>
                     <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits cancelling receipts on POS terminals (Requires justification)</span>
                   </div>
                   <input
                     type="checkbox"
                     checked={modalCanCancel}
                     onChange={(e) => setModalCanCancel(e.target.checked)}
-                    style={{ width: '18px', height: '18px', accentColor: 'var(--retail-accent)', cursor: 'pointer' }}
+                    role="switch"
+                    className="admin-permission-switch"
                   />
                 </label>
 
@@ -1423,14 +1315,15 @@ export default function SalesPermissionsAdmin() {
                 {/* Toggle 2: Process Returns */}
                 <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <div>
-                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Process Customer Returns & Refunds</strong>
+                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Process customer returns</strong>
                     <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits accepting returned items and issuing credit vouchers</span>
                   </div>
                   <input
                     type="checkbox"
                     checked={modalCanReturn}
                     onChange={(e) => setModalCanReturn(e.target.checked)}
-                    style={{ width: '18px', height: '18px', accentColor: 'var(--retail-accent)', cursor: 'pointer' }}
+                    role="switch"
+                    className="admin-permission-switch"
                   />
                 </label>
 
@@ -1439,14 +1332,15 @@ export default function SalesPermissionsAdmin() {
                 {/* Toggle 3: Stock Audits */}
                 <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
                   <div>
-                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Conduct Physical Stock Count Audits</strong>
+                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Enter stock counts</strong>
                     <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits counting inventory on /audits during stock reconciliation</span>
                   </div>
                   <input
                     type="checkbox"
                     checked={modalCanAudit}
                     onChange={(e) => setModalCanAudit(e.target.checked)}
-                    style={{ width: '18px', height: '18px', accentColor: 'var(--retail-accent)', cursor: 'pointer' }}
+                    role="switch"
+                    className="admin-permission-switch"
                   />
                 </label>
               </div>
@@ -1454,7 +1348,7 @@ export default function SalesPermissionsAdmin() {
               {/* Justification Reason Field */}
               <div>
                 <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 750, color: 'var(--retail-ink)', marginBottom: '6px' }}>
-                  Audit Justification Reason (Required by Invariant OD-08)
+                  Reason for changing access
                 </label>
                 <textarea
                   rows={3}
@@ -1621,126 +1515,15 @@ export default function SalesPermissionsAdmin() {
         </div>
       )}
 
-      {/* MODAL: BULK PRESET POLICY */}
-      {isBulkModalOpen && (
-        <div
-          className="admin-dialog-backdrop"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.55)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100,
-            padding: '20px',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsBulkModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--retail-card)',
-              borderRadius: '16px',
-              width: 'min(480px, 100%)',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
-              padding: '26px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
-                Bulk Permissions Preset
-              </h2>
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={() => setIsBulkModalOpen(false)}
-                style={{ border: 'none', background: 'var(--retail-edge)', borderRadius: '8px', width: '28px', height: '28px', cursor: 'pointer', fontSize: '14px', color: 'var(--retail-muted)' }}
-              >
-                <X size="1em" className="inline-icon" aria-hidden="true" />
-              </button>
-            </div>
-
-            <form onSubmit={handleApplyBulk} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                  Target Role
-                </label>
-                <select
-                  value={bulkRole}
-                  onChange={(e) => setBulkRole(e.target.value as any)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '12.5px', fontWeight: 600, color: 'var(--retail-ink)' }}
-                >
-                  <option value="CASHIER">All Cashier Stations</option>
-                  <option value="STORE_MANAGER">All Store Managers</option>
-                  <option value="STAFF">All Floor Staff</option>
-                </select>
-              </div>
-
-              <div style={{ background: 'var(--retail-raised)', padding: '12px', borderRadius: '10px', border: '1px solid var(--retail-edge-strong)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--retail-ink)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={bulkCanCancel}
-                    onChange={(e) => setBulkCanCancel(e.target.checked)}
-                    style={{ accentColor: 'var(--retail-accent)' }}
-                  />
-                  <span>Allow Voiding / Cancelling Sales</span>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--retail-ink)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={bulkCanReturn}
-                    onChange={(e) => setBulkCanReturn(e.target.checked)}
-                    style={{ accentColor: 'var(--retail-accent)' }}
-                  />
-                  <span>Allow Processing Customer Returns</span>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12.5px', color: 'var(--retail-ink)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={bulkCanAudit}
-                    onChange={(e) => setBulkCanAudit(e.target.checked)}
-                    style={{ accentColor: 'var(--retail-accent)' }}
-                  />
-                  <span>Allow Conducting Stock Audits</span>
-                </label>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                  Audit Justification Reason
-                </label>
-                <input
-                  type="text"
-                  value={bulkReason}
-                  onChange={(e) => setBulkReason(e.target.value)}
-                  placeholder="Reason for role-wide update..."
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '12.5px', fontWeight: 550, color: 'var(--retail-ink)' }}
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsBulkModalOpen(false)}
-                  style={{ padding: '8px 14px', borderRadius: '8px', background: 'var(--retail-edge)', border: 'none', color: 'var(--retail-muted)', fontSize: '12.5px', fontWeight: 650, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  style={{ padding: '8px 18px', borderRadius: '8px', background: 'var(--retail-accent)', border: 'none', color: '#ffffff', fontSize: '12.5px', fontWeight: 750, cursor: 'pointer', boxShadow: '0 2px 6px rgba(26, 98, 234, 0.28)' }}
-                >
-                  Apply to All {roleLabels[bulkRole]}s
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {confirmSave && editingUser && <ConfirmAction title="Save access changes?" confirmLabel="Yes, save changes"
+        cancelLabel="No, keep editing" onCancel={() => setConfirmSave(false)} onConfirm={() => void handleSaveModal()}>
+        <p>Update permissions for <strong>{editingUser.name || editingUser.email}</strong>?</p>
+        <ul>
+          <li>Cancel bills: {modalCanCancel ? 'On' : 'Off'}</li>
+          <li>Process returns: {modalCanReturn ? 'On' : 'Off'}</li>
+          <li>Enter stock counts: {modalCanAudit ? 'On' : 'Off'}</li>
+        </ul>
+      </ConfirmAction>}
     </div>
   );
 }
