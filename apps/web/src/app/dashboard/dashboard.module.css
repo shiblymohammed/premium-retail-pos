@@ -669,3 +669,65 @@
   .overviewTitle p { font-size: 13px; }
   .barLabel { font-size: 9px; }
 }
+
+.adminOverviewLead, .deskSplit { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 14px; margin-bottom: 16px; }
+.deskPanel { min-width: 0; padding: clamp(14px, 2vw, 20px); border: 1px solid var(--retail-edge); border-radius: var(--retail-radius); background: var(--retail-card); box-shadow: var(--retail-shadow); }
+.deskPanel h2, .deskWork h2 { font-size: 19px; line-height: 1.22; margin: 0; letter-spacing: -.03em; }
+.deskPanel p { color: var(--retail-muted); font-size: 13px; margin: 3px 0 0; }
+.deskPanelHeading { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+.checklist { list-style: none; margin: 0; padding: 0; }
+.checklist li + li { border-top: 1px solid var(--retail-edge); }
+.checklist a, .exceptionList a { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 9px; align-items: center; padding: 6px 4px; min-height: 40px; color: var(--retail-ink); text-decoration: none; font-size: 13px; border-radius: 7px; }
+.checklist a:hover, .exceptionList a:hover { background: var(--retail-raised); }
+.checklist small, .exceptionList span { color: var(--retail-muted); }
+.checklistNumber { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--retail-raised); color: var(--retail-muted); font-size: 12px; font-weight: 700; }
+.checklistNumber[data-complete=true] { color: var(--feedback-ok); }
+.exceptionIcon { display: grid; place-items: center; flex: 0 0 38px; height: 38px; background: var(--retail-accent-soft); color: var(--retail-accent-strong); border-radius: 11px; }
+.exceptionList { background: var(--retail-raised); border-radius: 12px; padding: 5px 8px; }
+.exceptionList a { padding-inline: 5px; }
+.exceptionList a + a { border-top: 1px solid var(--retail-edge); }
+.exceptionList a:hover { background: var(--retail-card); }
+.exceptionDot { color: var(--retail-accent-strong); }
+.exceptionList span { font-variant-numeric: tabular-nums; font-weight: 750; }
+.deskScope { display: inline-flex; align-items: center; gap: 7px; padding: 8px 13px; border: 1px solid var(--retail-edge); border-radius: 999px; background: var(--retail-card); color: var(--retail-muted); font-weight: 600; }
+.deskHero { min-width: 0; padding: clamp(17px, 3vw, 27px); border: 1px solid var(--retail-accent-line); border-radius: var(--retail-radius); background: linear-gradient(145deg, var(--retail-accent-soft), var(--retail-card) 85%); color: var(--retail-ink); }
+.deskHeroTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+.deskHeroTop i, .deskResource > i, .deskCardTop i { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border-radius: 12px; background: var(--retail-accent-soft); color: var(--retail-accent-strong); }
+.deskHeroTop i { background: var(--retail-orange-gradient); color: var(--retail-orange-ink); width: 49px; flex-basis: 49px; height: 49px; }
+.deskHeroTop span { padding: 5px 9px; border: 1px solid var(--retail-edge); border-radius: 999px; color: var(--retail-muted); background: var(--retail-card); font-size: 12px; }
+.deskHero h2 { font-size: clamp(23px, 3vw, 36px); line-height: 1.12; margin: 0; letter-spacing: -.045em; }
+.deskHero p { margin: 6px 0 16px; color: var(--retail-muted); }
+.deskPrimary { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 14px; border: 0; border-radius: 999px; color: var(--control-active-text); background: var(--control-active); text-decoration: none; font: inherit; font-weight: 650; }
+.deskPrimary:hover { opacity: .85; }
+.deskResource, .shiftStatus { display: flex; align-items: center; gap: 9px; margin-top: 8px; padding: 7px; border: 1px solid var(--retail-edge); border-radius: 11px; color: var(--retail-ink); text-decoration: none; }
+.deskResource:hover, .deskCard:hover { background: var(--retail-raised); }
+.deskResource > span, .shiftStatus > span { min-width: 0; display: grid; flex: 1; }
+.deskResource small, .shiftStatus small { color: var(--retail-muted); }
+.deskResource > i { flex-basis: 33px; width: 33px; height: 33px; border-radius: 9px; }
+.shiftStatus { background: var(--retail-raised); padding: 9px; }
+.deskWork h2 { margin: 0 0 10px; }
+.deskCards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.deskCard { min-width: 0; display: grid; align-content: start; gap: 4px; border: 1px solid var(--retail-edge); border-radius: 14px; padding: 13px; background: var(--retail-card); color: var(--retail-ink); text-decoration: none; }
+.deskCardTop { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; color: var(--retail-muted); }
+.deskCardTop i { height: 34px; width: 34px; flex-basis: 34px; border-radius: 9px; }
+.deskCard strong { margin: 2px 0; font-size: clamp(19px, 3vw, 25px); line-height: 1.1; overflow-wrap: anywhere; }
+.deskCard strong[data-unavailable=true] { font-size: 15px; color: var(--retail-muted); }
+.deskCard small { color: var(--retail-muted); }
+@media (max-width: 900px) { .deskCards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .adminOverviewLead, .deskSplit { grid-template-columns: minmax(0, 1fr); } }
+
+.offlineTerminal { display: inline-block; margin: 6px 10px; color: var(--retail-accent-strong); text-underline-offset: 3px; }
+
+.managerDesk { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); grid-template-areas: 'hero access' 'work work'; gap: 14px; }
+.managerDesk > .deskHero { grid-area: hero; }
+.managerDesk > .deskWork { grid-area: work; }
+.managerDesk > .deskPanel { grid-area: access; }
+@media (max-width: 760px) {
+  .managerDesk { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'hero' 'work' 'access'; }
+}
+
+.adminOverviewLead:has(> :only-child) { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 901px) {
+  .adminOverviewLead:has(> :only-child) .exceptionList { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .adminOverviewLead:has(> :only-child) .exceptionList a + a { border-top: 0; border-left: 1px solid var(--retail-edge); }
+}

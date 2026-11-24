@@ -8,7 +8,6 @@ import {
   Clipboard,
   ClipboardCheck,
   CreditCard,
-  Ellipsis,
   FileText,
   Info,
   KeyRound,
@@ -27,6 +26,7 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 import { QuickAccessCard, AdminModal } from '@/components/admin';
+import { AdminActionMenu } from '@/components/admin/admin-action-menu';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -122,7 +122,6 @@ export default function SalesPermissionsAdmin() {
 
   // Dropdown Toggles
   const [openDropdown, setOpenDropdown] = useState<'ROLE' | 'LOCATION' | 'CAPABILITY' | null>(null);
-  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
 
   // Selected row for highlight
   const [selectedUserId, setSelectedUserId] = useState<string>('');
@@ -150,6 +149,8 @@ export default function SalesPermissionsAdmin() {
 
   // Initialize from Session or API
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search).get('q');
+    if (query) setSearch(query);
     const session = getStoredSession();
     if (session?.user?.email) {
       setActorEmail(session.user.email);
@@ -203,9 +204,6 @@ export default function SalesPermissionsAdmin() {
       const target = e.target as HTMLElement;
       if (!target.closest('.custom-filter-dropdown-wrap')) {
         setOpenDropdown(null);
-      }
-      if (!target.closest('.perm-action-menu-wrap')) {
-        setActiveActionMenuId(null);
       }
     };
     window.addEventListener('click', handleGlobalClick);
@@ -274,6 +272,7 @@ export default function SalesPermissionsAdmin() {
 
   // Open Edit Permissions Modal
   const openEditModal = (u: UserRecord) => {
+    setError('');
     setEditingUser(u);
     setModalCanCancel(u.canCancelSales);
     setModalCanReturn(u.canProcessReturns);
@@ -352,7 +351,6 @@ export default function SalesPermissionsAdmin() {
   ) => {
     const reason = `Fast-assigned ${label} via directory quick action`;
     setSavingUserId(user.id);
-    setActiveActionMenuId(null);
 
     try {
       if (!token) throw new Error('No authenticated session. Sign in again and retry.');
@@ -416,7 +414,7 @@ export default function SalesPermissionsAdmin() {
       {/* Alert Notice (Matching users, company, discount-limits) */}
       {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
-      {error && <Feedback tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
+      {error && !editingUser && <Feedback tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
       {loading && (
         <div role="status" style={{ padding: '12px 16px', marginBottom: '16px', borderRadius: '9px', background: 'light-dark(#eff6ff, #1d2733)', border: '1px solid light-dark(#bfdbfe, #2e425b)', color: 'var(--retail-accent-strong)', fontSize: '13px' }}>
           Loading current permissions from the server…
@@ -942,7 +940,7 @@ export default function SalesPermissionsAdmin() {
               boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
             }}
           >
-            <div className="admin-table-scroll" role="region" aria-label="Scrollable records" tabIndex={0}>
+            <div className="admin-table-scroll permission-directory" role="region" aria-label="Staff permissions" tabIndex={0}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr
@@ -1004,7 +1002,7 @@ export default function SalesPermissionsAdmin() {
                           }}
                         >
                           {/* Col 1: Staff Account */}
-                          <td style={{ padding: '13px 20px' }}>
+                          <td data-column="Staff account" style={{ padding: '13px 20px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                               <div
                                 style={{
@@ -1049,7 +1047,7 @@ export default function SalesPermissionsAdmin() {
                           </td>
 
                           {/* Col 2: Role */}
-                          <td style={{ padding: '13px 16px' }}>
+                          <td data-column="Role" style={{ padding: '13px 16px' }}>
                             <span
                               style={{
                                 display: 'inline-flex',
@@ -1092,7 +1090,7 @@ export default function SalesPermissionsAdmin() {
                           </td>
 
                           {/* Col 3: Assigned Store */}
-                          <td style={{ padding: '13px 16px' }}>
+                          <td data-column="Location" style={{ padding: '13px 16px' }}>
                             <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
                               <span style={{ color: 'var(--retail-accent)', fontSize: '13px' }}><Store size="1em" className="inline-icon" aria-hidden="true" /></span>
                               <span>{scopes.length ? scopes[0] : 'All Branches'}</span>
@@ -1105,7 +1103,7 @@ export default function SalesPermissionsAdmin() {
                           </td>
 
                           {/* Col 4: Sales Voids (Clean Pill) */}
-                          <td style={{ padding: '13px 14px' }}>
+                          <td data-column="Voids" style={{ padding: '13px 14px' }}>
                             <span
                               style={{
                                 display: 'inline-flex',
@@ -1125,7 +1123,7 @@ export default function SalesPermissionsAdmin() {
                           </td>
 
                           {/* Col 5: Customer Returns (Clean Pill) */}
-                          <td style={{ padding: '13px 14px' }}>
+                          <td data-column="Returns" style={{ padding: '13px 14px' }}>
                             <span
                               style={{
                                 display: 'inline-flex',
@@ -1145,7 +1143,7 @@ export default function SalesPermissionsAdmin() {
                           </td>
 
                           {/* Col 6: Stock Audits (Clean Pill) */}
-                          <td style={{ padding: '13px 14px' }}>
+                          <td data-column="Stock counts" style={{ padding: '13px 14px' }}>
                             <span
                               style={{
                                 display: 'inline-flex',
@@ -1165,7 +1163,7 @@ export default function SalesPermissionsAdmin() {
                           </td>
 
                           {/* Col 7: Actions */}
-                          <td style={{ padding: '13px 20px', textAlign: 'right' }}>
+                          <td data-column="Actions" style={{ padding: '13px 20px', textAlign: 'right' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }} onClick={(e) => e.stopPropagation()}>
                               {/* Edit Permissions Button */}
                               <button
@@ -1208,88 +1206,21 @@ export default function SalesPermissionsAdmin() {
                                 <Link2 size="1em" className="inline-icon" aria-hidden="true" />
                               </button>
 
-                              {/* Context Menu Trigger */}
-                              <div className="perm-action-menu-wrap" style={{ position: 'relative' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveActionMenuId((prev) => (prev === user.id ? null : user.id))}
-                                  style={{
-                                    border: 'none',
-                                    background: 'transparent',
-                                    color: 'var(--retail-muted)',
-                                    width: '28px',
-                                    height: '28px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    display: 'grid',
-                                    placeItems: 'center',
-                                    fontSize: '16px',
-                                    fontWeight: 800,
-                                  }}
-                                  title="More options"
-                                >
-                                  <Ellipsis size="1em" className="inline-icon" aria-hidden="true" />
-                                </button>
-
-                                {activeActionMenuId === user.id && (
-                                  <div
-                                    style={{
-                                      position: 'absolute',
-                                      top: 'calc(100% + 4px)',
-                                      right: 0,
-                                      zIndex: 60,
-                                      background: 'var(--retail-card)',
-                                      borderRadius: '10px',
-                                      border: '1px solid light-dark(#cbd5e1, #34455a)',
-                                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                                      minWidth: '200px',
-                                      padding: '5px',
-                                      textAlign: 'left',
-                                    }}
-                                  >
-                                    <div
-                                      onClick={() => openEditModal(user)}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 650, color: 'var(--retail-accent)', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      <Pencil size="1em" className="inline-icon" aria-hidden="true" /> Configure Permissions...
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, true, true, false, 'Full POS Access')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'light-dark(#059669, #b5f5e1)', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      <Zap size="1em" className="inline-icon" aria-hidden="true" /> Grant Voids & Returns
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, false, true, false, 'Returns Only')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'var(--retail-ink)', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      <Zap size="1em" className="inline-icon" aria-hidden="true" /> Grant Returns Desk Only
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, false, false, true, 'Stock Auditor')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'light-dark(#4f46e5, #bdb6ff)', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      <Package size="1em" className="inline-icon" aria-hidden="true" /> Grant Stock Audit Count
-                                    </div>
-                                    <div
-                                      onClick={() => void applyQuickPreset(user, false, false, false, 'Standard Sales (Revoked)')}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'light-dark(#dc2626, #f2abab)', cursor: 'pointer', borderRadius: '6px' }}
-                                    >
-                                      <Ban size="1em" className="inline-icon" aria-hidden="true" /> Revoke All Overrides
-                                    </div>
-                                    <div
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(user.email);
-                                        setNotice(`Copied ${user.email} to clipboard.`);
-                                        setActiveActionMenuId(null);
-                                      }}
-                                      style={{ padding: '7px 10px', fontSize: '12px', fontWeight: 550, color: 'var(--retail-muted)', cursor: 'pointer', borderRadius: '6px', borderTop: '1px solid var(--retail-edge)' }}
-                                    >
-                                      <Clipboard size="1em" className="inline-icon" aria-hidden="true" /> Copy Email Address
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
+                              <AdminActionMenu label={`Permission actions for ${user.name || user.email}`}>
+                                <button type="button" onClick={() => openEditModal(user)}><Pencil size={15} aria-hidden="true" /> Configure permissions</button>
+                                <button type="button" onClick={() => void applyQuickPreset(user, true, true, false, 'Full POS Access')}><Zap size={15} aria-hidden="true" /> Grant voids and returns</button>
+                                <button type="button" onClick={() => void applyQuickPreset(user, false, true, false, 'Returns Only')}><Zap size={15} aria-hidden="true" /> Grant returns only</button>
+                                <button type="button" onClick={() => void applyQuickPreset(user, false, false, true, 'Stock Auditor')}><Package size={15} aria-hidden="true" /> Grant stock audit count</button>
+                                <button type="button" className="admin-action-danger" onClick={() => void applyQuickPreset(user, false, false, false, 'Standard Sales (Revoked)')}><Ban size={15} aria-hidden="true" /> Revoke all overrides</button>
+                                <button type="button" onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(user.email);
+                                    setNotice(`Copied ${user.email} to clipboard.`);
+                                  } catch {
+                                    setError('Could not copy the email address.');
+                                  }
+                                }}><Clipboard size={15} aria-hidden="true" /> Copy email address</button>
+                              </AdminActionMenu>
                             </div>
                           </td>
                         </tr>
@@ -1437,17 +1368,21 @@ export default function SalesPermissionsAdmin() {
           }}
         >
           <div
+            role="dialog" aria-modal="true" aria-labelledby="permission-editor-title"
+            onKeyDown={(event) => { if (event.key === 'Escape') setEditingUser(null); }}
             style={{
               background: 'var(--retail-card)',
               borderRadius: '16px',
               width: 'min(520px, 100%)',
               boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
-              padding: '26px',
+              padding: 'clamp(14px, 3vw, 26px)',
+              maxHeight: 'calc(100dvh - 40px)',
+              overflowY: 'auto',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
+                <h2 id="permission-editor-title" style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
                   Configure Staff Sales Permissions
                 </h2>
                 <div style={{ fontSize: '12.5px', color: 'var(--retail-muted)', marginTop: '2px' }}>
@@ -1457,6 +1392,7 @@ export default function SalesPermissionsAdmin() {
               <button
                 type="button"
                 aria-label="Close"
+                autoFocus
                 onClick={() => setEditingUser(null)}
                 style={{ border: 'none', background: 'var(--retail-edge)', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '14px', color: 'var(--retail-muted)' }}
               >
@@ -1465,6 +1401,7 @@ export default function SalesPermissionsAdmin() {
             </div>
 
             <form onSubmit={handleSaveModal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {error && <Feedback tone="error">{error}</Feedback>}
               {/* Permission Toggles List */}
               <div style={{ background: 'var(--retail-raised)', padding: '16px', borderRadius: '12px', border: '1px solid var(--retail-edge-strong)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {/* Toggle 1: Cancel Sales */}

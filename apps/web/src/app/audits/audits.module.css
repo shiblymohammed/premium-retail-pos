@@ -272,3 +272,18 @@
   .side { grid-template-columns: minmax(0, 1fr); }
   .itemCount { min-width: 0; }
 }
+
+.settings { min-width: 0; }
+.settings > summary:focus-visible { outline: 2px solid var(--retail-accent-strong); outline-offset: -3px; border-radius: 12px; }
+.settingsBody { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr)); align-items: start; gap: 12px; }
+.settingsBody .settingGroup { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+.settingsBody :is(input, select, button) { min-width: 0; max-width: 100%; }
+.settingsBody :is(.field input, select) { width: 100%; }
+.settingsBody .saveButton { height: auto; min-height: 42px; white-space: normal; }
+.settingsBody .globalScheduleGrid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 115px), 1fr)); align-items: end; }
+.settingsBody .inline { display: grid; grid-template-columns: minmax(0, 1fr) minmax(56px, 72px) minmax(26px, auto); }
+
+
+.headerActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.settingsJump { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--retail-edge); color: var(--retail-accent-strong); background: var(--retail-card); font-size: 13px; font-weight: 650; text-decoration: none; }
+.settings { scroll-margin-top: 12px; }

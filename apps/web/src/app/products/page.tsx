@@ -111,6 +111,7 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 export default function ProductsPage() {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
+  const [currency, setCurrency] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selectedLocation, setSelectedLocation] = useState('All retail locations');
@@ -136,7 +137,7 @@ export default function ProductsPage() {
   const [newProdPrice, setNewProdPrice] = useState(0);
   const [newProdCartonRatio, setNewProdCartonRatio] = useState(1);
 
-  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   // Sync location scope with app frame and local storage
   useEffect(() => {
@@ -156,6 +157,8 @@ export default function ProductsPage() {
     const token = getStoredSession()?.accessToken;
     if (!token) { setLoading(false); return; }
     const headers = { Authorization: `Bearer ${token}` };
+    const currencyController = new AbortController();
+    setCurrency(null);
     Promise.all([
       fetch(`${API_BASE}/products?isActive=true`, { headers, cache: 'no-store' }),
       fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
@@ -170,6 +173,13 @@ export default function ProductsPage() {
       const selectedLocations = ['All retail locations', 'All locations'].includes(selectedLocation)
         ? availableLocations
         : availableLocations.filter((location: { name: string }) => location.name === selectedLocation);
+      const companyIds = [...new Set<string>(selectedLocations.flatMap((location: { companyId?: string }) => location.companyId ? [location.companyId] : []))];
+      if (companyIds.length === 1 && !currencyController.signal.aborted) {
+        void fetch(`${API_BASE}/companies/${encodeURIComponent(companyIds[0])}`, { headers, cache: 'no-store', signal: currencyController.signal })
+          .then(async (response) => response.ok ? response.json() : null)
+          .then((payload) => { if (!currencyController.signal.aborted) setCurrency(payload?.data?.currency ?? null); })
+          .catch(() => { /* Prices can still display without a currency symbol. */ });
+      }
       const totals = new Map<string, { available: number; transit: number; reserved: number; quarantined: number }>();
       for (const location of selectedLocations) {
         for (let index = 0; index < variantIds.length; index += 100) {
@@ -211,6 +221,7 @@ export default function ProductsPage() {
       );
       setProducts(rows);
     }).catch((error) => showToast(error instanceof Error ? error.message : 'Could not load product data.', 'info')).finally(() => setLoading(false));
+    return () => currencyController.abort();
   }, [reloadKey, selectedLocation]);
 
   const handleLocationChange = (loc: string) => {
@@ -338,7 +349,7 @@ export default function ProductsPage() {
     }
   };
 
-  const showToast = (message: string, type: 'success' | 'info' = 'success') => {
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     setNotification({ message, type });
     setTimeout(() => {
       setNotification(null);
@@ -383,7 +394,7 @@ export default function ProductsPage() {
   const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProdName.trim() || !newProdSku.trim()) {
-      alert('Please fill out Product Name and SKU.');
+      showToast('Enter a product name and SKU.', 'error');
       return;
     }
 
@@ -412,7 +423,10 @@ export default function ProductsPage() {
   const activeFilterCount = [selectedHealth !== 'All items', selectedCategory !== 'All categories', !['All retail locations', 'All locations'].includes(selectedLocation)].filter(Boolean).length;
   const firstRow = sortedProducts.length ? (currentPage - 1) * itemsPerPage + 1 : 0;
   const lastRow = Math.min(currentPage * itemsPerPage, sortedProducts.length);
-  const formatPrice = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatPrice = (n: number) => n.toLocaleString('en-IN', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+    ...(currency ? { style: 'currency' as const, currency } : {}),
+  });
   const statusTone = (s: ProductItem['status']) => (s === 'Healthy' ? styles.pillGood : s === 'Low Stock' ? styles.pillWarn : styles.pillBad);
   const unitWord = (n: number) => (Math.abs(n) === 1 ? 'pack' : 'packs');
   const pageNumbers = (() => {
@@ -811,7 +825,7 @@ export default function ProductsPage() {
 
               <div className={styles.formRow}>
                 <div className={styles.formGroup}>
-                  <label>Selling Price (₹ per canonical pack)</label>
+                  <label>Selling price per base unit{currency ? ` (${currency})` : ''}</label>
                   <input
                     type="number"
                     step="0.01"

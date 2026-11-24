@@ -1,5 +1,6 @@
 'use client';
 
+import { ReasonDialog, type ReasonAction } from '@/components/admin/reason-dialog';
 import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
 import {
@@ -174,6 +175,7 @@ export default function AuditsPage() {
   const [approvalReason, setApprovalReason] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const selectedLocation = locations.find((l) => l.id === locationId) || locations[0];
@@ -351,10 +353,8 @@ export default function AuditsPage() {
     })();
   }
 
-  async function handleAbortAudit() {
+  async function handleAbortAudit(reason: string) {
     if (!session || !token || !capabilities.canManage) return;
-    const reason = window.prompt('Why is this audit being aborted?');
-    if (!reason?.trim()) return;
     setBusy(true); setError('');
     try {
       await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/abort`, token, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) });
@@ -364,10 +364,8 @@ export default function AuditsPage() {
     finally { setBusy(false); }
   }
 
-  async function handleRequestRecount(item: AuditItem) {
+  async function handleRequestRecount(item: AuditItem, reason: string) {
     if (!session || !token || !capabilities.canManage) return;
-    const reason = window.prompt(`Why does ${item.variant.product.name} need another physical count?`);
-    if (!reason?.trim()) return;
     setBusy(true); setError('');
     try {
       await auditApi(`/audits/sessions/${encodeURIComponent(session.id)}/items/${encodeURIComponent(item.id)}/recount-required`, token, {
@@ -498,6 +496,11 @@ export default function AuditsPage() {
           <h1>Stock Audits</h1>
           <p>Count what&apos;s on your shelves and fix any stock differences.</p>
         </div>
+        <div className={styles.headerActions}>
+        {capabilities.canManage && <a className={styles.settingsJump} href="#count-settings" onClick={() => {
+          const details = document.querySelector<HTMLDetailsElement>('#count-settings');
+          if (details) details.open = true;
+        }}><Icon name="settings" size={16} /> Count settings</a>}
         <PillDropdown<string>
           value={locationId}
           heading="Store to count"
@@ -514,6 +517,7 @@ export default function AuditsPage() {
             window.dispatchEvent(new CustomEvent('premium-retail-location-change', { detail: selected.name }));
           }}
         />
+      </div>
       </header>
 
       {error && <Feedback tone="error" onDismiss={() => setError('')} action={!token && <a href="/login?returnUrl=%2Faudits">Sign in</a>}>{error}</Feedback>}
@@ -628,7 +632,7 @@ export default function AuditsPage() {
                     <span><b>{countedCount}</b> of {plural(items.length, 'product')} counted</span>
                     <span className={styles.track}><i style={{ width: `${progressPct}%` }} /></span>
                   </div>
-                  {capabilities.canManage && <button type="button" onClick={handleAbortAudit} className={styles.textButton} disabled={busy}>Abort audit</button>}
+                  {capabilities.canManage && <button type="button" onClick={() => setReasonAction({ title: 'Abort stock count?', description: 'Sales resume at this location when the count is aborted.', submit: handleAbortAudit })} className={styles.textButton} disabled={busy}>Abort audit</button>}
                   <button type="button" onClick={handleSubmitCounts} className={styles.primaryButton} disabled={busy || !canSubmit} title={!canSubmit ? 'Save every count and any required recount first' : undefined}>
                     <Icon name="check" size={16} /> Finish counting
                   </button>
@@ -714,10 +718,10 @@ export default function AuditsPage() {
                           ) : capabilities.canManage && session.status === 'SUBMITTED' && item.requiresRecount ? (
                             <div className={styles.finishActions}>
                               <span className={`${styles.badge} ${styles.badgeWarn}`}>Recount required before submission</span>
-                              <button type="button" onClick={() => void handleRequestRecount(item)} className={styles.textButton} disabled={busy}>Request another recount</button>
+                              <button type="button" onClick={() => setReasonAction({ title: `Request a recount for ${item.variant.product.name}?`, submit: (reason) => handleRequestRecount(item, reason) })} className={styles.textButton} disabled={busy}>Request another recount</button>
                             </div>
                           ) : capabilities.canManage && session.status === 'SUBMITTED' ? (
-                            <button type="button" onClick={() => void handleRequestRecount(item)} className={styles.textButton} disabled={busy}>Request recount</button>
+                            <button type="button" onClick={() => setReasonAction({ title: `Request a recount for ${item.variant.product.name}?`, submit: (reason) => handleRequestRecount(item, reason) })} className={styles.textButton} disabled={busy}>Request recount</button>
                           ) : (
                             <span className={`${styles.badge} ${diff === 0 ? styles.badgeGood : styles.badgeWarn}`}>{diff === 0 ? 'Matches' : diff < 0 ? `${Math.abs(diff)} missing` : `${diff} extra`}</span>
                           )}
@@ -735,7 +739,7 @@ export default function AuditsPage() {
                     <textarea rows={2} required placeholder="e.g. 2 packs were damaged and thrown away" value={approvalReason} onChange={(e) => setApprovalReason(e.target.value)} />
                   </label>
                   <div className={styles.finishActions}>
-                    <button type="button" onClick={handleAbortAudit} className={styles.textButton} disabled={busy}>Abort audit</button>
+                    <button type="button" onClick={() => setReasonAction({ title: 'Abort stock count?', description: 'Sales resume at this location when the count is aborted.', submit: handleAbortAudit })} className={styles.textButton} disabled={busy}>Abort audit</button>
                     <button type="submit" className={styles.successButton} disabled={busy}><Icon name="check" size={16} /> Approve &amp; update stock</button>
                   </div>
                 </form>
@@ -806,7 +810,9 @@ export default function AuditsPage() {
             </ul>
           </section>
 
-          {capabilities.canManage && <details className={`${styles.card} ${styles.settings}`}>
+        </aside>
+      </div>
+          {capabilities.canManage && <details id="count-settings" className={`${styles.card} ${styles.settings}`}>
             <summary>
               <span><Icon name="settings" size={16} /> Count settings</span>
               <Icon name="chevron" size={16} />
@@ -881,8 +887,8 @@ export default function AuditsPage() {
               </div>
             </div>
           </details>}
-        </aside>
-      </div>
+      {reasonAction && <ReasonDialog action={reasonAction} onClose={() => setReasonAction(null)} />}
+
     </div>
   );
 }

@@ -16,6 +16,8 @@ import { ALL_NAV_GROUPS, LOCATION_KEY } from './nav-data';
 import { WorkspaceTools } from './workspace-tools';
 import { Sidebar } from './sidebar';
 import { ThemeControl } from './theme-control';
+import { DeviceLock } from './device-lock';
+import { WorkspaceTour } from './workspace-tour';
 
 export interface AppFrameLayoutProps {
   children: React.ReactNode;
@@ -319,6 +321,8 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
 
   return (
     <div className={`app-frame${collapsed ? ' is-collapsed' : ''}${mobileNavOpen ? ' is-navigation-open' : ''}`}>
+      {session && <WorkspaceTour key={`tour:${session.user.id}:${userRole}`} userId={session.user.id} role={userRole} pathname={pathname} links={visibleGroups.flatMap((group) => group.links)} />}
+      {session && <DeviceLock key={session.user.id} userId={session.user.id} role={rawRole} onSignOut={handleSignOut} />}
       {mobileNavOpen && <button className="workspace-nav-backdrop" type="button" tabIndex={-1} aria-label="Close navigation" onClick={closeMobileNavigation} />}
       <Sidebar
         homeRoute={homeRoute}

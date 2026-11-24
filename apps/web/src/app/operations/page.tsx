@@ -1,5 +1,6 @@
 'use client';
 
+import { ReasonDialog, type ReasonAction } from '@/components/admin/reason-dialog';
 import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
 import {
@@ -186,6 +187,7 @@ export default function OperationsPage() {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null);
   const [notice, setNotice] = useState('');
 
   // Receive modal
@@ -471,17 +473,13 @@ export default function OperationsPage() {
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not approve this transfer.'); }
   }
 
-  async function rejectTransfer(t: StockTransfer) {
-    const reason = window.prompt(`Reason for rejecting ${t.transferCode}?`)?.trim();
-    if (!reason) return;
+  async function rejectTransfer(t: StockTransfer, reason: string) {
     setMenuFor(null);
     try { await mutate(`/transfers/${t.id}/reject`, 'POST', { reason }); setNotice(`Transfer ${t.transferCode} rejected.`); }
     catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reject this transfer.'); }
   }
 
-  async function cancelTransfer(t: StockTransfer) {
-    const reason = window.prompt(`Reason for cancelling ${t.transferCode}?`)?.trim();
-    if (!reason) return;
+  async function cancelTransfer(t: StockTransfer, reason: string) {
     setMenuFor(null);
     try { await mutate(`/transfers/${t.id}/cancel`, 'PATCH', { reason }); setNotice(`Transfer ${t.transferCode} cancelled; inventory adjustments were recorded by the server.`); }
     catch (error) { setNotice(error instanceof Error ? error.message : 'Could not cancel this transfer.'); }
@@ -502,9 +500,7 @@ export default function OperationsPage() {
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not approve replenishment.'); }
   }
 
-  async function rejectReplenishment(request: ReplenishmentRequest) {
-    const reason = window.prompt(`Reason for rejecting ${request.requestNumber}?`)?.trim();
-    if (!reason) return;
+  async function rejectReplenishment(request: ReplenishmentRequest, reason: string) {
     try {
       await mutate(`/transfers/replenishment/${request.id}/reject`, 'POST', { reason });
       setNotice(`Replenishment ${request.requestNumber} rejected.`);
@@ -781,10 +777,10 @@ export default function OperationsPage() {
                           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setExpanded(isOpen ? null : t.id); }}><Icon name="eye" size={15} /><span><b>{isOpen ? 'Hide details' : 'View details'}</b><small>Products, timeline and notes</small></span></button>
                           {t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
                           {t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => approveTransfer(t)}><Icon name="check" size={15} /><span><b>Approve</b><small>Approver cannot be the requester</small></span></button>}
-                          {t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => rejectTransfer(t)}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
+                          {t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${t.transferCode}?`, submit: (reason) => rejectTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
                           {['APPROVED', 'PARTIALLY_DISPATCHED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => dispatchTransfer(t)}><Icon name="send" size={15} /><span><b>Dispatch remaining stock</b><small>Server checks available inventory</small></span></button>}
                           {['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
-                          {!['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => cancelTransfer(t)}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
+                          {!['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
                           <button type="button" role="menuitem" onClick={() => copyTracking(t)}><Icon name="copy" size={15} /><span><b>Copy tracking number</b><small>{t.trackingNumber}</small></span></button>
                           <div className={styles.menuDivider} />
                           <button type="button" role="menuitem" onClick={() => exportCsv([t])}><Icon name="download" size={15} /><span><b>Download as CSV</b><small>This transfer only</small></span></button>
@@ -855,7 +851,7 @@ export default function OperationsPage() {
             <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
             <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
             <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
-            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => approveReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Approve</button><button type="button" className={styles.ghostButton} onClick={() => rejectReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Reject</button></span> : <span />}
+            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => approveReplenishment(request)} disabled={request.generatedByUserId === apiUserId}>Approve</button><button type="button" className={styles.ghostButton} onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) }); }} disabled={request.generatedByUserId === apiUserId}>Reject</button></span> : <span />}
           </li>)}</ul>
         )}
       </section>
@@ -1013,6 +1009,7 @@ export default function OperationsPage() {
           </div>
         </div>
       )}
+      {reasonAction && <ReasonDialog action={reasonAction} onClose={() => setReasonAction(null)} />}
     </div>
   );
 }

@@ -412,3 +412,12 @@ button.summaryCard { cursor: pointer; }
   .route { min-width: 0; }
   .rowActions { flex-wrap: wrap; }
 }
+
+
+@media (max-width: 600px) {
+  .row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'main status' 'route route' 'items items' 'actions actions'; }
+  .rowActions { justify-content: flex-start; }
+  .rowActions :is(.actionButton, .ghostButton, .moreButton) { min-height: 40px; }
+  .route > span { flex: 1; white-space: normal; overflow-wrap: anywhere; overflow: visible; }
+  .rowActions .menu { left: 0; right: auto; width: min(260px, calc(100vw - 48px)); }
+}

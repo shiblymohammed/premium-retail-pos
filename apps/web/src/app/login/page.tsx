@@ -47,11 +47,13 @@ function LoginForm() {
   const [rememberEmail, setRememberEmail] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
   useEffect(() => {
+    setReady(true);
     const existing = getStoredSession();
     if (existing?.accessToken && existing.user?.role) {
       router.replace(safeReturnPath(returnUrl, existing.user.role));
@@ -184,7 +186,7 @@ function LoginForm() {
             <h1 id="login-title">Welcome back</h1>
             <p className={styles.intro}>Sign in to your retail workspace.</p>
 
-            <form onSubmit={handleLogin} className={styles.form} noValidate>
+            <form method="post" onSubmit={handleLogin} className={styles.form} noValidate>
               {error && <div className={styles.alertError} role="alert" aria-live="assertive">{error}</div>}
               {notice && <div className={styles.alertSuccess} role="status" aria-live="polite">{notice}</div>}
 
@@ -192,7 +194,7 @@ function LoginForm() {
                 <label htmlFor="login-email">Email address</label>
                 <div className={`${styles.inputWrap} ${errors.email ? styles.inputInvalid : ''}`}>
                   <span className={styles.fieldIcon} aria-hidden="true"><Mail size={18} strokeWidth={1.8} aria-hidden="true" /></span>
-                  <input id="login-email" name="email" type="email" required maxLength={254} value={email} onChange={(event) => { setEmail(event.target.value); setError(''); setErrors((current) => ({ ...current, email: undefined })); }} onBlur={handleEmailBlur} placeholder="you@company.com" autoComplete="username" autoCapitalize="none" spellCheck={false} aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? 'login-email-error' : undefined} />
+                  <input id="login-email" disabled={!ready} name="email" type="email" required maxLength={254} value={email} onChange={(event) => { setEmail(event.target.value); setError(''); setErrors((current) => ({ ...current, email: undefined })); }} onBlur={handleEmailBlur} placeholder="you@company.com" autoComplete="username" autoCapitalize="none" spellCheck={false} aria-invalid={Boolean(errors.email)} aria-describedby={errors.email ? 'login-email-error' : undefined} />
                 </div>
                 {errors.email && <p className={styles.fieldError} id="login-email-error">{errors.email}</p>}
               </div>
@@ -201,7 +203,7 @@ function LoginForm() {
                 <label htmlFor="login-password">Password</label>
                 <div className={`${styles.inputWrap} ${errors.password ? styles.inputInvalid : ''}`}>
                   <span className={styles.fieldIcon} aria-hidden="true"><LockKeyhole size={18} strokeWidth={1.8} aria-hidden="true" /></span>
-                  <input id="login-password" name="password" type={showPassword ? 'text' : 'password'} required minLength={8} maxLength={72} value={password} onChange={(event) => { setPassword(event.target.value); setError(''); setErrors((current) => ({ ...current, password: undefined })); }} onBlur={handlePasswordBlur} placeholder="Enter your password" autoComplete="current-password" aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? 'login-password-error' : undefined} />
+                  <input id="login-password" disabled={!ready} name="password" type={showPassword ? 'text' : 'password'} required minLength={8} maxLength={72} value={password} onChange={(event) => { setPassword(event.target.value); setError(''); setErrors((current) => ({ ...current, password: undefined })); }} onBlur={handlePasswordBlur} placeholder="Enter your password" autoComplete="current-password" aria-invalid={Boolean(errors.password)} aria-describedby={errors.password ? 'login-password-error' : undefined} />
                   <button className={styles.passwordToggle} type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword}>
                     {showPassword ? <EyeOff size={18} strokeWidth={1.8} aria-hidden="true" /> : <Eye size={18} strokeWidth={1.8} aria-hidden="true" />}
                   </button>
@@ -209,7 +211,7 @@ function LoginForm() {
                 {errors.password && <p className={styles.fieldError} id="login-password-error">{errors.password}</p>}
               </div>
 
-              <button type="submit" disabled={busy} className={styles.submitBtn}>
+              <button type="submit" disabled={!ready || busy} className={styles.submitBtn}>
                 <span>{busy ? 'Signing in…' : 'Sign in'}</span>
                 {!busy && <span className={styles.submitArrow} aria-hidden="true"><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span>}
               </button>

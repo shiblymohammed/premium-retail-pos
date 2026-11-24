@@ -1,6 +1,8 @@
 'use client';
 
 import React, { FormEvent, useState } from 'react';
+import { getStoredSession } from '@/lib/auth';
+import { saveDevicePin } from '@/lib/device-lock';
 import { UserPreferences } from './types';
 import { ChoiceList, Icon, NumberField, ToggleRow } from './setting-controls';
 import styles from './settings.module.css';
@@ -71,7 +73,7 @@ export function getSettingGroups(role: string): SettingGroup[] {
     description: 'How you sign in and unlock this screen.',
     items: [
       { id: 'password', icon: 'key', title: 'Password', description: 'Change the password you use to sign in', summary: () => 'Change' },
-      { id: 'pin', icon: 'pin', title: 'Quick unlock PIN', description: 'A 4-digit PIN to get back in after the screen locks', summary: () => 'Set' },
+      { id: 'pin', icon: 'lock', title: 'Quick unlock PIN', description: 'A 4-digit PIN to get back in after the screen locks', summary: () => 'Set' },
     ],
   };
 
@@ -405,14 +407,26 @@ function PasswordPanel({ onSaved }: { onSaved: (msg: string) => void }) {
 
 // ---------- Quick unlock PIN ----------
 function PinPanel({ onSaved }: { onSaved: (msg: string) => void }) {
-  const [pin, setPin] = useState('1234');
+  const [pin, setPin] = useState('');
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!/^\d{4}$/.test(pin)) return setError('The PIN must be exactly 4 digits (0-9).');
+    const user = getStoredSession()?.user;
+    if (!user) return setError('Sign in again before saving a PIN.');
+    if (saving) return;
     setError('');
-    onSaved('Unlock PIN saved.');
+    setSaving(true);
+    try {
+      await saveDevicePin(user.id, pin);
+      onSaved('Device PIN saved. You can now lock the screen.');
+    } catch {
+      setError('Could not save the PIN on this device.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -420,15 +434,15 @@ function PinPanel({ onSaved }: { onSaved: (msg: string) => void }) {
       <label className={styles.field}>
         <span>4-digit PIN</span>
         <input
-          className={styles.pinInput} type="password" inputMode="numeric" maxLength={4} autoComplete="off"
-          value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+          className={styles.pinInput} type="password" inputMode="numeric" maxLength={4} autoComplete="new-password"
+          name="new-device-pin" value={pin} disabled={saving} onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
         />
         <small>Numbers only. Avoid easy ones like 0000 or your birthday.</small>
       </label>
       {error && <p className={styles.error}><Icon name="alert" size={15} /> {error}</p>}
       <div className={styles.infoBox}>
         <Icon name="info" size={16} />
-        <span>When the screen locks, type this PIN to carry on where you left off. You don&apos;t need to sign in again with your email and password.</span>
+        <span>When the screen locks, type this PIN to carry on where you left off. This PIN is saved for your account on this browser.</span>
       </div>
     </form>
   );

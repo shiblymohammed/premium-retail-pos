@@ -1,5 +1,9 @@
 'use client';
 
+import { Compass } from 'lucide-react';
+import { OPEN_WORKSPACE_TOUR } from '@/components/layout/workspace-tour';
+import { AdminModal } from '@/components/admin';
+import { DEVICE_LOCK_CHANGED, hasDevicePin, setDeviceLocked } from '@/lib/device-lock';
 import { Feedback } from '@/components/ui/feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -33,6 +37,9 @@ export default function SettingsPage() {
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [openId, setOpenId] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const [pinSet, setPinSet] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     const current = getStoredSession();
@@ -46,6 +53,18 @@ export default function SettingsPage() {
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (!session?.user.id) return;
+    const sync = () => setPinSet(hasDevicePin(session.user.id));
+    sync();
+    window.addEventListener(DEVICE_LOCK_CHANGED, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(DEVICE_LOCK_CHANGED, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!toast) return;
@@ -67,14 +86,17 @@ export default function SettingsPage() {
         // Storage full or blocked; the change still applies for this visit
       }
     }
+    window.dispatchEvent(new Event(DEVICE_LOCK_CHANGED));
     setToast(message);
   };
 
   const updatePref = <K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) => save({ ...prefs, [key]: value });
 
-  const resetDefaults = () => {
-    if (window.confirm('Put every setting on this page back to its default value?')) save(DEFAULT_PREFERENCES, 'Settings reset to defaults');
-  };
+  function lockNow() {
+    if (!session?.user.id || !pinSet) return;
+    try { setDeviceLocked(session.user.id, true); }
+    catch { setError('Could not lock the screen on this device.'); }
+  }
 
   const close = useCallback(() => setOpenId(null), []);
   const formDone = (msg: string) => { setOpenId(null); setToast(msg); };
@@ -90,6 +112,9 @@ export default function SettingsPage() {
           <h1>Settings</h1>
           <p>Choose an option to change it. Your changes are saved straight away.</p>
         </div>
+        <button type="button" className={styles.ghostButton} onClick={() => window.dispatchEvent(new Event(OPEN_WORKSPACE_TOUR))}>
+          <Compass size={17} aria-hidden="true" /> Take a tour
+        </button>
       </header>
 
       <div className={styles.layout}>
@@ -103,13 +128,16 @@ export default function SettingsPage() {
           <ul className={styles.metaList}>
             <li><i><Icon name="mail" size={16} /></i><div><small>Email</small><b title={email}>{email}</b></div></li>
             <li><i><Icon name="store" size={16} /></i><div><small>Assigned store</small><b>Use the location selector</b></div></li>
-            <li><i><Icon name="lock" size={16} /></i><div><small>Screen lock</small><b>{prefs.autoLockMinutes ? `After ${prefs.autoLockMinutes} minutes` : 'Never'}</b></div></li>
+            <li><i><Icon name="lock" size={16} /></i><div><small>Screen lock</small><b>{!pinSet ? 'Set a PIN to enable' : prefs.autoLockMinutes ? `After ${prefs.autoLockMinutes} minutes` : 'Never'}</b></div></li>
           </ul>
           <div className={styles.savedNote}>
             <Icon name="check" size={16} />
             <span>Settings are saved on this device for your role.</span>
           </div>
-          <button type="button" className={styles.ghostButton} onClick={resetDefaults}>
+          {pinSet && <button type="button" className={styles.primaryButton} onClick={lockNow}>
+            <Icon name="lock" size={16} /> Lock screen now
+          </button>}
+          <button type="button" className={styles.ghostButton} onClick={() => setResetOpen(true)}>
             <Icon name="reset" size={16} /> Reset to defaults
           </button>
         </aside>
@@ -130,7 +158,7 @@ export default function SettingsPage() {
                       <strong>{item.title}</strong>
                       <span>{item.description}</span>
                     </span>
-                    <span className={styles.rowValue}>{item.summary(prefs)}</span>
+                    <span className={styles.rowValue}>{item.id === 'pin' ? (pinSet ? 'Change' : 'Set') : item.id === 'autolock' && !pinSet ? 'PIN required' : item.summary(prefs)}</span>
                     <span className={styles.chev}><Icon name={item.href ? 'external' : 'chevron'} size={16} /></span>
                   </>
                 );
@@ -162,6 +190,11 @@ export default function SettingsPage() {
         </SettingsDrawer>
       )}
 
+      {resetOpen && <AdminModal isOpen title="Reset preferences?" onClose={() => setResetOpen(false)} footer={<>
+        <button type="button" className="admin-secondary" onClick={() => setResetOpen(false)}>Cancel</button>
+        <button type="button" className="admin-primary" onClick={() => { save(DEFAULT_PREFERENCES, 'Settings reset to defaults'); setResetOpen(false); }}>Reset preferences</button>
+      </>}><p>Restore the default settings for this role on this device. Your unlock PIN stays saved.</p></AdminModal>}
+      {error && <Feedback toast tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
       {toast && <Feedback toast tone="success">{toast}</Feedback>}
     </div>
   );

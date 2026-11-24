@@ -1,7 +1,7 @@
 'use client';
 
 import { X, Zap } from 'lucide-react';
-import React, { useEffect } from 'react';
+import React, { useEffect, useId } from 'react';
 
 export interface AdminModalProps {
   isOpen: boolean;
@@ -24,6 +24,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   children,
   footer,
 }) => {
+  const titleId = useId();
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -50,6 +51,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       onClick={onClose}
     >
       <div
+        role="dialog" aria-modal="true" aria-labelledby={titleId}
         style={{
           width: '100%',
           maxWidth,
@@ -92,7 +94,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {badgeIcon}
             </div>
             <div>
-              <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>{title}</h3>
+              <h3 id={titleId} style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>{title}</h3>
               {subtitle && (
                 <p style={{ margin: '2px 0 0', fontSize: '11.5px', color: 'var(--retail-muted)' }}>
                   {subtitle}
@@ -136,6 +138,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'flex-end',
+            flexWrap: 'wrap',
               gap: '10px',
             }}
           >

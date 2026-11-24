@@ -5,11 +5,8 @@ import {
   Check,
   ChevronDown,
   CreditCard,
-  Ellipsis,
   FileText,
-  Folder,
   FolderOpen,
-  Info,
   LayoutGrid,
   Link2,
   List,
@@ -22,7 +19,10 @@ import {
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
-import { QuickAccessCard } from '@/components/admin';
+import { AdminModal } from '@/components/admin';
+import { AdminActionMenu } from '@/components/admin/admin-action-menu';
+import { Feedback } from '@/components/ui/feedback';
+import Link from 'next/link';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -68,6 +68,7 @@ const roleLabels: Record<string, string> = {
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [directoryState, setDirectoryState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [availableLocations, setAvailableLocations] = useState<ManagedLocation[]>([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
@@ -107,7 +108,13 @@ export default function UserManagementPage() {
   // Google Drive Reference UI State
   const [selectedUserId, setSelectedUserId] = useState<string>('');
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
-  const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 760px)').matches) setViewMode('grid');
+  }, []);
+  const [permissionReview, setPermissionReview] = useState('');
+  const [formError, setFormError] = useState('');
+  const [deactivateUser, setDeactivateUser] = useState<ManagedUser | null>(null);
   const [openDropdown, setOpenDropdown] = useState<'ROLE' | 'LOCATION' | 'STATUS' | null>(null);
 
   useEffect(() => {
@@ -126,9 +133,6 @@ export default function UserManagementPage() {
       if (!target.closest('.custom-filter-dropdown-wrap')) {
         setOpenDropdown(null);
       }
-      if (!target.closest('.user-action-menu-wrap')) {
-        setActiveActionMenuId(null);
-      }
     };
     window.addEventListener('click', handleGlobalClick);
 
@@ -145,6 +149,7 @@ export default function UserManagementPage() {
     }
 
     if (!session?.accessToken) {
+      setDirectoryState('error');
       setNotice('Sign in as Super Admin to manage real user accounts.');
       return;
     }
@@ -175,9 +180,12 @@ export default function UserManagementPage() {
           joinedDate: user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
         })) : [];
         setUsers(mapped);
-        setNotice('');
+        setDirectoryState('ready');
       })
-      .catch((error: unknown) => setNotice(error instanceof Error ? error.message : 'Could not load users from the API.'));
+      .catch((error: unknown) => {
+        setDirectoryState('error');
+        setNotice(error instanceof Error ? error.message : 'Could not load users from the API.', 'error');
+      });
   }, []);
 
   const filteredUsers = useMemo(() => {
@@ -208,6 +216,8 @@ export default function UserManagementPage() {
   }, [users]);
 
   const openCreateModal = () => {
+    setFormError('');
+    setPermissionReview('');
     setEditingUser(null);
     setFormName('');
     setFormEmail('');
@@ -219,6 +229,8 @@ export default function UserManagementPage() {
   };
 
   const openEditModal = (u: ManagedUser) => {
+    setFormError('');
+    setPermissionReview('');
     setEditingUser(u);
     setFormName(u.name);
     setFormEmail(u.email);
@@ -237,24 +249,26 @@ export default function UserManagementPage() {
 
   const handleSaveUser = async (e: FormEvent) => {
     e.preventDefault();
+    if (savingUser) return;
     if (!formEmail.trim() || (formRole !== 'SUPER_ADMIN' && !formName.trim())) {
-      alert('Name and Email are required for employee accounts.');
+      setFormError('Name and Email are required for employee accounts.');
       return;
     }
     if (formRole !== 'SUPER_ADMIN' && formLocations.length === 0) {
-      alert('Choose at least one active location for this role.');
+      setFormError('Choose at least one active location for this role.');
       return;
     }
     if (!editingUser && formRole !== 'SUPER_ADMIN' && (!formName.trim() || !formEmployeeCode.trim())) {
-      alert('Enter the employee name and code for this account.');
+      setFormError('Enter the employee name and code for this account.');
       return;
     }
     const session = getStoredSession();
-    if (!session?.accessToken) { setNotice('Your session has expired. Sign in again.'); return; }
-    if (!editingUser && formPassword.length < 12) { alert('Set an initial password with at least 12 characters.'); return; }
+    if (!session?.accessToken) { setFormError('Your session has expired. Sign in again.'); return; }
+    if (!editingUser && formPassword.length < 12) { setFormError('Set an initial password with at least 12 characters.'); return; }
     const locationIds = formLocations.map((name) => availableLocations.find((location) => location.name === name)?.id).filter((id): id is string => Boolean(id));
     const nameParts = formName.trim().split(/\s+/);
     const createEmployeeProfile = !editingUser && formRole !== 'SUPER_ADMIN';
+    setFormError('');
     setSavingUser(true);
     try {
       const response = await fetch(`${API_BASE}/users${createEmployeeProfile ? '/with-employee' : editingUser ? `/${editingUser.id}` : ''}`, {
@@ -310,16 +324,18 @@ export default function UserManagementPage() {
       }
       if (createEmployeeProfile) mapped.employeeId = saved.employee?.id;
       setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
-      setNotice(`User account ${saved.email} ${editingUser ? 'updated' : 'created'} successfully.`);
+      if (!editingUser && formRole !== 'SUPER_ADMIN') setPermissionReview(saved.email);
+      setNotice(editingUser ? `Account updated for ${saved.email}.` : `Account created for ${saved.email}.`);
       setIsModalOpen(false);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'The user could not be saved.');
+      setFormError(error instanceof Error ? error.message : 'The user could not be saved.');
     } finally {
       setSavingUser(false);
     }
   };
 
   const handleToggleStatus = async (userId: string) => {
+    setPermissionReview('');
     const user = users.find((item) => item.id === userId);
     const session = getStoredSession();
     if (!user || !session?.accessToken) return;
@@ -330,7 +346,7 @@ export default function UserManagementPage() {
       if (!response.ok) throw new Error(payload.message || `Could not ${nextActive ? 'reactivate' : 'deactivate'} this account.`);
       setUsers((current) => current.map((item) => item.id === userId ? { ...item, isActive: nextActive } : item));
       setNotice(nextActive ? `User ${user.email} reactivated.` : `User ${user.email} deactivated. Existing refresh sessions were revoked.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not update this account status.'); }
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not update this account status.', 'error'); }
   };
 
   const getRoleBadgeStyle = (role: ManagedUser['role']) => {
@@ -338,7 +354,7 @@ export default function UserManagementPage() {
       case 'SUPER_ADMIN':
         return { background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe' };
       case 'ADMIN':
-        return { background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' };
+        return { background: 'var(--retail-accent-soft)', color: '#2563eb', border: '1px solid var(--retail-accent-line)' };
       case 'STORE_MANAGER':
         return { background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' };
       case 'CENTRAL_MANAGER':
@@ -349,11 +365,12 @@ export default function UserManagementPage() {
         return { background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a' };
       case 'STAFF':
       default:
-        return { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' };
+        return { background: 'var(--retail-raised)', color: 'var(--retail-muted)', border: '1px solid var(--retail-edge-strong)' };
     }
   };
 
   const copyUserQuickInfo = (u: ManagedUser) => {
+    setPermissionReview('');
     const info = `User: ${u.name} | Email: ${u.email} | Role: ${u.role} | Code: ${u.employeeCode} | Stores: ${u.assignedLocations.join(', ')}`;
     navigator.clipboard.writeText(info);
     setNotice(`Credentials and store access for ${u.email} copied to clipboard!`);
@@ -366,7 +383,7 @@ export default function UserManagementPage() {
         return {
           icon: <FileText size={13} aria-hidden="true" />,
           bg: '#e8f0fe',
-          color: '#1a62ea',
+          color: 'var(--retail-accent-strong)',
           border: '#d2e3fc',
         };
       case 'STORE_MANAGER':
@@ -402,8 +419,18 @@ export default function UserManagementPage() {
     }
   };
 
+  function userActions(user: ManagedUser) {
+    return <AdminActionMenu label={`Actions for ${user.name || user.email}`}>
+      <button type="button" onClick={() => openEditModal(user)}><Pencil size={15} aria-hidden="true" /> Edit account</button>
+      {user.isActive
+        ? <button type="button" className="admin-action-danger" onClick={() => setDeactivateUser(user)}><X size={15} aria-hidden="true" /> Deactivate account</button>
+        : <button type="button" onClick={() => void handleToggleStatus(user.id)}><Check size={15} aria-hidden="true" /> Reactivate account</button>}
+      <button type="button" onClick={() => copyUserQuickInfo(user)}><Link2 size={15} aria-hidden="true" /> Copy access details</button>
+    </AdminActionMenu>;
+  }
+
   return (
-    <div className="app-page" style={{ color: '#1e293b' }}>
+    <div className="app-page admin-workspace" style={{ color: 'var(--retail-ink)' }}>
       {notice && (
         <div
           style={{
@@ -442,206 +469,32 @@ export default function UserManagementPage() {
         </div>
       )}
 
-      {/* Header: User Directory with Blue Folder Badge + View Switchers */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            User Directory
-            <span
-              style={{
-                display: 'inline-grid',
-                placeItems: 'center',
-                width: '34px',
-                height: '34px',
-                borderRadius: '9px',
-                background: '#1a62ea',
-                color: '#ffffff',
-                fontSize: '18px',
-                boxShadow: '0 3px 8px rgba(26, 98, 234, 0.25)',
-              }}
-              title="Dual-Axis Directory"
-            >
-              <Folder size="1em" className="inline-icon" aria-hidden="true" />
-            </span>
-          </h1>
-        </div>
-
-        {/* Right side: View Mode Toggles, Info, and Provision User Button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              style={{
-                border: 'none',
-                background: viewMode === 'list' ? '#ffffff' : 'transparent',
-                color: viewMode === 'list' ? '#1a62ea' : '#64748b',
-                padding: '6px 10px',
-                borderRadius: '6px',
-                fontWeight: 700,
-                fontSize: '14px',
-                cursor: 'pointer',
-                boxShadow: viewMode === 'list' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-              }}
-              title="List View"
-            >
-              <List size="1em" className="inline-icon" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('grid')}
-              style={{
-                border: 'none',
-                background: viewMode === 'grid' ? '#ffffff' : 'transparent',
-                color: viewMode === 'grid' ? '#1a62ea' : '#64748b',
-                padding: '6px 10px',
-                borderRadius: '6px',
-                fontWeight: 700,
-                fontSize: '14px',
-                cursor: 'pointer',
-                boxShadow: viewMode === 'grid' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-              }}
-              title="Grid View"
-            >
-              <LayoutGrid size="1em" className="inline-icon" aria-hidden="true" />
-            </button>
+      {notice && <Feedback toast tone={notice.type} onDismiss={() => { setNotice(null); setPermissionReview(''); }}
+        action={permissionReview ? <Link href={`/admin/sales-permissions?q=${encodeURIComponent(permissionReview)}`}>Review permissions</Link> : undefined}>
+        {notice.message}{permissionReview && ' Would you like to review their permissions?'}
+      </Feedback>}
+      <header className="admin-page-header">
+        <div><h1>User Directory</h1><p>Manage accounts and their assigned locations.</p></div>
+        <div className="admin-heading-actions">
+          <div className="admin-view-switch" role="group" aria-label="Directory view">
+            <button type="button" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')}><List size={16} aria-hidden="true" /> List</button>
+            <button type="button" aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')}><LayoutGrid size={16} aria-hidden="true" /> Grid</button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => alert(`Total Accounts: ${kpis.total}\nActive Supervisors: ${kpis.managers}\nCashier Stations: ${kpis.cashiers}\nDepot Logistics: ${kpis.warehouse}`)}
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '8px',
-              border: '1px solid #e2e8f0',
-              background: '#ffffff',
-              color: '#64748b',
-              fontSize: '16px',
-              display: 'grid',
-              placeItems: 'center',
-              cursor: 'pointer',
-            }}
-            title="Directory Info"
-          >
-            <Info size="1em" className="inline-icon" aria-hidden="true" />
-          </button>
-
-          <button
-            type="button"
-            onClick={openCreateModal}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '10px 18px',
-              borderRadius: '8px',
-              background: '#1a62ea',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: 700,
-              fontSize: '13px',
-              cursor: 'pointer',
-              boxShadow: '0 2px 10px rgba(26, 98, 234, 0.28)',
-            }}
-          >
-            <span style={{ fontSize: '15px' }}><Plus size="1em" className="inline-icon" aria-hidden="true" /></span> Provision New User
-          </button>
+          <button type="button" className="admin-primary" disabled={directoryState !== 'ready'} onClick={openCreateModal}><Plus size={16} aria-hidden="true" /> Add user</button>
         </div>
-      </div>
-
-      {/* SECTION 1: QUICK ACCESS (Row of 4 Folder-Tabbed Cards matching the reference image) */}
-      <div style={{ marginBottom: '34px' }}>
-        <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: '0 0 14px' }}>
-          QUICK ACCESS
-        </h2>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
-          {/* Folder Card 1: Store Managers (Deep royal blue when active) */}
-          <QuickAccessCard
-            isActive={roleFilter === 'STORE_MANAGER'}
-            onClick={() => setRoleFilter(roleFilter === 'STORE_MANAGER' ? 'ALL' : 'STORE_MANAGER')}
-            title="Filter by Store Managers"
-            avatars={[
-              { text: 'AP', bg: '#059669' },
-              { text: 'RD', bg: '#0d9488' },
-              { text: 'SM', bg: '#2563eb' },
-            ]}
-            heading="Store Managers"
-            subheading={`${kpis.managers} Active Supervisors · Storefloor`}
-          />
-
-          {/* Folder Card 2: Cashiers & POS */}
-          <QuickAccessCard
-            isActive={roleFilter === 'CASHIER'}
-            onClick={() => setRoleFilter(roleFilter === 'CASHIER' ? 'ALL' : 'CASHIER')}
-            title="Filter by Cashiers"
-            avatars={[
-              { text: 'RM', bg: '#d97706' },
-              { text: 'NS', bg: '#f59e0b' },
-              { text: 'MD', bg: '#b45309' },
-            ]}
-            heading="Cashiers & POS"
-            subheading={`${kpis.cashiers} Checkout Terminals · 5% Disc Cap`}
-          />
-
-          {/* Folder Card 3: Warehouse & Depot */}
-          <QuickAccessCard
-            isActive={roleFilter === 'CENTRAL_MANAGER' || roleFilter === 'SUB_WAREHOUSE_MANAGER'}
-            onClick={() => setRoleFilter(roleFilter === 'CENTRAL_MANAGER' ? 'ALL' : 'CENTRAL_MANAGER')}
-            title="Filter by Warehouse Logistics"
-            avatars={[
-              { text: 'VS', bg: '#4f46e5' },
-              { text: 'RK', bg: '#6366f1' },
-            ]}
-            heading="Warehouse Logistics"
-            subheading={`${kpis.warehouse} Depot Managers · Stock Audits`}
-          />
-
-          {/* Summary Card 4: Executive Admins (Styled exactly like 4th card in reference image) */}
-          <div
-            className={`drive-folder-card${roleFilter === 'SUPER_ADMIN' || roleFilter === 'ADMIN' ? ' active-folder' : ''}`}
-            onClick={() => setRoleFilter(roleFilter === 'SUPER_ADMIN' ? 'ALL' : 'SUPER_ADMIN')}
-            title="Filter by Executive Admins"
-            style={{ borderLeft: '4px solid #1a62ea' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: '#1a62ea' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
-                <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>Executive Admins</strong>
-              </div>
-              <div
-                style={{
-                  width: '26px',
-                  height: '26px',
-                  borderRadius: '50%',
-                  background: '#1a62ea',
-                  color: '#fff',
-                  fontSize: '11px',
-                  fontWeight: 750,
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                SA
-              </div>
-            </div>
-            <div style={{ marginTop: '16px' }}>
-              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', textTransform: 'uppercase', display: 'block' }}>
-                GOVERNANCE
-              </small>
-              <span style={{ fontSize: '12px', fontWeight: 650, color: '#334155', display: 'block', marginTop: '2px' }}>
-                Enterprise RBAC & Security Invariants
-              </span>
-            </div>
-          </div>
-        </div>
+      </header>
+      <div className="admin-user-summary" aria-label="Account summary">
+        <span><b>{kpis.total}</b> total accounts</span>
+        <span><b>{kpis.active}</b> active</span>
+        <span><b>{kpis.managers}</b> store managers</span>
+        <span><b>{kpis.cashiers}</b> cashiers</span>
+        <span><b>{kpis.warehouse}</b> warehouse managers</span>
       </div>
 
       {/* SECTION 2: ALL USERS (Matching ALL FILES in the reference image) */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-          <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: 0 }}>
+          <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', margin: 0 }}>
             ALL USERS ({filteredUsers.length})
           </h2>
 
@@ -655,10 +508,10 @@ export default function UserManagementPage() {
               style={{
                 padding: '7px 14px',
                 borderRadius: '18px',
-                border: '1px solid #cbd5e1',
+                border: '1px solid var(--retail-edge-strong)',
                 fontSize: '12.5px',
                 outline: 'none',
-                background: '#f8fafc',
+                background: 'var(--retail-raised)',
                 minWidth: '220px',
               }}
             />
@@ -674,9 +527,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: roleFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                  background: roleFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                  color: roleFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                  border: roleFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid var(--retail-edge-strong)',
+                  background: roleFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                  color: roleFilter !== 'ALL' ? '#1d4ed8' : 'var(--retail-ink)',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -686,7 +539,7 @@ export default function UserManagementPage() {
               >
                 <span><UserRound size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <span>{roleLabels[roleFilter] || 'All Roles'}</span>
-                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <span style={{ fontSize: '9px', color: 'var(--retail-subtle)', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {openDropdown === 'ROLE' && (
@@ -696,15 +549,15 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '210px',
-                    background: '#ffffff',
+                    background: 'var(--retail-card)',
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid var(--retail-edge)',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
                   }}
                 >
-                  <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: 'var(--retail-subtle)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                     FILTER BY ROLE
                   </div>
                   {ROLE_OPTIONS.map((opt) => {
@@ -722,8 +575,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? '#eff6ff' : 'transparent',
-                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -733,14 +586,14 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
                         }}
                       >
                         <span>{opt.label}</span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: 'var(--retail-accent-strong)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -759,9 +612,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: locationFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                  background: locationFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                  color: locationFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                  border: locationFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid var(--retail-edge-strong)',
+                  background: locationFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                  color: locationFilter !== 'ALL' ? '#1d4ed8' : 'var(--retail-ink)',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -771,7 +624,7 @@ export default function UserManagementPage() {
               >
                 <span><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                 <span>{locationFilter === 'ALL' ? 'All Locations' : locationFilter}</span>
-                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <span style={{ fontSize: '9px', color: 'var(--retail-subtle)', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {openDropdown === 'LOCATION' && (
@@ -781,15 +634,15 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '230px',
-                    background: '#ffffff',
+                    background: 'var(--retail-card)',
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid var(--retail-edge)',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
                   }}
                 >
-                  <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: 'var(--retail-subtle)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                     FILTER BY STORE LOCATION
                   </div>
                   <button
@@ -803,8 +656,8 @@ export default function UserManagementPage() {
                       padding: '7px 10px',
                       borderRadius: '8px',
                       border: 'none',
-                      background: locationFilter === 'ALL' ? '#eff6ff' : 'transparent',
-                      color: locationFilter === 'ALL' ? '#1a62ea' : '#1e293b',
+                      background: locationFilter === 'ALL' ? 'var(--retail-accent-soft)' : 'transparent',
+                      color: locationFilter === 'ALL' ? 'var(--retail-accent)' : 'var(--retail-ink)',
                       fontSize: '12px',
                       fontWeight: locationFilter === 'ALL' ? 700 : 500,
                       textAlign: 'left',
@@ -814,14 +667,14 @@ export default function UserManagementPage() {
                       cursor: 'pointer',
                     }}
                     onMouseEnter={(e) => {
-                      if (locationFilter !== 'ALL') e.currentTarget.style.background = '#f8fafc';
+                      if (locationFilter !== 'ALL') e.currentTarget.style.background = 'var(--retail-raised)';
                     }}
                     onMouseLeave={(e) => {
                       if (locationFilter !== 'ALL') e.currentTarget.style.background = 'transparent';
                     }}
                   >
                     <span>All Store Locations</span>
-                    {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                    {locationFilter === 'ALL' && <span style={{ color: 'var(--retail-accent-strong)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                   </button>
                   {availableLocations.map((location) => {
                     const loc = location.name;
@@ -839,8 +692,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? '#eff6ff' : 'transparent',
-                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -850,17 +703,17 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
                         }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ color: '#1a62ea' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
+                          <span style={{ color: 'var(--retail-accent-strong)' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                           {loc}
                         </span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: 'var(--retail-accent-strong)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -879,9 +732,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: statusFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
-                  background: statusFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
-                  color: statusFilter !== 'ALL' ? '#1d4ed8' : '#334155',
+                  border: statusFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid var(--retail-edge-strong)',
+                  background: statusFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
+                  color: statusFilter !== 'ALL' ? '#1d4ed8' : 'var(--retail-ink)',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -889,9 +742,9 @@ export default function UserManagementPage() {
                   boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                 }}
               >
-                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : '#64748b' }}></span>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? 'var(--retail-subtle)' : 'var(--retail-muted)' }}></span>
                 <span>{statusFilter === 'ALL' ? 'All Statuses' : statusFilter === 'ACTIVE' ? 'Active Only' : 'Inactive Only'}</span>
-                <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <span style={{ fontSize: '9px', color: 'var(--retail-subtle)', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
 
               {openDropdown === 'STATUS' && (
@@ -901,21 +754,21 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '180px',
-                    background: '#ffffff',
+                    background: 'var(--retail-card)',
                     borderRadius: '12px',
-                    border: '1px solid #e2e8f0',
+                    border: '1px solid var(--retail-edge)',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
                   }}
                 >
-                  <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: 'var(--retail-subtle)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                     ACCOUNT STATUS
                   </div>
                   {[
-                    { value: 'ALL', label: 'All Statuses', dot: '#64748b' },
+                    { value: 'ALL', label: 'All Statuses', dot: 'var(--retail-muted)' },
                     { value: 'ACTIVE', label: 'Active Only', dot: '#16a34a' },
-                    { value: 'INACTIVE', label: 'Inactive Only', dot: '#94a3b8' },
+                    { value: 'INACTIVE', label: 'Inactive Only', dot: 'var(--retail-subtle)' },
                   ].map((st) => {
                     const isSelected = statusFilter === st.value;
                     return (
@@ -931,8 +784,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? '#eff6ff' : 'transparent',
-                          color: isSelected ? '#1a62ea' : '#1e293b',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
+                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -942,7 +795,7 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
@@ -952,7 +805,7 @@ export default function UserManagementPage() {
                           <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: st.dot }}></span>
                           {st.label}
                         </span>
-                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: 'var(--retail-accent-strong)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -972,7 +825,7 @@ export default function UserManagementPage() {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#1a62ea',
+                  color: 'var(--retail-accent-strong)',
                   fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -985,24 +838,39 @@ export default function UserManagementPage() {
           </div>
         </div>
 
-        {/* File Table / User Directory Table */}
+        {viewMode === 'grid' ? (
+          <div className="admin-user-grid" aria-label="User cards">
+            {filteredUsers.length === 0 && <p>{directoryState === 'loading' ? 'Loading accounts…' : directoryState === 'error' ? 'Could not load accounts.' : 'No accounts match your filters.'}</p>}
+            {filteredUsers.map((user) => <article className="admin-user-card" key={user.id}>
+              <header><div><h3>{user.name || user.email}</h3><p>{user.email}</p></div>{userActions(user)}</header>
+              <dl>
+                <div><dt>Role</dt><dd>{roleLabels[user.role]}</dd></div>
+                <div><dt>Status</dt><dd>{user.isActive ? 'Active' : 'Inactive'}</dd></div>
+                <div><dt>Locations</dt><dd>{user.assignedLocations.join(', ') || 'Unassigned'}</dd></div>
+                <div><dt>Joined</dt><dd>{user.joinedDate || '—'}</dd></div>
+                <div><dt>Discount limit</dt><dd>{user.discountLimitPercent}%</dd></div>
+                <div><dt>Overrides</dt><dd>{[user.canCancelSales && 'Voids', user.canProcessReturns && 'Returns', user.canCountStockAudits && 'Stock counts'].filter(Boolean).join(', ') || 'None'}</dd></div>
+              </dl>
+            </article>)}
+          </div>
+        ) : (
         <div
           style={{
-            background: '#ffffff',
-            border: '1px solid #eef2f6',
+            background: 'var(--retail-card)',
+            border: '1px solid var(--retail-edge)',
             borderRadius: '14px',
             overflow: 'hidden',
             boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
           }}
         >
-          <div style={{ overflowX: 'auto' }}>
+          <div className="admin-table-scroll" tabIndex={0} aria-label="User list">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr
                   style={{
-                    borderBottom: '1px solid #edf2f7',
-                    background: '#ffffff',
-                    color: '#64748b',
+                    borderBottom: '1px solid var(--retail-edge)',
+                    background: 'var(--retail-card)',
+                    color: 'var(--retail-muted)',
                     fontSize: '11px',
                     fontWeight: 750,
                     letterSpacing: '0.06em',
@@ -1018,9 +886,9 @@ export default function UserManagementPage() {
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
+                    <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}><FolderOpen size="1em" className="inline-icon" aria-hidden="true" /></div>
-                      <strong>No accounts matching the active filters</strong>
+                      <strong>{directoryState === 'loading' ? 'Loading accounts…' : directoryState === 'error' ? 'Could not load accounts.' : 'No accounts match your filters.'}</strong>
                       <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new user.</p>
                     </td>
                   </tr>
@@ -1036,7 +904,7 @@ export default function UserManagementPage() {
                         onClick={() => setSelectedUserId(u.id)}
                         style={{
                           borderBottom: '1px solid #f1f5f9',
-                          background: isSelected ? '#edf4fe' : '#ffffff',
+                          background: isSelected ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
                           cursor: 'pointer',
                           transition: 'background 0.12s ease',
                           opacity: u.isActive ? 1 : 0.65,
@@ -1045,7 +913,7 @@ export default function UserManagementPage() {
                           if (!isSelected) e.currentTarget.style.background = '#f8fafd';
                         }}
                         onMouseLeave={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = '#ffffff';
+                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-card)';
                         }}
                       >
                         {/* Column 1: NAME (Colored Role/Document Icon + User Name + Subtitle) */}
@@ -1068,17 +936,17 @@ export default function UserManagementPage() {
                               {badge.icon}
                             </div>
                             <div style={{ minWidth: 0 }}>
-                              <strong style={{ color: '#0f172a', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
+                              <strong style={{ color: 'var(--retail-ink)', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
                                 {u.name}
                               </strong>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
-                                <span style={{ color: '#64748b', fontSize: '11.5px' }}>{u.email}</span>
+                                <span style={{ color: 'var(--retail-muted)', fontSize: '11.5px' }}>{u.email}</span>
                                 <span
                                   style={{
                                     padding: '1px 5px',
                                     borderRadius: '4px',
-                                    background: '#f1f5f9',
-                                    color: '#475569',
+                                    background: 'var(--retail-raised)',
+                                    color: 'var(--retail-muted)',
                                     fontSize: '11px',
                                     fontFamily: 'monospace',
                                     fontWeight: 600,
@@ -1115,12 +983,12 @@ export default function UserManagementPage() {
                               <span
                                 style={{
                                   fontSize: '11.5px',
-                                  color: '#334155',
+                                  color: 'var(--retail-ink)',
                                   fontWeight: 600,
-                                  background: '#f8fafc',
+                                  background: 'var(--retail-raised)',
                                   padding: '2px 7px',
                                   borderRadius: '5px',
-                                  border: '1px solid #e2e8f0',
+                                  border: '1px solid var(--retail-edge)',
                                 }}
                               >
                                 {u.assignedLocations[0] || 'Unassigned'}
@@ -1131,7 +999,7 @@ export default function UserManagementPage() {
                         </td>
 
                         {/* Column 3: JOINED DATE */}
-                        <td style={{ padding: '13px 16px', color: '#64748b', fontSize: '12.5px', whiteSpace: 'nowrap' }}>
+                        <td style={{ padding: '13px 16px', color: 'var(--retail-muted)', fontSize: '12.5px', whiteSpace: 'nowrap' }}>
                           Joined {u.joinedDate}
                         </td>
 
@@ -1142,9 +1010,9 @@ export default function UserManagementPage() {
                               style={{
                                 padding: '3px 8px',
                                 borderRadius: '12px',
-                                background: u.discountLimitPercent > 0 ? '#eff6ff' : '#f1f5f9',
-                                color: u.discountLimitPercent > 0 ? '#1d4ed8' : '#475569',
-                                border: u.discountLimitPercent > 0 ? '1px solid #bfdbfe' : '1px solid #cbd5e1',
+                                background: u.discountLimitPercent > 0 ? 'var(--retail-accent-soft)' : 'var(--retail-raised)',
+                                color: u.discountLimitPercent > 0 ? '#1d4ed8' : 'var(--retail-muted)',
+                                border: u.discountLimitPercent > 0 ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
                                 fontSize: '11.5px',
                                 fontWeight: 700,
                               }}
@@ -1171,7 +1039,7 @@ export default function UserManagementPage() {
                             {u.isActive ? (
                               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#16a34a' }} title="Active Session"></span>
                             ) : (
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#94a3b8' }} title="Inactive"></span>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--retail-subtle)' }} title="Inactive"></span>
                             )}
                           </div>
                         </td>
@@ -1191,7 +1059,7 @@ export default function UserManagementPage() {
                                 borderRadius: '6px',
                                 border: 'none',
                                 background: 'transparent',
-                                color: '#64748b',
+                                color: 'var(--retail-muted)',
                                 fontSize: '15px',
                                 cursor: 'pointer',
                                 display: 'grid',
@@ -1202,98 +1070,7 @@ export default function UserManagementPage() {
                               <Link2 size="1em" className="inline-icon" aria-hidden="true" />
                             </button>
 
-                            <div className="user-action-menu-wrap" style={{ position: 'relative' }}>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveActionMenuId(activeActionMenuId === u.id ? null : u.id);
-                                }}
-                                style={{
-                                  width: '30px',
-                                  height: '30px',
-                                  borderRadius: '6px',
-                                  border: 'none',
-                                  background: 'transparent',
-                                  color: '#64748b',
-                                  fontSize: '18px',
-                                  fontWeight: 900,
-                                  cursor: 'pointer',
-                                  display: 'grid',
-                                  placeItems: 'center',
-                                }}
-                                title="More Actions"
-                              >
-                                <Ellipsis size="1em" className="inline-icon" aria-hidden="true" />
-                              </button>
-
-                              {/* Action Menu Popover */}
-                              {activeActionMenuId === u.id && (
-                                <div
-                                  onClick={(e) => e.stopPropagation()}
-                                  style={{
-                                    position: 'absolute',
-                                    right: 0,
-                                    top: '34px',
-                                    background: '#ffffff',
-                                    borderRadius: '10px',
-                                    border: '1px solid #e2e8f0',
-                                    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.12)',
-                                    zIndex: 50,
-                                    width: '180px',
-                                    padding: '6px',
-                                    textAlign: 'left',
-                                  }}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setActiveActionMenuId(null);
-                                      openEditModal(u);
-                                    }}
-                                    style={{
-                                      width: '100%',
-                                      padding: '8px 10px',
-                                      borderRadius: '6px',
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: '#1e293b',
-                                      fontSize: '12.5px',
-                                      fontWeight: 600,
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '8px',
-                                    }}
-                                  >
-                                    <span><Pencil size="1em" className="inline-icon" aria-hidden="true" /></span> Edit Account
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setActiveActionMenuId(null);
-                                      handleToggleStatus(u.id);
-                                    }}
-                                    style={{
-                                      width: '100%',
-                                      padding: '8px 10px',
-                                      borderRadius: '6px',
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: u.isActive ? '#dc2626' : '#16a34a',
-                                      fontSize: '12.5px',
-                                      fontWeight: 600,
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '8px',
-                                    }}
-                                  >
-                                    <span>{u.isActive ? <X size="1em" className="inline-icon" aria-hidden="true" /> : <Check size="1em" className="inline-icon" aria-hidden="true" />}</span> {u.isActive ? 'Deactivate' : 'Reactivate'}
-                                  </button>
-                                </div>
-                              )}
-                            </div>
+                            {userActions(u)}
                           </div>
                         </td>
                       </tr>
@@ -1304,7 +1081,16 @@ export default function UserManagementPage() {
             </table>
           </div>
         </div>
+        )}
+
       </div>
+
+      {deactivateUser && <AdminModal isOpen title="Deactivate account?" onClose={() => setDeactivateUser(null)} footer={<>
+        <button type="button" className="admin-secondary" onClick={() => setDeactivateUser(null)}>Cancel</button>
+        <button type="button" className="admin-primary" onClick={() => { void handleToggleStatus(deactivateUser.id); setDeactivateUser(null); }}>Deactivate account</button>
+      </>}>
+        <p>{deactivateUser.email} will lose access and existing sign-ins will be revoked.</p>
+      </AdminModal>}
 
       {/* CREATE / EDIT USER MODAL */}
       {isModalOpen && (
@@ -1321,8 +1107,9 @@ export default function UserManagementPage() {
           }}
         >
           <div
+            role="dialog" aria-modal="true" aria-labelledby="user-form-title"
             style={{
-              background: '#ffffff',
+              background: 'var(--retail-card)',
               borderRadius: '16px',
               maxWidth: '560px',
               width: '100%',
@@ -1334,77 +1121,79 @@ export default function UserManagementPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
-                  {editingUser ? 'Edit User Credentials & Access' : 'Provision New Enterprise Account'}
+                <h2 id="user-form-title" style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>
+                  {editingUser ? 'Edit account' : 'Add user'}
                 </h2>
-                <small style={{ color: '#64748b' }}>
-                  Enforces dual-axis physical store binding and RBAC controls.
+                <small style={{ color: 'var(--retail-muted)' }}>
+                  Choose a role and the locations this user can access.
                 </small>
               </div>
               <button
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsModalOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: 'var(--retail-muted)', cursor: 'pointer' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
             </div>
 
             <form onSubmit={handleSaveUser}>
+              {formError && <Feedback tone="error">{formError}</Feedback>}
               {formRole !== 'SUPER_ADMIN' && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+              <div className="admin-form-grid">
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label htmlFor="user-name" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Full Name *
                   </label>
-                  <input
+                  <input id="user-name"
                     type="text"
                     required
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="e.g. Ramesh Verma"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label htmlFor="user-code" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Employee Code *
                   </label>
-                  <input
+                  <input id="user-code"
                     type="text"
                     required
                     value={formEmployeeCode}
                     onChange={(e) => setFormEmployeeCode(e.target.value)}
                     placeholder="EMP-0845"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px' }}
                   />
                 </div>
               </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+              <div className="admin-form-grid">
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label htmlFor="user-email" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Email Address *
                   </label>
-                  <input
+                  <input id="user-email"
                     type="email"
                     required
                     value={formEmail}
+                    readOnly={Boolean(editingUser)}
                     onChange={(e) => setFormEmail(e.target.value)}
                     placeholder="r.verma@premiumretail.com"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label htmlFor="user-role" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Operational Role *
                   </label>
-                  <select
+                  <select id="user-role"
                     value={formRole}
                     onChange={(e) => setFormRole(e.target.value as any)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px', background: 'var(--retail-card)' }}
                   >
                     <option value="CASHIER">CASHIER (POS Lane)</option>
                     <option value="STAFF">STAFF (Floor Operations)</option>
@@ -1423,28 +1212,31 @@ export default function UserManagementPage() {
 
               {!editingUser && (
                 <div style={{ marginBottom: '14px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  <label htmlFor="user-password" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
                     Initial Password
                   </label>
-                  <input
+                  <input id="user-password"
                     type="password"
                     required
                     minLength={12}
                     placeholder="At least 12 characters"
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px' }}
                   />
                 </div>
               )}
 
               {/* Physical Location Binding */}
               {formRole !== 'SUPER_ADMIN' && (
-              <div style={{ marginBottom: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
-                  Authorized Physical Store Locations (Dual-Axis Invariant) *
+              <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--retail-raised)', borderRadius: '8px', border: '1px solid var(--retail-edge)' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '8px' }}>
+                  Assigned locations *
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                {availableLocations.length === 0 && <Feedback tone="info" action={<Link href="/admin/company">Manage locations</Link>}>
+                  Create or reactivate a location before adding a user with this role.
+                </Feedback>}
+                <div className="admin-form-grid">
                   {availableLocations.map((location) => {
                     const loc = location.name;
                     const checked = formLocations.includes(loc);
@@ -1456,7 +1248,7 @@ export default function UserManagementPage() {
                           alignItems: 'center',
                           gap: '8px',
                           fontSize: '12px',
-                          color: '#334155',
+                          color: 'var(--retail-ink)',
                           cursor: 'pointer',
                         }}
                       >
@@ -1480,9 +1272,9 @@ export default function UserManagementPage() {
                   style={{
                     padding: '9px 16px',
                     borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    background: '#ffffff',
-                    color: '#475569',
+                    border: '1px solid var(--retail-edge-strong)',
+                    background: 'var(--retail-card)',
+                    color: 'var(--retail-muted)',
                     fontSize: '13px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -1492,10 +1284,11 @@ export default function UserManagementPage() {
                 </button>
                 <button
                   type="submit"
+                  disabled={savingUser}
                   style={{
                     padding: '9px 20px',
                     borderRadius: '8px',
-                    background: '#155eef',
+                    background: 'var(--retail-accent)',
                     color: '#ffffff',
                     border: 'none',
                     fontSize: '13px',
@@ -1503,7 +1296,7 @@ export default function UserManagementPage() {
                     cursor: 'pointer',
                   }}
                 >
-                  {editingUser ? 'Save Changes' : 'Create User & Bind Stores'}
+                  {savingUser ? 'Saving…' : editingUser ? 'Save changes' : 'Create user'}
                 </button>
               </div>
             </form>
