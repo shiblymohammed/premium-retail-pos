@@ -112,7 +112,7 @@ export default function DashboardPage() {
     return <main className={styles.page}>
       <header className={styles.heading}><div><span className={styles.eyebrow}>YOUR WORKSPACE</span><h1>Welcome back</h1><p>Choose a task to continue your shift.</p></div></header>
       <section className={styles.quickLinks}>
-        {role === 'CASHIER' && <Link href="/" className={styles.quickCard}><strong>Open POS terminal</strong><span>Start a sale, scan products, and complete checkout.</span></Link>}
+        {role === 'CASHIER' && <Link href="/pos-terminal" className={styles.quickCard}><strong>Open POS terminal</strong><span>Start a sale, scan products, and complete checkout.</span></Link>}
         {['CASHIER', 'STAFF'].includes(role) && <Link href="/attendance" className={styles.quickCard}><strong>Staff attendance</strong><span>Clock in or out and review your recent records.</span></Link>}
         <Link href="/settings" className={styles.quickCard}><strong>My settings</strong><span>Review your account and sign-in options.</span></Link>
       </section>

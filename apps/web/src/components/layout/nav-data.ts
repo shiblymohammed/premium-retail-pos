@@ -18,7 +18,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Overview',
         href: '/dashboard',
         icon: 'dashboard',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'],
+        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'CASHIER', 'STAFF'],
       },
       {
         label: 'Reports',
@@ -33,7 +33,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
     links: [
       {
         label: 'Checkout',
-        href: '/',
+        href: '/pos-terminal',
         icon: 'pos',
         roles: ['CASHIER'],
       },

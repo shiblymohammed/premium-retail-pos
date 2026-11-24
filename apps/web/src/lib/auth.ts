@@ -180,22 +180,5 @@ export async function revokeSession(accessToken: string) {
 }
 
 export function getRoleHomeRoute(role?: string): string {
-  switch (role) {
-    case 'CASHIER':
-      return '/';
-    case 'STAFF':
-      return '/attendance';
-    case 'STORE_MANAGER':
-      return '/dashboard';
-    case 'CENTRAL_MANAGER':
-    case 'WAREHOUSE_MANAGER':
-    case 'SUB_WAREHOUSE_MANAGER':
-      return '/operations';
-    case 'ADMIN':
-      return '/admin/users';
-    case 'SUPER_ADMIN':
-      return '/dashboard';
-    default:
-      return '/dashboard';
-  }
+  return '/dashboard';
 }

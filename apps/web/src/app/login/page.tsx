@@ -175,7 +175,7 @@ function LoginForm() {
     <main className={styles.container}>
       <div className={styles.pageLayout}>
         <section className={styles.loginCard} aria-labelledby="login-title">
-          <a href="/" className={styles.brand} aria-label="Premium Retail home">
+          <a href="/login" className={styles.brand} aria-label="Premium Retail sign in">
             <span className={styles.brandBadge}><Store size={22} strokeWidth={1.8} aria-hidden="true" /></span>
             <strong>Premium Retail</strong>
           </a>

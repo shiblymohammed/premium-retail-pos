@@ -93,6 +93,7 @@ export default function CompanySettingsPage() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [openDropdown, setOpenDropdown] = useState<'TYPE' | 'STATUS' | null>(null);
   const [activeActionMenuId, setActiveActionMenuId] = useState<string | null>(null);
+  const [actionMenuPosition, setActionMenuPosition] = useState<{ top: number; right: number } | null>(null);
 
   // Selected Node Form State
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) || nodes[0];
@@ -187,6 +188,20 @@ export default function CompanySettingsPage() {
     window.addEventListener('click', handleGlobalClick);
     return () => window.removeEventListener('click', handleGlobalClick);
   }, []);
+
+  useEffect(() => {
+    if (!activeActionMenuId) return;
+    const closeMenu = () => {
+      setActiveActionMenuId(null);
+      setActionMenuPosition(null);
+    };
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    return () => {
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+    };
+  }, [activeActionMenuId]);
 
   const filteredNodes = useMemo(() => {
     return nodes.filter((n) => {
@@ -859,7 +874,7 @@ export default function CompanySettingsPage() {
             }}
           >
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+              <table style={{ width: '100%', minWidth: '960px', tableLayout: 'fixed', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr
                     style={{
@@ -1079,7 +1094,18 @@ export default function CompanySettingsPage() {
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setActiveActionMenuId(activeActionMenuId === n.id ? null : n.id);
+                                    if (activeActionMenuId === n.id) {
+                                      setActiveActionMenuId(null);
+                                      setActionMenuPosition(null);
+                                      return;
+                                    }
+                                    const buttonRect = e.currentTarget.getBoundingClientRect();
+                                    const menuHeight = 82;
+                                    setActionMenuPosition({
+                                      top: Math.max(8, Math.min(buttonRect.bottom + 4, window.innerHeight - menuHeight - 8)),
+                                      right: Math.max(8, window.innerWidth - buttonRect.right),
+                                    });
+                                    setActiveActionMenuId(n.id);
                                   }}
                                   style={{
                                     width: '30px',
@@ -1103,15 +1129,15 @@ export default function CompanySettingsPage() {
                                   <div
                                     onClick={(e) => e.stopPropagation()}
                                     style={{
-                                      position: 'absolute',
-                                      right: 0,
-                                      top: '34px',
+                                      position: 'fixed',
+                                      right: actionMenuPosition?.right ?? 8,
+                                      top: actionMenuPosition?.top ?? 8,
                                       background: '#ffffff',
                                       borderRadius: '10px',
                                       border: '1px solid #e2e8f0',
                                       boxShadow: '0 10px 25px rgba(0, 0, 0, 0.12)',
-                                      zIndex: 70,
-                                      width: '180px',
+                                      zIndex: 1000,
+                                      width: 'min(200px, calc(100vw - 16px))',
                                       padding: '6px',
                                       textAlign: 'left',
                                     }}
