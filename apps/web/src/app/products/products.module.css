@@ -603,3 +603,6 @@ button.chip:hover { filter: brightness(0.95); }
   .pageNumbers { flex-wrap: wrap; justify-content: center; }
   .rowsScroller:focus-visible { outline-offset: -3px; }
 }
+
+.productImage { display: block; object-fit: cover; background: var(--retail-edge); }
+.imagePreview { display: block; width: 88px; height: 88px; margin-top: 10px; border: 1px solid var(--retail-edge-strong); border-radius: 12px; object-fit: cover; background: var(--retail-card); }

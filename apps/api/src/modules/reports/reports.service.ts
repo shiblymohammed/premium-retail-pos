@@ -13,35 +13,64 @@ export class ReportsService {
 
   async salesSummary(query: ReportQuery, actor: RequestUser) {
     const scope = await this.resolveScope(query, actor);
-    const rows = await this.prisma.invoice.findMany({
-      where: { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } },
-      select: { id: true, invoiceNumber: true, locationId: true, status: true, netTotal: true, createdAt: true, cancelledAt: true },
-      orderBy: { createdAt: 'desc' },
-      take: 10000,
-    });
+    const where = { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } };
+    const [invoiceCount, invoiceRows, dailyRows] = await Promise.all([
+      this.prisma.invoice.count({ where }),
+      this.prisma.invoice.findMany({
+        where,
+        select: { id: true, invoiceNumber: true, locationId: true, status: true, netTotal: true, createdAt: true, cancelledAt: true },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 500,
+      }),
+      this.prisma.$queryRaw<Array<{ locationId: string; date: string; invoices: number; cancelled: number; netSales: string }>>(Prisma.sql`
+        WITH refunded AS (
+          SELECT r."invoice_id" AS "invoiceId", SUM(r."amount") AS "amount"
+          FROM "invoice_refunds" r
+          GROUP BY r."invoice_id"
+        )
+        SELECT i."location_id" AS "locationId",
+          (i."created_at" AT TIME ZONE c."timezone")::date::text AS "date",
+          COUNT(*) FILTER (WHERE i."status" = 'FINALIZED')::integer AS "invoices",
+          COUNT(*) FILTER (WHERE i."status" = 'CANCELLED')::integer AS "cancelled",
+          COALESCE(SUM(i."net_total" - COALESCE(refunded."amount", 0)), 0)::text AS "netSales"
+        FROM "invoices" i
+        JOIN "locations" l ON l."id" = i."location_id"
+        JOIN "companies" c ON c."id" = l."company_id"
+        LEFT JOIN refunded ON refunded."invoiceId" = i."id"
+        WHERE i."location_id" IN (${Prisma.join(scope.locationIds)})
+          AND i."created_at" >= ${scope.from}
+          AND i."created_at" < ${scope.to}
+        GROUP BY i."location_id", (i."created_at" AT TIME ZONE c."timezone")::date
+        ORDER BY (i."created_at" AT TIME ZONE c."timezone")::date ASC
+      `),
+    ]);
     const locations = await this.prisma.location.findMany({ where: { id: { in: scope.locationIds } }, select: { id: true, name: true, company: { select: { timezone: true } } } });
     const nameById = new Map(locations.map((location) => [location.id, location.name]));
-    const timezoneById = new Map(locations.map((location) => [location.id, location.company.timezone]));
-    const days = new Map<string, { date: string; invoices: number; netSales: number; cancelled: number }>();
-    const byLocation = new Map<string, { invoices: number; netSales: number; cancelled: number }>();
-    for (const invoice of rows) {
-      const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: timezoneById.get(invoice.locationId) ?? 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(invoice.createdAt);
-      const day = days.get(dayKey) ?? { date: dayKey, invoices: 0, netSales: 0, cancelled: 0 };
-      const location = byLocation.get(invoice.locationId) ?? { invoices: 0, netSales: 0, cancelled: 0 };
-      if (invoice.status === 'FINALIZED') {
-        day.invoices += 1; location.invoices += 1;
-        day.netSales += Number(invoice.netTotal); location.netSales += Number(invoice.netTotal);
-      } else { day.cancelled += 1; location.cancelled += 1; }
-      days.set(dayKey, day); byLocation.set(invoice.locationId, location);
+    const byLocation = new Map<string, { invoices: number; netSales: Prisma.Decimal; cancelled: number }>();
+    const days = new Map<string, { date: string; invoices: number; netSales: Prisma.Decimal; cancelled: number }>();
+    for (const row of dailyRows) {
+      const day = days.get(row.date) ?? { date: row.date, invoices: 0, netSales: new Prisma.Decimal(0), cancelled: 0 };
+      day.invoices += row.invoices;
+      day.cancelled += row.cancelled;
+      day.netSales = day.netSales.add(row.netSales);
+      days.set(row.date, day);
+
+      const location = byLocation.get(row.locationId) ?? { invoices: 0, netSales: new Prisma.Decimal(0), cancelled: 0 };
+      location.invoices += row.invoices;
+      location.cancelled += row.cancelled;
+      location.netSales = location.netSales.add(row.netSales);
+      byLocation.set(row.locationId, location);
     }
-    const total = [...byLocation.values()].reduce((sum, item) => sum + item.netSales, 0);
+    const total = [...byLocation.values()].reduce((sum, item) => sum.add(item.netSales), new Prisma.Decimal(0));
+    const completedInvoices = [...byLocation.values()].reduce((sum, item) => sum + item.invoices, 0);
+    const cancelledInvoices = [...byLocation.values()].reduce((sum, item) => sum + item.cancelled, 0);
     return {
       period: { from: scope.from.toISOString(), to: scope.to.toISOString() },
-      totals: { netSales: this.money(total), completedInvoices: rows.filter((r) => r.status === 'FINALIZED').length, cancelledInvoices: rows.filter((r) => r.status === 'CANCELLED').length },
-      locations: [...byLocation.entries()].map(([locationId, value]) => ({ locationId, locationName: nameById.get(locationId) ?? 'Location', ...value, netSales: this.money(value.netSales) })).sort((a, b) => Number(b.netSales) - Number(a.netSales)),
-      daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)).map((item) => ({ ...item, netSales: this.money(item.netSales) })),
-      invoices: rows.slice(0, 500).map((invoice) => ({ ...invoice, locationName: nameById.get(invoice.locationId) ?? 'Location', netTotal: this.money(Number(invoice.netTotal)) })),
-      truncated: rows.length === 10000,
+      totals: { netSales: total.toFixed(2), completedInvoices, cancelledInvoices },
+      locations: [...byLocation.entries()].map(([locationId, value]) => ({ locationId, locationName: nameById.get(locationId) ?? 'Location', invoices: value.invoices, cancelled: value.cancelled, netSales: value.netSales.toFixed(2) })).sort((a, b) => Number(b.netSales) - Number(a.netSales)),
+      daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)).map((item) => ({ ...item, netSales: item.netSales.toFixed(2) })),
+      invoices: invoiceRows.map((invoice) => ({ ...invoice, locationName: nameById.get(invoice.locationId) ?? 'Location', netTotal: invoice.netTotal.toFixed(2) })),
+      truncated: invoiceCount > invoiceRows.length,
     };
   }
 

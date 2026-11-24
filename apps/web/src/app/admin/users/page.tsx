@@ -1,6 +1,5 @@
 'use client';
 
-import { Feedback } from '@/components/ui/feedback';
 import {
   ChartNoAxesColumn,
   Check,
@@ -29,6 +28,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/
 
 export interface ManagedUser {
   id: string;
+  employeeId?: string;
   name: string;
   email: string;
   employeeCode: string;
@@ -73,7 +73,20 @@ export default function UserManagementPage() {
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [locationFilter, setLocationFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [notice, setNotice] = useState('');
+  const [notice, setNoticeState] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const setNotice = (msg: string | { message: string; type: 'success' | 'error' } | null, explicitType?: 'success' | 'error') => {
+    if (!msg) {
+      setNoticeState(null);
+      return;
+    }
+    if (typeof msg === 'object') {
+      setNoticeState(msg);
+      return;
+    }
+    const isError = explicitType === 'error' || (explicitType === undefined && /error|fail|could not|cannot|invalid|required|expired|must|again|not available/i.test(msg));
+    setNoticeState({ message: msg, type: isError ? 'error' : 'success' });
+  };
   const [savingUser, setSavingUser] = useState(false);
   // Fail closed while the signed-in role is being hydrated; never briefly
   // render Super Admin-only role options for another administrator.
@@ -148,6 +161,7 @@ export default function UserManagementPage() {
         const locationNameById = new Map(locationRecords.map((location) => [location.id, location.name]));
         const mapped: ManagedUser[] = Array.isArray(userPayload.data) ? userPayload.data.map((user: any) => ({
           id: user.id,
+          employeeId: user.employee?.id,
           name: user.employee ? `${user.employee.firstName} ${user.employee.lastName}` : user.email.split('@')[0],
           email: user.email,
           employeeCode: user.employee?.employeeCode || '',
@@ -239,21 +253,31 @@ export default function UserManagementPage() {
     if (!session?.accessToken) { setNotice('Your session has expired. Sign in again.'); return; }
     if (!editingUser && formPassword.length < 12) { alert('Set an initial password with at least 12 characters.'); return; }
     const locationIds = formLocations.map((name) => availableLocations.find((location) => location.name === name)?.id).filter((id): id is string => Boolean(id));
+    const nameParts = formName.trim().split(/\s+/);
+    const createEmployeeProfile = !editingUser && formRole !== 'SUPER_ADMIN';
     setSavingUser(true);
     try {
-      const response = await fetch(`${API_BASE}/users${editingUser ? `/${editingUser.id}` : ''}`, {
+      const response = await fetch(`${API_BASE}/users${createEmployeeProfile ? '/with-employee' : editingUser ? `/${editingUser.id}` : ''}`, {
         method: editingUser ? 'PATCH' : 'POST',
         headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
         cache: 'no-store',
         body: JSON.stringify(editingUser
           ? { role: formRole, locationIds }
-          : { email: formEmail.trim(), password: formPassword, role: formRole, locationIds }),
+          : createEmployeeProfile
+            ? {
+                email: formEmail.trim(), password: formPassword, role: formRole, locationIds,
+                employeeCode: formEmployeeCode.trim(), firstName: nameParts[0],
+                lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0],
+                hireDate: new Date().toISOString().slice(0, 10),
+              }
+            : { email: formEmail.trim(), password: formPassword, role: formRole, locationIds }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'The server could not save this user.');
       const saved = payload.data;
       const mapped: ManagedUser = {
         id: saved.id,
+        employeeId: editingUser?.employeeId,
         name: formName.trim() || saved.email.split('@')[0],
         email: saved.email,
         employeeCode: formEmployeeCode.trim(),
@@ -266,23 +290,28 @@ export default function UserManagementPage() {
         isActive: saved.isActive !== false,
         joinedDate: saved.createdAt ? new Date(saved.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
       };
-      setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
-      setNotice(`User account ${saved.email} ${editingUser ? 'updated' : 'created'} successfully.`);
-      setIsModalOpen(false);
-      if (!editingUser && formRole !== 'SUPER_ADMIN') {
-        const nameParts = formName.trim().split(/\s+/);
-        const employeeResponse = await fetch(`${API_BASE}/employees`, {
-          method: 'POST',
+      if (editingUser && formRole !== 'SUPER_ADMIN') {
+        const employeeResponse = await fetch(`${API_BASE}/employees${editingUser?.employeeId ? `/${editingUser.employeeId}` : ''}`, {
+          method: editingUser?.employeeId ? 'PATCH' : 'POST',
           headers: { Authorization: `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
           cache: 'no-store',
-          body: JSON.stringify({ userId: saved.id, employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0], hireDate: new Date().toISOString().slice(0, 10) }),
+          body: JSON.stringify(editingUser?.employeeId
+            ? { employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0] }
+            : { userId: saved.id, employeeCode: formEmployeeCode.trim(), firstName: nameParts[0], lastName: nameParts.slice(1).join(' ') || nameParts[0], locationId: locationIds[0], hireDate: new Date().toISOString().slice(0, 10) }),
         });
         const employeePayload = await employeeResponse.json().catch(() => ({}));
         if (!employeeResponse.ok) {
-          setNotice(`Account ${saved.email} was created, but the employee profile failed: ${employeePayload.message || 'create it from Employee Management.'}`);
+          setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
+          setIsModalOpen(false);
+          setNotice(`User account ${saved.email} was saved, but employee details were not: ${employeePayload.message || 'the employee profile could not be saved.'}`, 'error');
           return;
         }
+        mapped.employeeId = (employeePayload.data ?? employeePayload).id || editingUser.employeeId;
       }
+      if (createEmployeeProfile) mapped.employeeId = saved.employee?.id;
+      setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
+      setNotice(`User account ${saved.email} ${editingUser ? 'updated' : 'created'} successfully.`);
+      setIsModalOpen(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'The user could not be saved.');
     } finally {
@@ -294,33 +323,33 @@ export default function UserManagementPage() {
     const user = users.find((item) => item.id === userId);
     const session = getStoredSession();
     if (!user || !session?.accessToken) return;
-    if (!user.isActive) { setNotice('Reactivation is not currently available from this screen.'); return; }
     try {
-      const response = await fetch(`${API_BASE}/users/${userId}/deactivate`, { method: 'PATCH', headers: { Authorization: `Bearer ${session.accessToken}` }, cache: 'no-store' });
+      const nextActive = !user.isActive;
+      const response = await fetch(`${API_BASE}/users/${userId}/${nextActive ? 'reactivate' : 'deactivate'}`, { method: 'PATCH', headers: { Authorization: `Bearer ${session.accessToken}` }, cache: 'no-store' });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || 'Could not deactivate this account.');
-      setUsers((current) => current.map((item) => item.id === userId ? { ...item, isActive: false } : item));
-      setNotice(`User ${user.email} deactivated. Existing refresh sessions were revoked.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not deactivate this account.'); }
+      if (!response.ok) throw new Error(payload.message || `Could not ${nextActive ? 'reactivate' : 'deactivate'} this account.`);
+      setUsers((current) => current.map((item) => item.id === userId ? { ...item, isActive: nextActive } : item));
+      setNotice(nextActive ? `User ${user.email} reactivated.` : `User ${user.email} deactivated. Existing refresh sessions were revoked.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not update this account status.'); }
   };
 
   const getRoleBadgeStyle = (role: ManagedUser['role']) => {
     switch (role) {
       case 'SUPER_ADMIN':
-        return { background: 'light-dark(#f5f3ff, #201c32)', color: 'light-dark(#7c3aed, #c2a5f3)', border: '1px solid light-dark(#ddd6fe, #332b56)' };
+        return { background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe' };
       case 'ADMIN':
-        return { background: 'light-dark(#eff6ff, #1d2733)', color: 'var(--retail-accent)', border: '1px solid light-dark(#bfdbfe, #2e425b)' };
+        return { background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' };
       case 'STORE_MANAGER':
-        return { background: 'light-dark(#ecfdf5, #1e352a)', color: 'light-dark(#059669, #b5f5e1)', border: '1px solid light-dark(#a7f3d0, #31624b)' };
+        return { background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' };
       case 'CENTRAL_MANAGER':
-        return { background: 'light-dark(#eef2ff, #1d2233)', color: '#4f46e5', border: '1px solid light-dark(#c7d2fe, #2d3659)' };
+        return { background: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' };
       case 'SUB_WAREHOUSE_MANAGER':
-        return { background: 'light-dark(#f0fdfa, #1d332e)', color: 'light-dark(#0d9488, #b4f5f0)', border: '1px solid light-dark(#99f6e4, #32645a)' };
+        return { background: '#f0fdfa', color: '#0d9488', border: '1px solid #99f6e4' };
       case 'CASHIER':
-        return { background: 'light-dark(#fffbeb, #34301d)', color: 'light-dark(#d97706, #f4d3ad)', border: '1px solid light-dark(#fde68a, #665b33)' };
+        return { background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a' };
       case 'STAFF':
       default:
-        return { background: 'var(--retail-edge)', color: 'var(--retail-muted)', border: '1px solid light-dark(#cbd5e1, #34455a)' };
+        return { background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' };
     }
   };
 
@@ -336,51 +365,87 @@ export default function UserManagementPage() {
       case 'ADMIN':
         return {
           icon: <FileText size={13} aria-hidden="true" />,
-          bg: 'var(--retail-accent-soft)',
-          color: 'var(--retail-accent)',
-          border: 'var(--retail-accent-line)',
+          bg: '#e8f0fe',
+          color: '#1a62ea',
+          border: '#d2e3fc',
         };
       case 'STORE_MANAGER':
         return {
           icon: <ChartNoAxesColumn size={13} aria-hidden="true" />,
           bg: '#e6f4ea',
-          color: 'light-dark(#137333, #baf4cd)',
-          border: 'light-dark(#ceead6, #2e5c3b)',
+          color: '#137333',
+          border: '#ceead6',
         };
       case 'CASHIER':
         return {
           icon: <CreditCard size={13} aria-hidden="true" />,
           bg: '#fef7e0',
-          color: 'light-dark(#b06000, #f5d7b3)',
-          border: 'light-dark(#feefc3, #5a4f2d)',
+          color: '#b06000',
+          border: '#feefc3',
         };
       case 'CENTRAL_MANAGER':
       case 'SUB_WAREHOUSE_MANAGER':
         return {
           icon: <Package size={13} aria-hidden="true" />,
           bg: '#f3e8fd',
-          color: 'light-dark(#8430ce, #d1b1ed)',
-          border: 'light-dark(#e9d2fd, #432c57)',
+          color: '#8430ce',
+          border: '#e9d2fd',
         };
       case 'STAFF':
       default:
         return {
           icon: <UserRound size={13} aria-hidden="true" />,
-          bg: 'var(--retail-edge)',
-          color: 'light-dark(#5f6368, #d0d2d4)',
-          border: 'var(--retail-edge-strong)',
+          bg: '#f1f3f4',
+          color: '#5f6368',
+          border: '#dadce0',
         };
     }
   };
 
   return (
-    <div className="app-page admin-workspace">
-      {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
+    <div className="app-page" style={{ color: '#1e293b' }}>
+      {notice && (
+        <div
+          style={{
+            padding: '12px 18px',
+            borderRadius: '10px',
+            background: notice.type === 'error' ? '#fef2f2' : '#ecfdf5',
+            border: `1px solid ${notice.type === 'error' ? '#fecaca' : '#a7f3d0'}`,
+            color: notice.type === 'error' ? '#991b1b' : '#065f46',
+            fontSize: '13px',
+            marginBottom: '20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: notice.type === 'error' ? '0 2px 8px rgba(239, 68, 68, 0.1)' : '0 2px 8px rgba(16, 185, 129, 0.1)',
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            {notice.type === 'error' ? <X size="1em" className="inline-icon" aria-hidden="true" /> : <Check size="1em" className="inline-icon" aria-hidden="true" />}{' '}
+            {notice.message}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss notice"
+            onClick={() => setNotice('')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: notice.type === 'error' ? '#991b1b' : '#065f46',
+              cursor: 'pointer',
+              fontWeight: 800,
+              fontSize: '14px',
+            }}
+          >
+            <X size="1em" className="inline-icon" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {/* Header: User Directory with Blue Folder Badge + View Switchers */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '28px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
             User Directory
             <span
               style={{
@@ -389,7 +454,7 @@ export default function UserManagementPage() {
                 width: '34px',
                 height: '34px',
                 borderRadius: '9px',
-                background: 'var(--retail-accent)',
+                background: '#1a62ea',
                 color: '#ffffff',
                 fontSize: '18px',
                 boxShadow: '0 3px 8px rgba(26, 98, 234, 0.25)',
@@ -403,14 +468,14 @@ export default function UserManagementPage() {
 
         {/* Right side: View Mode Toggles, Info, and Provision User Button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ display: 'inline-flex', background: 'var(--retail-edge)', padding: '3px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
+          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
             <button
               type="button"
               onClick={() => setViewMode('list')}
               style={{
                 border: 'none',
-                background: viewMode === 'list' ? 'var(--retail-card)' : 'transparent',
-                color: viewMode === 'list' ? 'var(--retail-accent)' : 'var(--retail-muted)',
+                background: viewMode === 'list' ? '#ffffff' : 'transparent',
+                color: viewMode === 'list' ? '#1a62ea' : '#64748b',
                 padding: '6px 10px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -427,8 +492,8 @@ export default function UserManagementPage() {
               onClick={() => setViewMode('grid')}
               style={{
                 border: 'none',
-                background: viewMode === 'grid' ? 'var(--retail-card)' : 'transparent',
-                color: viewMode === 'grid' ? 'var(--retail-accent)' : 'var(--retail-muted)',
+                background: viewMode === 'grid' ? '#ffffff' : 'transparent',
+                color: viewMode === 'grid' ? '#1a62ea' : '#64748b',
                 padding: '6px 10px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -449,9 +514,9 @@ export default function UserManagementPage() {
               width: '36px',
               height: '36px',
               borderRadius: '8px',
-              border: '1px solid var(--retail-edge-strong)',
-              background: 'var(--retail-card)',
-              color: 'var(--retail-muted)',
+              border: '1px solid #e2e8f0',
+              background: '#ffffff',
+              color: '#64748b',
               fontSize: '16px',
               display: 'grid',
               placeItems: 'center',
@@ -471,7 +536,7 @@ export default function UserManagementPage() {
               gap: '8px',
               padding: '10px 18px',
               borderRadius: '8px',
-              background: 'var(--retail-accent)',
+              background: '#1a62ea',
               color: '#ffffff',
               border: 'none',
               fontWeight: 700,
@@ -486,8 +551,10 @@ export default function UserManagementPage() {
       </div>
 
       {/* SECTION 1: QUICK ACCESS (Row of 4 Folder-Tabbed Cards matching the reference image) */}
-      <details className="admin-shortcuts">
-        <summary>Role shortcuts <ChevronDown size={15} aria-hidden="true" /></summary>
+      <div style={{ marginBottom: '34px' }}>
+        <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: '0 0 14px' }}>
+          QUICK ACCESS
+        </h2>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
           {/* Folder Card 1: Store Managers (Deep royal blue when active) */}
@@ -498,7 +565,7 @@ export default function UserManagementPage() {
             avatars={[
               { text: 'AP', bg: '#059669' },
               { text: 'RD', bg: '#0d9488' },
-              { text: 'SM', bg: 'var(--retail-accent)' },
+              { text: 'SM', bg: '#2563eb' },
             ]}
             heading="Store Managers"
             subheading={`${kpis.managers} Active Supervisors · Storefloor`}
@@ -536,19 +603,19 @@ export default function UserManagementPage() {
             className={`drive-folder-card${roleFilter === 'SUPER_ADMIN' || roleFilter === 'ADMIN' ? ' active-folder' : ''}`}
             onClick={() => setRoleFilter(roleFilter === 'SUPER_ADMIN' ? 'ALL' : 'SUPER_ADMIN')}
             title="Filter by Executive Admins"
-            style={{ borderLeft: '4px solid var(--retail-accent)' }}
+            style={{ borderLeft: '4px solid #1a62ea' }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: 'var(--retail-accent)' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
-                <strong style={{ fontSize: '13.5px', color: 'var(--retail-ink)' }}>Executive Admins</strong>
+                <span style={{ fontSize: '18px', color: '#1a62ea' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>Executive Admins</strong>
               </div>
               <div
                 style={{
                   width: '26px',
                   height: '26px',
                   borderRadius: '50%',
-                  background: 'var(--retail-accent)',
+                  background: '#1a62ea',
                   color: '#fff',
                   fontSize: '11px',
                   fontWeight: 750,
@@ -560,21 +627,21 @@ export default function UserManagementPage() {
               </div>
             </div>
             <div style={{ marginTop: '16px' }}>
-              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', display: 'block' }}>
+              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', textTransform: 'uppercase', display: 'block' }}>
                 GOVERNANCE
               </small>
-              <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--retail-ink)', display: 'block', marginTop: '2px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 650, color: '#334155', display: 'block', marginTop: '2px' }}>
                 Enterprise RBAC & Security Invariants
               </span>
             </div>
           </div>
         </div>
-      </details>
+      </div>
 
       {/* SECTION 2: ALL USERS (Matching ALL FILES in the reference image) */}
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-          <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', margin: 0 }}>
+          <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: 0 }}>
             ALL USERS ({filteredUsers.length})
           </h2>
 
@@ -588,10 +655,10 @@ export default function UserManagementPage() {
               style={{
                 padding: '7px 14px',
                 borderRadius: '18px',
-                border: '1px solid light-dark(#cbd5e1, #34455a)',
+                border: '1px solid #cbd5e1',
                 fontSize: '12.5px',
                 outline: 'none',
-                background: 'var(--retail-raised)',
+                background: '#f8fafc',
                 minWidth: '220px',
               }}
             />
@@ -607,9 +674,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: roleFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                  background: roleFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                  color: roleFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
+                  border: roleFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
+                  background: roleFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                  color: roleFilter !== 'ALL' ? '#1d4ed8' : '#334155',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -629,9 +696,9 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '210px',
-                    background: 'var(--retail-card)',
+                    background: '#ffffff',
                     borderRadius: '12px',
-                    border: '1px solid var(--retail-edge-strong)',
+                    border: '1px solid #e2e8f0',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
@@ -655,8 +722,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
-                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
+                          background: isSelected ? '#eff6ff' : 'transparent',
+                          color: isSelected ? '#1a62ea' : '#1e293b',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -666,14 +733,14 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
+                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
                         }}
                       >
                         <span>{opt.label}</span>
-                        {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -692,9 +759,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: locationFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                  background: locationFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                  color: locationFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
+                  border: locationFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
+                  background: locationFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                  color: locationFilter !== 'ALL' ? '#1d4ed8' : '#334155',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -714,9 +781,9 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '230px',
-                    background: 'var(--retail-card)',
+                    background: '#ffffff',
                     borderRadius: '12px',
-                    border: '1px solid var(--retail-edge-strong)',
+                    border: '1px solid #e2e8f0',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
@@ -736,8 +803,8 @@ export default function UserManagementPage() {
                       padding: '7px 10px',
                       borderRadius: '8px',
                       border: 'none',
-                      background: locationFilter === 'ALL' ? 'var(--retail-accent-soft)' : 'transparent',
-                      color: locationFilter === 'ALL' ? 'var(--retail-accent)' : 'var(--retail-ink)',
+                      background: locationFilter === 'ALL' ? '#eff6ff' : 'transparent',
+                      color: locationFilter === 'ALL' ? '#1a62ea' : '#1e293b',
                       fontSize: '12px',
                       fontWeight: locationFilter === 'ALL' ? 700 : 500,
                       textAlign: 'left',
@@ -747,14 +814,14 @@ export default function UserManagementPage() {
                       cursor: 'pointer',
                     }}
                     onMouseEnter={(e) => {
-                      if (locationFilter !== 'ALL') e.currentTarget.style.background = 'var(--retail-raised)';
+                      if (locationFilter !== 'ALL') e.currentTarget.style.background = '#f8fafc';
                     }}
                     onMouseLeave={(e) => {
                       if (locationFilter !== 'ALL') e.currentTarget.style.background = 'transparent';
                     }}
                   >
                     <span>All Store Locations</span>
-                    {locationFilter === 'ALL' && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                    {locationFilter === 'ALL' && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                   </button>
                   {availableLocations.map((location) => {
                     const loc = location.name;
@@ -772,8 +839,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
-                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
+                          background: isSelected ? '#eff6ff' : 'transparent',
+                          color: isSelected ? '#1a62ea' : '#1e293b',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -783,17 +850,17 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
+                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
                         }}
                       >
                         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ color: 'var(--retail-accent)' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
+                          <span style={{ color: '#1a62ea' }}><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
                           {loc}
                         </span>
-                        {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -812,9 +879,9 @@ export default function UserManagementPage() {
                   gap: '6px',
                   padding: '7px 14px',
                   borderRadius: '20px',
-                  border: statusFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                  background: statusFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                  color: statusFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
+                  border: statusFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
+                  background: statusFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                  color: statusFilter !== 'ALL' ? '#1d4ed8' : '#334155',
                   fontSize: '12.5px',
                   fontWeight: 650,
                   cursor: 'pointer',
@@ -822,7 +889,7 @@ export default function UserManagementPage() {
                   boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                 }}
               >
-                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : 'var(--retail-muted)' }}></span>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : '#64748b' }}></span>
                 <span>{statusFilter === 'ALL' ? 'All Statuses' : statusFilter === 'ACTIVE' ? 'Active Only' : 'Inactive Only'}</span>
                 <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
               </button>
@@ -834,9 +901,9 @@ export default function UserManagementPage() {
                     top: 'calc(100% + 6px)',
                     left: 0,
                     width: '180px',
-                    background: 'var(--retail-card)',
+                    background: '#ffffff',
                     borderRadius: '12px',
-                    border: '1px solid var(--retail-edge-strong)',
+                    border: '1px solid #e2e8f0',
                     boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                     padding: '6px',
                     zIndex: 60,
@@ -846,7 +913,7 @@ export default function UserManagementPage() {
                     ACCOUNT STATUS
                   </div>
                   {[
-                    { value: 'ALL', label: 'All Statuses', dot: 'var(--retail-muted)' },
+                    { value: 'ALL', label: 'All Statuses', dot: '#64748b' },
                     { value: 'ACTIVE', label: 'Active Only', dot: '#16a34a' },
                     { value: 'INACTIVE', label: 'Inactive Only', dot: '#94a3b8' },
                   ].map((st) => {
@@ -864,8 +931,8 @@ export default function UserManagementPage() {
                           padding: '7px 10px',
                           borderRadius: '8px',
                           border: 'none',
-                          background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
-                          color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
+                          background: isSelected ? '#eff6ff' : 'transparent',
+                          color: isSelected ? '#1a62ea' : '#1e293b',
                           fontSize: '12px',
                           fontWeight: isSelected ? 700 : 500,
                           textAlign: 'left',
@@ -875,7 +942,7 @@ export default function UserManagementPage() {
                           cursor: 'pointer',
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
+                          if (!isSelected) e.currentTarget.style.background = '#f8fafc';
                         }}
                         onMouseLeave={(e) => {
                           if (!isSelected) e.currentTarget.style.background = 'transparent';
@@ -885,7 +952,7 @@ export default function UserManagementPage() {
                           <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: st.dot }}></span>
                           {st.label}
                         </span>
-                        {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                        {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                       </button>
                     );
                   })}
@@ -905,7 +972,7 @@ export default function UserManagementPage() {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: 'var(--retail-accent)',
+                  color: '#1a62ea',
                   fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -921,21 +988,21 @@ export default function UserManagementPage() {
         {/* File Table / User Directory Table */}
         <div
           style={{
-            background: 'var(--retail-card)',
-            border: '1px solid var(--retail-edge)',
+            background: '#ffffff',
+            border: '1px solid #eef2f6',
             borderRadius: '14px',
             overflow: 'hidden',
             boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
           }}
         >
-          <div className="admin-table-scroll" role="region" aria-label="Scrollable records" tabIndex={0}>
+          <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr
                   style={{
-                    borderBottom: '1px solid var(--retail-edge)',
-                    background: 'var(--retail-card)',
-                    color: 'var(--retail-muted)',
+                    borderBottom: '1px solid #edf2f7',
+                    background: '#ffffff',
+                    color: '#64748b',
                     fontSize: '11px',
                     fontWeight: 750,
                     letterSpacing: '0.06em',
@@ -951,7 +1018,7 @@ export default function UserManagementPage() {
               <tbody>
                 {filteredUsers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
+                    <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
                       <div style={{ fontSize: '32px', marginBottom: '8px' }}><FolderOpen size="1em" className="inline-icon" aria-hidden="true" /></div>
                       <strong>No accounts matching the active filters</strong>
                       <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new user.</p>
@@ -968,17 +1035,17 @@ export default function UserManagementPage() {
                         key={u.id}
                         onClick={() => setSelectedUserId(u.id)}
                         style={{
-                          borderBottom: '1px solid var(--retail-edge)',
-                          background: isSelected ? 'var(--retail-raised)' : 'var(--retail-card)',
+                          borderBottom: '1px solid #f1f5f9',
+                          background: isSelected ? '#edf4fe' : '#ffffff',
                           cursor: 'pointer',
                           transition: 'background 0.12s ease',
                           opacity: u.isActive ? 1 : 0.65,
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
+                          if (!isSelected) e.currentTarget.style.background = '#f8fafd';
                         }}
                         onMouseLeave={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'var(--retail-card)';
+                          if (!isSelected) e.currentTarget.style.background = '#ffffff';
                         }}
                       >
                         {/* Column 1: NAME (Colored Role/Document Icon + User Name + Subtitle) */}
@@ -1001,17 +1068,17 @@ export default function UserManagementPage() {
                               {badge.icon}
                             </div>
                             <div style={{ minWidth: 0 }}>
-                              <strong style={{ color: 'var(--retail-ink)', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
+                              <strong style={{ color: '#0f172a', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
                                 {u.name}
                               </strong>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
-                                <span style={{ color: 'var(--retail-muted)', fontSize: '11.5px' }}>{u.email}</span>
+                                <span style={{ color: '#64748b', fontSize: '11.5px' }}>{u.email}</span>
                                 <span
                                   style={{
                                     padding: '1px 5px',
                                     borderRadius: '4px',
-                                    background: 'var(--retail-edge)',
-                                    color: 'var(--retail-muted)',
+                                    background: '#f1f5f9',
+                                    color: '#475569',
                                     fontSize: '11px',
                                     fontFamily: 'monospace',
                                     fontWeight: 600,
@@ -1038,7 +1105,7 @@ export default function UserManagementPage() {
                                 placeItems: 'center',
                                 fontWeight: 800,
                                 fontSize: '10.5px',
-                                border: '1.5px solid light-dark(#ffffff, #3f3636)',
+                                border: '1.5px solid #ffffff',
                                 boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                               }}
                             >
@@ -1048,12 +1115,12 @@ export default function UserManagementPage() {
                               <span
                                 style={{
                                   fontSize: '11.5px',
-                                  color: 'var(--retail-ink)',
+                                  color: '#334155',
                                   fontWeight: 600,
-                                  background: 'var(--retail-raised)',
+                                  background: '#f8fafc',
                                   padding: '2px 7px',
                                   borderRadius: '5px',
-                                  border: '1px solid var(--retail-edge-strong)',
+                                  border: '1px solid #e2e8f0',
                                 }}
                               >
                                 {u.assignedLocations[0] || 'Unassigned'}
@@ -1064,7 +1131,7 @@ export default function UserManagementPage() {
                         </td>
 
                         {/* Column 3: JOINED DATE */}
-                        <td style={{ padding: '13px 16px', color: 'var(--retail-muted)', fontSize: '12.5px', whiteSpace: 'nowrap' }}>
+                        <td style={{ padding: '13px 16px', color: '#64748b', fontSize: '12.5px', whiteSpace: 'nowrap' }}>
                           Joined {u.joinedDate}
                         </td>
 
@@ -1075,8 +1142,8 @@ export default function UserManagementPage() {
                               style={{
                                 padding: '3px 8px',
                                 borderRadius: '12px',
-                                background: u.discountLimitPercent > 0 ? 'var(--retail-accent-soft)' : 'var(--retail-edge)',
-                                color: u.discountLimitPercent > 0 ? 'var(--retail-accent-strong)' : 'var(--retail-muted)',
+                                background: u.discountLimitPercent > 0 ? '#eff6ff' : '#f1f5f9',
+                                color: u.discountLimitPercent > 0 ? '#1d4ed8' : '#475569',
                                 border: u.discountLimitPercent > 0 ? '1px solid #bfdbfe' : '1px solid #cbd5e1',
                                 fontSize: '11.5px',
                                 fontWeight: 700,
@@ -1086,17 +1153,17 @@ export default function UserManagementPage() {
                             </span>
                             <div style={{ display: 'inline-flex', gap: '3px' }}>
                               {u.canCancelSales && (
-                                <span title="Can void and cancel sales" style={{ padding: '2px 5px', borderRadius: '4px', background: 'light-dark(#fee2e2, #371f1f)', color: 'light-dark(#dc2626, #f2abab)', fontSize: '10.5px', fontWeight: 700 }}>
+                                <span title="Can void and cancel sales" style={{ padding: '2px 5px', borderRadius: '4px', background: '#fee2e2', color: '#dc2626', fontSize: '10.5px', fontWeight: 700 }}>
                                   Void
                                 </span>
                               )}
                               {u.canProcessReturns && (
-                                <span title="Can process returns" style={{ padding: '2px 5px', borderRadius: '4px', background: 'light-dark(#fef3c7, #3e3923)', color: 'light-dark(#b45309, #f5ceb1)', fontSize: '10.5px', fontWeight: 700 }}>
+                                <span title="Can process returns" style={{ padding: '2px 5px', borderRadius: '4px', background: '#fef3c7', color: '#b45309', fontSize: '10.5px', fontWeight: 700 }}>
                                   Return
                                 </span>
                               )}
                               {u.canCountStockAudits && (
-                                <span title="Can record stock audit counts" style={{ padding: '2px 5px', borderRadius: '4px', background: 'light-dark(#dcfce7, #203929)', color: 'light-dark(#15803d, #b8f3ce)', fontSize: '10.5px', fontWeight: 700 }}>
+                                <span title="Can record stock audit counts" style={{ padding: '2px 5px', borderRadius: '4px', background: '#dcfce7', color: '#15803d', fontSize: '10.5px', fontWeight: 700 }}>
                                   Audit
                                 </span>
                               )}
@@ -1124,7 +1191,7 @@ export default function UserManagementPage() {
                                 borderRadius: '6px',
                                 border: 'none',
                                 background: 'transparent',
-                                color: 'var(--retail-muted)',
+                                color: '#64748b',
                                 fontSize: '15px',
                                 cursor: 'pointer',
                                 display: 'grid',
@@ -1148,7 +1215,7 @@ export default function UserManagementPage() {
                                   borderRadius: '6px',
                                   border: 'none',
                                   background: 'transparent',
-                                  color: 'var(--retail-muted)',
+                                  color: '#64748b',
                                   fontSize: '18px',
                                   fontWeight: 900,
                                   cursor: 'pointer',
@@ -1168,9 +1235,9 @@ export default function UserManagementPage() {
                                     position: 'absolute',
                                     right: 0,
                                     top: '34px',
-                                    background: 'var(--retail-card)',
+                                    background: '#ffffff',
                                     borderRadius: '10px',
-                                    border: '1px solid var(--retail-edge-strong)',
+                                    border: '1px solid #e2e8f0',
                                     boxShadow: '0 10px 25px rgba(0, 0, 0, 0.12)',
                                     zIndex: 50,
                                     width: '180px',
@@ -1190,7 +1257,7 @@ export default function UserManagementPage() {
                                       borderRadius: '6px',
                                       border: 'none',
                                       background: 'transparent',
-                                      color: 'var(--retail-ink)',
+                                      color: '#1e293b',
                                       fontSize: '12.5px',
                                       fontWeight: 600,
                                       cursor: 'pointer',
@@ -1242,7 +1309,6 @@ export default function UserManagementPage() {
       {/* CREATE / EDIT USER MODAL */}
       {isModalOpen && (
         <div
-          className="admin-dialog-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1256,7 +1322,7 @@ export default function UserManagementPage() {
         >
           <div
             style={{
-              background: 'var(--retail-card)',
+              background: '#ffffff',
               borderRadius: '16px',
               maxWidth: '560px',
               width: '100%',
@@ -1268,10 +1334,10 @@ export default function UserManagementPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
                   {editingUser ? 'Edit User Credentials & Access' : 'Provision New Enterprise Account'}
                 </h2>
-                <small style={{ color: 'var(--retail-muted)' }}>
+                <small style={{ color: '#64748b' }}>
                   Enforces dual-axis physical store binding and RBAC controls.
                 </small>
               </div>
@@ -1279,7 +1345,7 @@ export default function UserManagementPage() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsModalOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '18px', color: 'var(--retail-muted)', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
@@ -1289,7 +1355,7 @@ export default function UserManagementPage() {
               {formRole !== 'SUPER_ADMIN' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Full Name *
                   </label>
                   <input
@@ -1298,11 +1364,11 @@ export default function UserManagementPage() {
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
                     placeholder="e.g. Ramesh Verma"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Employee Code *
                   </label>
                   <input
@@ -1311,7 +1377,7 @@ export default function UserManagementPage() {
                     value={formEmployeeCode}
                     onChange={(e) => setFormEmployeeCode(e.target.value)}
                     placeholder="EMP-0845"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 </div>
               </div>
@@ -1319,7 +1385,7 @@ export default function UserManagementPage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Email Address *
                   </label>
                   <input
@@ -1328,17 +1394,17 @@ export default function UserManagementPage() {
                     value={formEmail}
                     onChange={(e) => setFormEmail(e.target.value)}
                     placeholder="r.verma@premiumretail.com"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Operational Role *
                   </label>
                   <select
                     value={formRole}
                     onChange={(e) => setFormRole(e.target.value as any)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
                   >
                     <option value="CASHIER">CASHIER (POS Lane)</option>
                     <option value="STAFF">STAFF (Floor Operations)</option>
@@ -1357,7 +1423,7 @@ export default function UserManagementPage() {
 
               {!editingUser && (
                 <div style={{ marginBottom: '14px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Initial Password
                   </label>
                   <input
@@ -1367,15 +1433,15 @@ export default function UserManagementPage() {
                     placeholder="At least 12 characters"
                     value={formPassword}
                     onChange={(e) => setFormPassword(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 </div>
               )}
 
               {/* Physical Location Binding */}
               {formRole !== 'SUPER_ADMIN' && (
-              <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--retail-raised)', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '8px' }}>
+              <div style={{ marginBottom: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
                   Authorized Physical Store Locations (Dual-Axis Invariant) *
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
@@ -1390,7 +1456,7 @@ export default function UserManagementPage() {
                           alignItems: 'center',
                           gap: '8px',
                           fontSize: '12px',
-                          color: 'var(--retail-ink)',
+                          color: '#334155',
                           cursor: 'pointer',
                         }}
                       >
@@ -1414,9 +1480,9 @@ export default function UserManagementPage() {
                   style={{
                     padding: '9px 16px',
                     borderRadius: '8px',
-                    border: '1px solid light-dark(#cbd5e1, #34455a)',
-                    background: 'var(--retail-card)',
-                    color: 'var(--retail-muted)',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#475569',
                     fontSize: '13px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -1429,7 +1495,7 @@ export default function UserManagementPage() {
                   style={{
                     padding: '9px 20px',
                     borderRadius: '8px',
-                    background: 'var(--retail-accent)',
+                    background: '#155eef',
                     color: '#ffffff',
                     border: 'none',
                     fontSize: '13px',

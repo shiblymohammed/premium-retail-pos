@@ -1,6 +1,5 @@
 'use client';
 
-import { Feedback } from '@/components/ui/feedback';
 import {
   Building2,
   Check,
@@ -33,10 +32,17 @@ export interface LocationNode {
   longitude: number;
   geofenceRadiusMeters: number;
   assignedManager: string;
-  terminalLanes: string[];
   isActive: boolean;
   address: string;
+  managerId?: string | null;
 }
+
+type ManagerOption = {
+  id: string;
+  email: string;
+  role: 'CENTRAL_MANAGER' | 'SUB_WAREHOUSE_MANAGER' | 'STORE_MANAGER';
+  locationIds: string[];
+};
 
 const TYPE_OPTIONS = [
   { value: 'ALL', label: 'All Facility Types' },
@@ -61,16 +67,27 @@ export default function CompanySettingsPage() {
   const [currency, setCurrency] = useState('INR');
   const [timezone, setTimezone] = useState('Asia/Kolkata');
   const [invoicePrefix, setInvoicePrefix] = useState('');
-  const [taxId, setTaxId] = useState('');
-  const [supportEmail, setSupportEmail] = useState('');
-  const [fiscalYearStart, setFiscalYearStart] = useState('April');
   const [companyId, setCompanyId] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Hierarchy State
   const [nodes, setNodes] = useState<LocationNode[]>([]);
+  const [managerOptions, setManagerOptions] = useState<ManagerOption[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string>('');
-  const [notice, setNotice] = useState('');
+  const [notice, setNoticeState] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const setNotice = (msg: string | { message: string; type: 'success' | 'error' } | null, explicitType?: 'success' | 'error') => {
+    if (!msg) {
+      setNoticeState(null);
+      return;
+    }
+    if (typeof msg === 'object') {
+      setNoticeState(msg);
+      return;
+    }
+    const isError = explicitType === 'error' || (explicitType === undefined && /error|fail|could not|cannot|invalid|required|expired|must|again|not available/i.test(msg));
+    setNoticeState({ message: msg, type: isError ? 'error' : 'success' });
+  };
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -80,25 +97,23 @@ export default function CompanySettingsPage() {
   // Selected Node Form State
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) || nodes[0];
   const [nodeName, setNodeName] = useState(selectedNode?.name || '');
-  const [nodeCode, setNodeCode] = useState(selectedNode?.code || '');
   const [nodeType, setNodeType] = useState<LocationNode['type']>(selectedNode?.type || 'RETAIL_STORE');
   const [nodeParent, setNodeParent] = useState(selectedNode?.parentId || '');
   const [nodeLat, setNodeLat] = useState(String(selectedNode?.latitude || '12.9716'));
   const [nodeLng, setNodeLng] = useState(String(selectedNode?.longitude || '77.5946'));
   const [nodeRadius, setNodeRadius] = useState(String(selectedNode?.geofenceRadiusMeters || '50'));
-  const [nodeManager, setNodeManager] = useState(selectedNode?.assignedManager || '');
+  const [nodeManager, setNodeManager] = useState(selectedNode?.managerId || '');
   const [nodeAddress, setNodeAddress] = useState(selectedNode?.address || '');
-  const [nodeActive, setNodeActive] = useState(selectedNode?.isActive ?? true);
-  const [nodeLanes, setNodeLanes] = useState(selectedNode?.terminalLanes?.join(', ') || '');
 
   // Add Node Modal
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<LocationNode['type']>('RETAIL_STORE');
   const [newParent, setNewParent] = useState('');
   const [newAddress, setNewAddress] = useState('');
-  const [newManager, setNewManager] = useState('');
+  const [newManagerId, setNewManagerId] = useState('');
+  const [managerAssignmentFilter, setManagerAssignmentFilter] = useState<'UNASSIGNED' | 'ASSIGNED' | 'ALL'>('UNASSIGNED');
+  const [managerRoleFilter, setManagerRoleFilter] = useState<'ALL' | ManagerOption['role']>('ALL');
 
   useEffect(() => {
     const token = getStoredSession()?.accessToken;
@@ -107,9 +122,20 @@ export default function CompanySettingsPage() {
     Promise.all([
       fetch(`${API_BASE}/companies`, { headers, cache: 'no-store' }),
       fetch(`${API_BASE}/locations`, { headers, cache: 'no-store' }),
-    ]).then(async ([companiesResponse, locationsResponse]) => {
-      if (!companiesResponse.ok || !locationsResponse.ok) throw new Error('Could not load company and location records.');
-      const [companiesPayload, locationsPayload] = await Promise.all([companiesResponse.json(), locationsResponse.json()]);
+      fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
+    ]).then(async ([companiesResponse, locationsResponse, usersResponse]) => {
+      if (!companiesResponse.ok || !locationsResponse.ok || !usersResponse.ok) throw new Error('Could not load company, location, and manager records.');
+      const [companiesPayload, locationsPayload, usersPayload] = await Promise.all([companiesResponse.json(), locationsResponse.json(), usersResponse.json()]);
+      const managers: ManagerOption[] = (usersPayload.data || [])
+        .filter((user: any) => ['CENTRAL_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'STORE_MANAGER'].includes(user.role))
+        .map((user: any) => ({ id: user.id, email: user.email, role: user.role, locationIds: (user.locationScopes || []).map((scope: any) => scope.locationId) }));
+      (locationsPayload.data || []).forEach((location: any) => {
+        if (!location.managerId) return;
+        const manager = managers.find((candidate) => candidate.id === location.managerId);
+        if (manager && !manager.locationIds.includes(location.id)) manager.locationIds.push(location.id);
+      });
+      setManagerOptions(managers);
+      const managerById = new Map(managers.map((manager) => [manager.id, manager]));
       const company = companiesPayload.data?.[0];
       if (company) {
         setCompanyId(company.id);
@@ -122,8 +148,9 @@ export default function CompanySettingsPage() {
         id: loc.id, code: loc.code || loc.id.slice(0, 8).toUpperCase(), name: loc.name,
         type: loc.type === 'MAIN_WAREHOUSE' ? 'CENTRAL_WAREHOUSE' : loc.type,
         parentId: loc.parentId || null, latitude: Number(loc.latitude || 0), longitude: Number(loc.longitude || 0),
-        geofenceRadiusMeters: Number(loc.geofenceRadius || 0), assignedManager: loc.manager?.name || '',
-        terminalLanes: [], isActive: Boolean(loc.isActive), address: loc.address || '',
+        geofenceRadiusMeters: Number(loc.geofenceRadius || 0), managerId: loc.managerId || null,
+        assignedManager: managerById.get(loc.managerId)?.email || '',
+        isActive: Boolean(loc.isActive), address: loc.address || '',
       }));
       setNodes(mapped);
       if (mapped[0]) setSelectedNodeId(mapped[0].id);
@@ -136,16 +163,13 @@ export default function CompanySettingsPage() {
   useEffect(() => {
     if (selectedNode) {
       setNodeName(selectedNode.name);
-      setNodeCode(selectedNode.code);
       setNodeType(selectedNode.type);
       setNodeParent(selectedNode.parentId || '');
       setNodeLat(String(selectedNode.latitude));
       setNodeLng(String(selectedNode.longitude));
       setNodeRadius(String(selectedNode.geofenceRadiusMeters));
-      setNodeManager(selectedNode.assignedManager);
+      setNodeManager(selectedNode.managerId || '');
       setNodeAddress(selectedNode.address);
-      setNodeActive(selectedNode.isActive);
-      setNodeLanes(selectedNode.terminalLanes.join(', '));
     }
   }, [selectedNodeId]);
 
@@ -187,14 +211,20 @@ export default function CompanySettingsPage() {
     const stores = nodes.filter((n) => n.type === 'RETAIL_STORE').length;
     const central = nodes.filter((n) => n.type === 'CENTRAL_WAREHOUSE').length;
     const sub = nodes.filter((n) => n.type === 'SUB_WAREHOUSE').length;
-    const totalLanes = nodes.reduce((acc, curr) => acc + curr.terminalLanes.length, 0);
-    return { total, stores, central, sub, totalLanes };
+    return { total, stores, central, sub };
   }, [nodes]);
+
+  const filteredManagerOptions = managerOptions.filter((manager) =>
+    (managerRoleFilter === 'ALL' || manager.role === managerRoleFilter) &&
+    (managerAssignmentFilter === 'ALL' ||
+      (managerAssignmentFilter === 'UNASSIGNED' && manager.locationIds.length === 0) ||
+      (managerAssignmentFilter === 'ASSIGNED' && manager.locationIds.length > 0))
+  );
 
   const handleSaveCompany = async (e: FormEvent) => {
     e.preventDefault();
     if (!invoicePrefix.trim() || invoicePrefix.length < 2) {
-      alert('Invoice prefix must be at least 2 characters.');
+      setNotice('Invoice prefix must be at least 2 characters.', 'error');
       return;
     }
     const token = getStoredSession()?.accessToken;
@@ -215,53 +245,112 @@ export default function CompanySettingsPage() {
     } finally { setSaving(false); }
   };
 
-  const handleSaveNode = (e: FormEvent) => {
+  const handleSaveNode = async (e: FormEvent) => {
     e.preventDefault();
     if (!nodeName.trim()) {
-      alert('Location name is required.');
+      setNotice('Location name is required.', 'error');
       return;
     }
-
-    setIsEditModalOpen(false);
-    setNotice('Location editing is not available through the current API. No changes were saved.');
+    if (!selectedNode) return setNotice('Select a location to edit.', 'error');
+    const token = getStoredSession()?.accessToken;
+    if (!token) {
+      setIsEditModalOpen(false);
+      return setNotice('Sign in again to save location changes.', 'error');
+    }
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/locations/${selectedNode.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: nodeName.trim(),
+          type: nodeType === 'CENTRAL_WAREHOUSE' ? 'MAIN_WAREHOUSE' : nodeType,
+          parentId: nodeParent || null,
+          address: nodeAddress.trim() || undefined,
+          latitude: Number(nodeLat),
+          longitude: Number(nodeLng),
+          geofenceRadius: Number(nodeRadius),
+          managerId: nodeManager || null,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'Location could not be updated.');
+      const saved = payload.data;
+      const manager = managerOptions.find((option) => option.id === nodeManager);
+      setNodes((current) => current.map((node) => node.id === saved.id ? {
+        ...node,
+        name: saved.name,
+        type: saved.type === 'MAIN_WAREHOUSE' ? 'CENTRAL_WAREHOUSE' : saved.type,
+        parentId: saved.parentId || null,
+        address: saved.address || '',
+        latitude: Number(saved.latitude || 0),
+        longitude: Number(saved.longitude || 0),
+        geofenceRadiusMeters: Number(saved.geofenceRadius || 0),
+        managerId: saved.managerId || null,
+        assignedManager: manager?.email || '',
+      } : node));
+      if (manager) setManagerOptions((current) => current.map((option) => option.id === manager.id ? { ...option, locationIds: [...new Set([...option.locationIds, saved.id])] } : option));
+      setIsEditModalOpen(false);
+      setNotice(`Location "${saved.name}" updated.`);
+    } catch (error) {
+      setIsEditModalOpen(false);
+      setNotice(error instanceof Error ? error.message : 'Location could not be updated.', 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleAddNode = async (e: FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newCode.trim()) {
-      alert('Name and Code are required.');
+    if (!newName.trim()) {
+      setNotice('Location name is required.', 'error');
       return;
     }
 
     const token = getStoredSession()?.accessToken;
-    if (!token) return setNotice('Sign in again to create a location.');
-    if (!companyId) return setNotice('Create the company profile before adding locations.');
+    if (!token) {
+      setIsAddModalOpen(false);
+      return setNotice('Sign in again to create a location.');
+    }
+    if (!companyId) {
+      setIsAddModalOpen(false);
+      return setNotice('Create the company profile before adding locations.');
+    }
     setSaving(true);
     try {
       const response = await fetch(`${API_BASE}/locations`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId, name: newName.trim(), type: newType === 'CENTRAL_WAREHOUSE' ? 'MAIN_WAREHOUSE' : newType, address: newAddress.trim() || undefined, parentId: newParent || undefined }),
+        body: JSON.stringify({ companyId, name: newName.trim(), type: newType === 'CENTRAL_WAREHOUSE' ? 'MAIN_WAREHOUSE' : newType, address: newAddress.trim() || undefined, parentId: newParent || undefined, managerId: newManagerId || undefined }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || 'Location could not be created.');
       const loc = payload.data;
-      const node: LocationNode = { id: loc.id, code: loc.code || loc.id.slice(0, 8).toUpperCase(), name: loc.name, type: loc.type === 'MAIN_WAREHOUSE' ? 'CENTRAL_WAREHOUSE' : loc.type, parentId: loc.parentId || null, latitude: Number(loc.latitude || 0), longitude: Number(loc.longitude || 0), geofenceRadiusMeters: Number(loc.geofenceRadius || 0), assignedManager: '', terminalLanes: [], isActive: Boolean(loc.isActive), address: loc.address || '' };
-      setNodes((prev) => [...prev, node]); setSelectedNodeId(node.id); setIsAddModalOpen(false); setNewName(''); setNewCode(''); setNewAddress(''); setNotice(`Location "${node.name}" created.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Location could not be created.'); }
+      const manager = managerOptions.find((option) => option.id === newManagerId);
+      const node: LocationNode = { id: loc.id, code: loc.code || loc.id.slice(0, 8).toUpperCase(), name: loc.name, type: loc.type === 'MAIN_WAREHOUSE' ? 'CENTRAL_WAREHOUSE' : loc.type, parentId: loc.parentId || null, latitude: Number(loc.latitude || 0), longitude: Number(loc.longitude || 0), geofenceRadiusMeters: Number(loc.geofenceRadius || 0), assignedManager: manager?.email || '', managerId: loc.managerId || null, isActive: Boolean(loc.isActive), address: loc.address || '' };
+      setNodes((prev) => [...prev, node]);
+      if (manager) setManagerOptions((prev) => prev.map((option) => option.id === manager.id ? { ...option, locationIds: [...new Set([...option.locationIds, node.id])] } : option));
+      setSelectedNodeId(node.id); setIsAddModalOpen(false); setNewName(''); setNewAddress(''); setNewManagerId(''); setNotice(`Location "${node.name}" created.`);
+    } catch (error) {
+      // The page notice is outside the modal. Close the modal first so the
+      // backdrop cannot hide the API error from the user.
+      setIsAddModalOpen(false);
+      setNotice(error instanceof Error ? error.message : 'Location could not be created.');
+    }
     finally { setSaving(false); }
   };
 
   const handleToggleNodeStatus = async (nodeId: string) => {
     const node = nodes.find((location) => location.id === nodeId);
-    if (!node || !node.isActive) return;
+    if (!node) return;
     const token = getStoredSession()?.accessToken;
-    if (!token) return setNotice('Sign in again to deactivate a location.');
+    if (!token) return setNotice(`Sign in again to ${node.isActive ? 'deactivate' : 'reactivate'} this location.`, 'error');
     try {
-      const response = await fetch(`${API_BASE}/locations/${nodeId}/deactivate`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}` } });
+      const nextActive = !node.isActive;
+      const response = await fetch(`${API_BASE}/locations/${nodeId}/${nextActive ? 'reactivate' : 'deactivate'}`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}` } });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || 'Location could not be deactivated.');
-      setNodes((prev) => prev.map((entry) => entry.id === nodeId ? { ...entry, isActive: false } : entry));
-      setNotice(`Location ${node.name} deactivated.`);
+      if (!response.ok) throw new Error(payload.message || `Location could not be ${nextActive ? 'reactivated' : 'deactivated'}.`);
+      setNodes((prev) => prev.map((entry) => entry.id === nodeId ? { ...entry, isActive: nextActive } : entry));
+      setNotice(`Location ${node.name} ${nextActive ? 'reactivated' : 'deactivated'}.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Location could not be deactivated.'); }
   };
 
@@ -277,39 +366,75 @@ export default function CompanySettingsPage() {
         return {
           icon: <Building2 size={13} aria-hidden="true" />,
           label: 'Central Hub',
-          bg: 'var(--retail-accent-soft)',
-          color: 'var(--retail-accent-strong)',
-          border: 'light-dark(#bfdbfe, #2e425b)',
+          bg: '#eff6ff',
+          color: '#1d4ed8',
+          border: '#bfdbfe',
         };
       case 'SUB_WAREHOUSE':
         return {
           icon: <Warehouse size={13} aria-hidden="true" />,
           label: 'Regional Depot',
-          bg: 'light-dark(#f3e8fd, #30223d)',
-          color: 'light-dark(#7e22ce, #d2aef2)',
-          border: 'light-dark(#e9d5ff, #402b56)',
+          bg: '#f3e8fd',
+          color: '#7e22ce',
+          border: '#e9d5ff',
         };
       case 'RETAIL_STORE':
       default:
         return {
           icon: <Store size={13} aria-hidden="true" />,
           label: 'Retail Store',
-          bg: 'light-dark(#ecfdf5, #1d352c)',
-          color: 'light-dark(#047857, #b8f6e4)',
-          border: 'light-dark(#a7f3d0, #31624b)',
+          bg: '#ecfdf5',
+          color: '#047857',
+          border: '#a7f3d0',
         };
     }
   };
 
   return (
-    <div className="app-page admin-workspace">
+    <div className="app-page" style={{ color: '#1e293b' }}>
       {/* Toast Alert Notice */}
-      {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
+      {notice && (
+        <div
+          style={{
+            padding: '12px 18px',
+            borderRadius: '10px',
+            background: notice.type === 'error' ? '#fef2f2' : '#ecfdf5',
+            border: `1px solid ${notice.type === 'error' ? '#fecaca' : '#a7f3d0'}`,
+            color: notice.type === 'error' ? '#991b1b' : '#065f46',
+            fontSize: '13px',
+            marginBottom: '20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: notice.type === 'error' ? '0 2px 8px rgba(239, 68, 68, 0.1)' : '0 2px 8px rgba(16, 185, 129, 0.1)',
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            {notice.type === 'error' ? <X size="1em" className="inline-icon" aria-hidden="true" /> : <Check size="1em" className="inline-icon" aria-hidden="true" />}{' '}
+            {notice.message}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss notice"
+            onClick={() => setNotice('')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: notice.type === 'error' ? '#991b1b' : '#065f46',
+              cursor: 'pointer',
+              fontWeight: 800,
+              fontSize: '14px',
+            }}
+          >
+            <X size="1em" className="inline-icon" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {/* Header: Company & Store Network with Royal Blue Badge + Actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
             Company & Store Network
             <span
               style={{
@@ -318,7 +443,7 @@ export default function CompanySettingsPage() {
                 width: '34px',
                 height: '34px',
                 borderRadius: '9px',
-                background: 'var(--retail-accent)',
+                background: '#1a62ea',
                 color: '#ffffff',
                 fontSize: '18px',
                 boxShadow: '0 3px 8px rgba(26, 98, 234, 0.25)',
@@ -333,14 +458,14 @@ export default function CompanySettingsPage() {
         {/* Action Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {/* Section View Tabs */}
-          <div style={{ display: 'inline-flex', background: 'var(--retail-edge)', padding: '3px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
+          <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
             <button
               type="button"
               onClick={() => setActiveTab('NETWORK')}
               style={{
                 border: 'none',
-                background: activeTab === 'NETWORK' ? 'var(--retail-card)' : 'transparent',
-                color: activeTab === 'NETWORK' ? 'var(--retail-accent)' : 'var(--retail-muted)',
+                background: activeTab === 'NETWORK' ? '#ffffff' : 'transparent',
+                color: activeTab === 'NETWORK' ? '#1a62ea' : '#64748b',
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -359,8 +484,8 @@ export default function CompanySettingsPage() {
               onClick={() => setActiveTab('PROFILE')}
               style={{
                 border: 'none',
-                background: activeTab === 'PROFILE' ? 'var(--retail-card)' : 'transparent',
-                color: activeTab === 'PROFILE' ? 'var(--retail-accent)' : 'var(--retail-muted)',
+                background: activeTab === 'PROFILE' ? '#ffffff' : 'transparent',
+                color: activeTab === 'PROFILE' ? '#1a62ea' : '#64748b',
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontWeight: 700,
@@ -385,7 +510,7 @@ export default function CompanySettingsPage() {
               gap: '8px',
               padding: '9px 18px',
               borderRadius: '8px',
-              background: 'var(--retail-accent)',
+              background: '#1a62ea',
               color: '#ffffff',
               border: 'none',
               fontWeight: 700,
@@ -400,8 +525,10 @@ export default function CompanySettingsPage() {
       </div>
 
       {/* SECTION 1: QUICK ACCESS (4 Folder-Tabbed Cards matching /admin/users) */}
-      <details className="admin-shortcuts">
-        <summary>Location shortcuts <ChevronDown size={15} aria-hidden="true" /></summary>
+      <div style={{ marginBottom: '32px' }}>
+        <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: '0 0 14px' }}>
+          NETWORK OVERVIEW
+        </h2>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
           {/* Folder Card 1: Retail Outlets & POS */}
@@ -420,7 +547,7 @@ export default function CompanySettingsPage() {
             ]}
             groupLabel="PHYSICAL STORE"
             heading={`Retail Outlets (${kpis.stores})`}
-            subheading={`${kpis.totalLanes} Active POS Lanes · Dual-Axis Lock`}
+            subheading="Retail store locations · dual-axis access"
           />
 
           {/* Folder Card 2: Central Warehouse */}
@@ -432,7 +559,7 @@ export default function CompanySettingsPage() {
             }}
             title="Filter by Central Warehouses"
             tabLabel="PRIMARY HUBS"
-            avatars={[{ text: 'WH', bg: 'var(--retail-accent)' }]}
+            avatars={[{ text: 'WH', bg: '#2563eb' }]}
             groupLabel="CENTRAL DEPOT"
             heading={`Central Hub (${kpis.central})`}
             subheading="Primary Inventory Ledger · 150m Geofence"
@@ -458,19 +585,19 @@ export default function CompanySettingsPage() {
             className={`drive-folder-card${activeTab === 'PROFILE' ? ' active-folder' : ''}`}
             onClick={() => setActiveTab('PROFILE')}
             title="View Corporate Identity & Tax Parameters"
-            style={{ borderLeft: '4px solid var(--retail-accent)' }}
+            style={{ borderLeft: '4px solid #1a62ea' }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: 'var(--retail-accent)' }}><Landmark size="1em" className="inline-icon" aria-hidden="true" /></span>
-                <strong style={{ fontSize: '13.5px', color: 'var(--retail-ink)' }}>Corporate Profile</strong>
+                <span style={{ fontSize: '18px', color: '#1a62ea' }}><Landmark size="1em" className="inline-icon" aria-hidden="true" /></span>
+                <strong style={{ fontSize: '13.5px', color: '#1e293b' }}>Corporate Profile</strong>
               </div>
               <div
                 style={{
                   width: '26px',
                   height: '26px',
                   borderRadius: '50%',
-                  background: 'var(--retail-accent)',
+                  background: '#1a62ea',
                   color: '#fff',
                   fontSize: '10.5px',
                   fontWeight: 750,
@@ -482,23 +609,23 @@ export default function CompanySettingsPage() {
               </div>
             </div>
             <div style={{ marginTop: '16px' }}>
-              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', display: 'block' }}>
+              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', textTransform: 'uppercase', display: 'block' }}>
                 BILLING NAMESPACE
               </small>
-              <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--retail-ink)', display: 'block', marginTop: '2px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 650, color: '#334155', display: 'block', marginTop: '2px' }}>
                 {invoicePrefix}-2026 · {currency} (₹) · GSTIN Configured
               </span>
             </div>
           </div>
         </div>
-      </details>
+      </div>
 
       {/* VIEW TAB 1: PHYSICAL TOPOLOGY & FACILITIES DIRECTORY */}
       {activeTab === 'NETWORK' && (
         <div>
           {/* Filter Toolbar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-            <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', margin: 0 }}>
+            <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: '#475569', textTransform: 'uppercase', margin: 0 }}>
               FACILITY DIRECTORY ({filteredNodes.length})
             </h2>
 
@@ -512,10 +639,10 @@ export default function CompanySettingsPage() {
                 style={{
                   padding: '7px 14px',
                   borderRadius: '18px',
-                  border: '1px solid light-dark(#cbd5e1, #34455a)',
+                  border: '1px solid #cbd5e1',
                   fontSize: '12.5px',
                   outline: 'none',
-                  background: 'var(--retail-raised)',
+                  background: '#f8fafc',
                   minWidth: '240px',
                 }}
               />
@@ -531,9 +658,9 @@ export default function CompanySettingsPage() {
                     gap: '6px',
                     padding: '7px 14px',
                     borderRadius: '20px',
-                    border: typeFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                    background: typeFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                    color: typeFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
+                    border: typeFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
+                    background: typeFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                    color: typeFilter !== 'ALL' ? '#1d4ed8' : '#334155',
                     fontSize: '12.5px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -553,9 +680,9 @@ export default function CompanySettingsPage() {
                       top: 'calc(100% + 6px)',
                       left: 0,
                       width: '220px',
-                      background: 'var(--retail-card)',
+                      background: '#ffffff',
                       borderRadius: '12px',
-                      border: '1px solid var(--retail-edge-strong)',
+                      border: '1px solid #e2e8f0',
                       boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                       padding: '6px',
                       zIndex: 60,
@@ -579,8 +706,8 @@ export default function CompanySettingsPage() {
                             padding: '7px 10px',
                             borderRadius: '8px',
                             border: 'none',
-                            background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
-                            color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
+                            background: isSelected ? '#eff6ff' : 'transparent',
+                            color: isSelected ? '#1a62ea' : '#1e293b',
                             fontSize: '12px',
                             fontWeight: isSelected ? 700 : 500,
                             textAlign: 'left',
@@ -590,14 +717,14 @@ export default function CompanySettingsPage() {
                             cursor: 'pointer',
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
+                            if (!isSelected) e.currentTarget.style.background = '#f8fafc';
                           }}
                           onMouseLeave={(e) => {
                             if (!isSelected) e.currentTarget.style.background = 'transparent';
                           }}
                         >
                           <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -616,9 +743,9 @@ export default function CompanySettingsPage() {
                     gap: '6px',
                     padding: '7px 14px',
                     borderRadius: '20px',
-                    border: statusFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                    background: statusFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                    color: statusFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
+                    border: statusFilter !== 'ALL' ? '1px solid #93c5fd' : '1px solid #cbd5e1',
+                    background: statusFilter !== 'ALL' ? '#eff6ff' : '#ffffff',
+                    color: statusFilter !== 'ALL' ? '#1d4ed8' : '#334155',
                     fontSize: '12.5px',
                     fontWeight: 650,
                     cursor: 'pointer',
@@ -626,7 +753,7 @@ export default function CompanySettingsPage() {
                     boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
                   }}
                 >
-                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : 'var(--retail-muted)' }}></span>
+                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: statusFilter === 'ACTIVE' ? '#16a34a' : statusFilter === 'INACTIVE' ? '#94a3b8' : '#64748b' }}></span>
                   <span>{statusFilter === 'ALL' ? 'All Statuses' : statusFilter === 'ACTIVE' ? 'Active Only' : 'Inactive Only'}</span>
                   <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
                 </button>
@@ -638,9 +765,9 @@ export default function CompanySettingsPage() {
                       top: 'calc(100% + 6px)',
                       left: 0,
                       width: '180px',
-                      background: 'var(--retail-card)',
+                      background: '#ffffff',
                       borderRadius: '12px',
-                      border: '1px solid var(--retail-edge-strong)',
+                      border: '1px solid #e2e8f0',
                       boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
                       padding: '6px',
                       zIndex: 60,
@@ -650,7 +777,7 @@ export default function CompanySettingsPage() {
                       FACILITY STATUS
                     </div>
                     {[
-                      { value: 'ALL', label: 'All Statuses', dot: 'var(--retail-muted)' },
+                      { value: 'ALL', label: 'All Statuses', dot: '#64748b' },
                       { value: 'ACTIVE', label: 'Active Facilities', dot: '#16a34a' },
                       { value: 'INACTIVE', label: 'Archived / Inactive', dot: '#94a3b8' },
                     ].map((st) => {
@@ -668,8 +795,8 @@ export default function CompanySettingsPage() {
                             padding: '7px 10px',
                             borderRadius: '8px',
                             border: 'none',
-                            background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
-                            color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
+                            background: isSelected ? '#eff6ff' : 'transparent',
+                            color: isSelected ? '#1a62ea' : '#1e293b',
                             fontSize: '12px',
                             fontWeight: isSelected ? 700 : 500,
                             textAlign: 'left',
@@ -679,7 +806,7 @@ export default function CompanySettingsPage() {
                             cursor: 'pointer',
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
+                            if (!isSelected) e.currentTarget.style.background = '#f8fafc';
                           }}
                           onMouseLeave={(e) => {
                             if (!isSelected) e.currentTarget.style.background = 'transparent';
@@ -689,7 +816,7 @@ export default function CompanySettingsPage() {
                             <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: st.dot }}></span>
                             {st.label}
                           </span>
-                          {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
+                          {isSelected && <span style={{ color: '#1a62ea', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
                         </button>
                       );
                     })}
@@ -708,7 +835,7 @@ export default function CompanySettingsPage() {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: 'var(--retail-accent)',
+                    color: '#1a62ea',
                     fontSize: '12px',
                     fontWeight: 700,
                     cursor: 'pointer',
@@ -724,21 +851,21 @@ export default function CompanySettingsPage() {
           {/* Table Container */}
           <div
             style={{
-              background: 'var(--retail-card)',
-              border: '1px solid var(--retail-edge)',
+              background: '#ffffff',
+              border: '1px solid #eef2f6',
               borderRadius: '14px',
               overflow: 'hidden',
               boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
             }}
           >
-            <div className="admin-table-scroll" role="region" aria-label="Scrollable records" tabIndex={0}>
+            <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
                   <tr
                     style={{
-                      borderBottom: '1px solid var(--retail-edge)',
-                      background: 'var(--retail-card)',
-                      color: 'var(--retail-muted)',
+                      borderBottom: '1px solid #edf2f7',
+                      background: '#ffffff',
+                      color: '#64748b',
                       fontSize: '11px',
                       fontWeight: 750,
                       letterSpacing: '0.06em',
@@ -747,14 +874,14 @@ export default function CompanySettingsPage() {
                     <th style={{ padding: '14px 20px', width: '32%' }}>FACILITY IDENTITY</th>
                     <th style={{ padding: '14px 16px', width: '18%' }}>TYPE & HIERARCHY</th>
                     <th style={{ padding: '14px 16px', width: '20%' }}>FACILITY MANAGER</th>
-                    <th style={{ padding: '14px 16px', width: '18%' }}>TERMINALS & GEOFENCE</th>
+                    <th style={{ padding: '14px 16px', width: '18%' }}>GEOFENCE</th>
                     <th style={{ padding: '14px 20px', width: '12%', textAlign: 'right' }}>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredNodes.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
+                      <td colSpan={5} style={{ padding: '48px 20px', textAlign: 'center', color: '#64748b' }}>
                         <div style={{ fontSize: '32px', marginBottom: '8px' }}><Building2 size="1em" className="inline-icon" aria-hidden="true" /></div>
                         <strong>No location nodes matching your active filter</strong>
                         <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new facility.</p>
@@ -772,17 +899,17 @@ export default function CompanySettingsPage() {
                           key={n.id}
                           onClick={() => setSelectedNodeId(n.id)}
                           style={{
-                            borderBottom: '1px solid var(--retail-edge)',
-                            background: isSelected ? 'var(--retail-raised)' : 'var(--retail-card)',
+                            borderBottom: '1px solid #f1f5f9',
+                            background: isSelected ? '#edf4fe' : '#ffffff',
                             cursor: 'pointer',
                             transition: 'background 0.12s ease',
                             opacity: n.isActive ? 1 : 0.65,
                           }}
                           onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
+                            if (!isSelected) e.currentTarget.style.background = '#f8fafd';
                           }}
                           onMouseLeave={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-card)';
+                            if (!isSelected) e.currentTarget.style.background = '#ffffff';
                           }}
                         >
                           {/* Col 1: FACILITY IDENTITY */}
@@ -805,7 +932,7 @@ export default function CompanySettingsPage() {
                                 {badge.icon}
                               </div>
                               <div style={{ minWidth: 0 }}>
-                                <strong style={{ color: 'var(--retail-ink)', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
+                                <strong style={{ color: '#0f172a', fontSize: '13.5px', display: 'block', fontWeight: 700 }}>
                                   {n.name}
                                 </strong>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
@@ -813,8 +940,8 @@ export default function CompanySettingsPage() {
                                     style={{
                                       padding: '1px 5px',
                                       borderRadius: '4px',
-                                      background: 'var(--retail-edge)',
-                                      color: 'var(--retail-muted)',
+                                      background: '#f1f5f9',
+                                      color: '#475569',
                                       fontSize: '11px',
                                       fontFamily: 'monospace',
                                       fontWeight: 700,
@@ -822,7 +949,7 @@ export default function CompanySettingsPage() {
                                   >
                                     {n.code}
                                   </span>
-                                  <span style={{ color: 'var(--retail-muted)', fontSize: '11.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '220px' }}>
+                                  <span style={{ color: '#64748b', fontSize: '11.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '220px' }}>
                                     {n.address}
                                   </span>
                                 </div>
@@ -847,7 +974,7 @@ export default function CompanySettingsPage() {
                               >
                                 {badge.label}
                               </span>
-                              <small style={{ display: 'block', fontSize: '11px', color: 'var(--retail-muted)', marginTop: '3px' }}>
+                              <small style={{ display: 'block', fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
                                 {parent ? `Parent: ${parent.name}` : 'Enterprise Root'}
                               </small>
                             </div>
@@ -867,55 +994,28 @@ export default function CompanySettingsPage() {
                                   placeItems: 'center',
                                   fontWeight: 800,
                                   fontSize: '10.5px',
-                                  border: '1.5px solid light-dark(#ffffff, #3f3636)',
+                                  border: '1.5px solid #ffffff',
                                   boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                                 }}
                               >
                                 {initials}
                               </div>
-                              <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--retail-ink)' }}>
+                              <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#1e293b' }}>
                                 {n.assignedManager.split('(')[0].trim()}
                               </span>
                             </div>
                           </td>
 
-                          {/* Col 4: TERMINALS & GEOFENCE */}
+                          {/* Col 4: GEOFENCE */}
                           <td style={{ padding: '13px 16px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                              {n.terminalLanes.length > 0 ? (
-                                <span
-                                  style={{
-                                    padding: '2px 7px',
-                                    borderRadius: '6px',
-                                    background: 'light-dark(#e0f2fe, #1f2e38)',
-                                    color: 'light-dark(#0369a1, #b4def5)',
-                                    fontSize: '11px',
-                                    fontWeight: 700,
-                                  }}
-                                >
-                                  {n.terminalLanes.length} POS Lanes
-                                </span>
-                              ) : (
-                                <span
-                                  style={{
-                                    padding: '2px 7px',
-                                    borderRadius: '6px',
-                                    background: 'var(--retail-edge)',
-                                    color: 'var(--retail-muted)',
-                                    fontSize: '11px',
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  Logistics Hub
-                                </span>
-                              )}
                               <span
                                 style={{
                                   padding: '2px 6px',
                                   borderRadius: '6px',
-                                  background: 'var(--retail-raised)',
-                                  border: '1px solid var(--retail-edge-strong)',
-                                  color: 'var(--retail-muted)',
+                                  background: '#f8fafc',
+                                  border: '1px solid #e2e8f0',
+                                  color: '#475569',
                                   fontSize: '10.5px',
                                   fontWeight: 600,
                                 }}
@@ -941,7 +1041,7 @@ export default function CompanySettingsPage() {
                                   borderRadius: '6px',
                                   border: 'none',
                                   background: 'transparent',
-                                  color: 'var(--retail-muted)',
+                                  color: '#64748b',
                                   fontSize: '15px',
                                   cursor: 'pointer',
                                   display: 'grid',
@@ -962,9 +1062,9 @@ export default function CompanySettingsPage() {
                                 style={{
                                   padding: '5px 10px',
                                   borderRadius: '6px',
-                                  border: '1px solid light-dark(#cbd5e1, #34455a)',
-                                  background: 'var(--retail-card)',
-                                  color: 'var(--retail-ink)',
+                                  border: '1px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  color: '#334155',
                                   fontSize: '11px',
                                   fontWeight: 650,
                                   cursor: 'pointer',
@@ -987,7 +1087,7 @@ export default function CompanySettingsPage() {
                                     borderRadius: '6px',
                                     border: 'none',
                                     background: 'transparent',
-                                    color: 'var(--retail-muted)',
+                                    color: '#64748b',
                                     fontSize: '18px',
                                     fontWeight: 900,
                                     cursor: 'pointer',
@@ -1006,9 +1106,9 @@ export default function CompanySettingsPage() {
                                       position: 'absolute',
                                       right: 0,
                                       top: '34px',
-                                      background: 'var(--retail-card)',
+                                      background: '#ffffff',
                                       borderRadius: '10px',
-                                      border: '1px solid var(--retail-edge-strong)',
+                                      border: '1px solid #e2e8f0',
                                       boxShadow: '0 10px 25px rgba(0, 0, 0, 0.12)',
                                       zIndex: 70,
                                       width: '180px',
@@ -1029,7 +1129,7 @@ export default function CompanySettingsPage() {
                                         borderRadius: '6px',
                                         border: 'none',
                                         background: 'transparent',
-                                        color: 'var(--retail-ink)',
+                                        color: '#1e293b',
                                         fontSize: '12.5px',
                                         fontWeight: 600,
                                         cursor: 'pointer',
@@ -1082,11 +1182,11 @@ export default function CompanySettingsPage() {
             style={{
               marginTop: '18px',
               padding: '12px 16px',
-              background: 'var(--retail-raised)',
-              border: '1px solid var(--retail-edge-strong)',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
               borderRadius: '10px',
               fontSize: '11.5px',
-              color: 'var(--retail-muted)',
+              color: '#64748b',
               lineHeight: 1.5,
               display: 'flex',
               alignItems: 'center',
@@ -1105,20 +1205,20 @@ export default function CompanySettingsPage() {
       {activeTab === 'PROFILE' && (
         <div
           style={{
-            background: 'var(--retail-card)',
-            border: '1px solid var(--retail-edge-strong)',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
             borderRadius: '14px',
             padding: '28px',
             boxShadow: '0 2px 10px rgba(0, 0, 0, 0.03)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '22px', borderBottom: '1px solid var(--retail-edge)', paddingBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '22px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
             <span style={{ fontSize: '24px' }}><Landmark size="1em" className="inline-icon" aria-hidden="true" /></span>
             <div>
-              <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
                 Corporate Profile & Enterprise Billing
               </h2>
-              <small style={{ color: 'var(--retail-muted)' }}>
+              <small style={{ color: '#64748b' }}>
                 Configures legal identity, base accounting currency, and global unique invoice namespace.
               </small>
             </div>
@@ -1127,7 +1227,7 @@ export default function CompanySettingsPage() {
           <form onSubmit={handleSaveCompany}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '18px', marginBottom: '24px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
                   Legal Company Entity Name *
                 </label>
                 <input
@@ -1135,18 +1235,18 @@ export default function CompanySettingsPage() {
                   required
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
                   Base Currency *
                 </label>
                 <select
                   value={currency}
                   onChange={(e) => setCurrency(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
                 >
                   <option value="INR">INR - Indian Rupee (₹)</option>
                   <option value="USD">USD - US Dollar ($)</option>
@@ -1157,13 +1257,13 @@ export default function CompanySettingsPage() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
                   Operating Timezone *
                 </label>
                 <select
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
                 >
                   <option value="Asia/Kolkata">Asia/Kolkata (UTC +05:30 - Standard)</option>
                   <option value="Asia/Dubai">Asia/Dubai (UTC +04:00)</option>
@@ -1174,7 +1274,7 @@ export default function CompanySettingsPage() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '6px' }}>
                   Global Unique Invoice Prefix *
                 </label>
                 <input
@@ -1187,43 +1287,19 @@ export default function CompanySettingsPage() {
                     width: '100%',
                     padding: '9px 12px',
                     borderRadius: '8px',
-                    border: '1px solid light-dark(#cbd5e1, #34455a)',
+                    border: '1px solid #cbd5e1',
                     fontSize: '13px',
                     fontFamily: 'monospace',
                     fontWeight: 800,
                     letterSpacing: '0.08em',
-                    color: 'var(--retail-accent)',
+                    color: '#1a62ea',
                   }}
                 />
-                <small style={{ color: 'var(--retail-muted)', fontSize: '11.5px', marginTop: '3px', display: 'block' }}>
+                <small style={{ color: '#64748b', fontSize: '11.5px', marginTop: '3px', display: 'block' }}>
                   Generates invoices as <code>{invoicePrefix}-2026-XXXXX</code>.
                 </small>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
-                  Tax Registration (GSTIN / VAT ID)
-                </label>
-                <input
-                  type="text"
-                  value={taxId}
-                  onChange={(e) => setTaxId(e.target.value)}
-                  placeholder="29AAAAA0000A1Z5"
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', fontFamily: 'monospace' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
-                  Operations Support Email
-                </label>
-                <input
-                  type="email"
-                  value={supportEmail}
-                  onChange={(e) => setSupportEmail(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
-                />
-              </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
@@ -1232,7 +1308,7 @@ export default function CompanySettingsPage() {
                 style={{
                   padding: '10px 24px',
                   borderRadius: '8px',
-                  background: 'var(--retail-accent)',
+                  background: '#1a62ea',
                   color: '#ffffff',
                   border: 'none',
                   fontSize: '13px',
@@ -1251,7 +1327,6 @@ export default function CompanySettingsPage() {
       {/* CONFIGURE / EDIT NODE MODAL */}
       {isEditModalOpen && (
         <div
-          className="admin-dialog-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1265,7 +1340,7 @@ export default function CompanySettingsPage() {
         >
           <div
             style={{
-              background: 'var(--retail-card)',
+              background: '#ffffff',
               borderRadius: '16px',
               maxWidth: '560px',
               width: '100%',
@@ -1277,10 +1352,10 @@ export default function CompanySettingsPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
                   Configure Facility Node
                 </h2>
-                <small style={{ color: 'var(--retail-muted)' }}>
+                <small style={{ color: '#64748b' }}>
                   Dual-axis physical store binding, GPS geofencing & terminal lanes.
                 </small>
               </div>
@@ -1288,7 +1363,7 @@ export default function CompanySettingsPage() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsEditModalOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '18px', color: 'var(--retail-muted)', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
@@ -1297,7 +1372,7 @@ export default function CompanySettingsPage() {
             <form onSubmit={handleSaveNode}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Facility Name *
                   </label>
                   <input
@@ -1305,32 +1380,35 @@ export default function CompanySettingsPage() {
                     required
                     value={nodeName}
                     onChange={(e) => setNodeName(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                    Location Code *
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    System Location ID
                   </label>
                   <input
                     type="text"
-                    required
-                    value={nodeCode}
-                    onChange={(e) => setNodeCode(e.target.value.toUpperCase())}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', fontFamily: 'monospace' }}
+                    readOnly
+                    value={selectedNode?.code || ''}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#64748b', fontSize: '13px', fontFamily: 'monospace' }}
                   />
                 </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Facility Type *
                   </label>
                   <select
                     value={nodeType}
-                    onChange={(e) => setNodeType(e.target.value as any)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
+                    onChange={(e) => {
+                      const nextType = e.target.value as LocationNode['type'];
+                      setNodeType(nextType);
+                      if (nextType === 'CENTRAL_WAREHOUSE') setNodeParent('');
+                    }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
                   >
                     <option value="RETAIL_STORE">RETAIL_STORE (Point of Sale)</option>
                     <option value="SUB_WAREHOUSE">SUB_WAREHOUSE (Regional Depot)</option>
@@ -1338,17 +1416,21 @@ export default function CompanySettingsPage() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Parent Logistics Node
                   </label>
                   <select
                     value={nodeParent}
+                    required={nodeType !== 'CENTRAL_WAREHOUSE'}
+                    disabled={nodeType === 'CENTRAL_WAREHOUSE'}
                     onChange={(e) => setNodeParent(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
                   >
-                    <option value="">None (Enterprise Root)</option>
+                    <option value="">{nodeType === 'CENTRAL_WAREHOUSE' ? 'No parent required' : 'Select a parent warehouse'}</option>
                     {nodes
-                      .filter((n) => n.id !== selectedNodeId)
+                      .filter((n) => n.id !== selectedNodeId && n.isActive && (nodeType === 'SUB_WAREHOUSE'
+                        ? n.type === 'CENTRAL_WAREHOUSE'
+                        : n.type === 'CENTRAL_WAREHOUSE' || n.type === 'SUB_WAREHOUSE'))
                       .map((n) => (
                         <option key={n.id} value={n.id}>
                           {n.name} ({n.code})
@@ -1359,7 +1441,7 @@ export default function CompanySettingsPage() {
               </div>
 
               <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                   Physical Facility Address *
                 </label>
                 <input
@@ -1367,99 +1449,83 @@ export default function CompanySettingsPage() {
                   required
                   value={nodeAddress}
                   onChange={(e) => setNodeAddress(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 />
               </div>
 
               {/* GPS Geofence */}
-              <div style={{ padding: '12px', background: 'var(--retail-raised)', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '8px' }}>
+              <div style={{ padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#1e293b', marginBottom: '8px' }}>
                   <MapPin size="1em" className="inline-icon" aria-hidden="true" /> GPS Geofence & Mobile Check-in (OD-12)
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                   <div>
-                    <span style={{ fontSize: '11px', color: 'var(--retail-muted)' }}>Latitude</span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Latitude</span>
                     <input
                       type="number"
                       step="0.0001"
                       value={nodeLat}
                       onChange={(e) => setNodeLat(e.target.value)}
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '12.5px' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px' }}
                     />
                   </div>
                   <div>
-                    <span style={{ fontSize: '11px', color: 'var(--retail-muted)' }}>Longitude</span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Longitude</span>
                     <input
                       type="number"
                       step="0.0001"
                       value={nodeLng}
                       onChange={(e) => setNodeLng(e.target.value)}
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '12.5px' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px' }}
                     />
                   </div>
                   <div>
-                    <span style={{ fontSize: '11px', color: 'var(--retail-muted)' }}>Radius (Meters)</span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Radius (Meters)</span>
                     <input
                       type="number"
                       min="10"
                       max="500"
                       value={nodeRadius}
                       onChange={(e) => setNodeRadius(e.target.value)}
-                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '12.5px' }}
+                      style={{ width: '100%', padding: '7px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12.5px' }}
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Manager & Terminal Lanes */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                    Assigned Manager
-                  </label>
-                  <input
-                    type="text"
-                    value={nodeManager}
-                    onChange={(e) => setNodeManager(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                    POS Terminal Lanes
-                  </label>
-                  <input
-                    type="text"
-                    value={nodeLanes}
-                    onChange={(e) => setNodeLanes(e.target.value)}
-                    placeholder="POS-T01, POS-T02"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
-                  />
-                </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                  Assigned Manager
+                </label>
+                <select
+                  value={nodeManager}
+                  onChange={(e) => setNodeManager(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
+                >
+                  <option value="">No manager assigned</option>
+                  {managerOptions.map((manager) => (
+                    <option key={manager.id} value={manager.id}>
+                      {manager.email} · {manager.role.replaceAll('_', ' ')} · {manager.locationIds.length ? `Assigned (${manager.locationIds.length} locations)` : 'Unassigned'}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--retail-ink)' }}>
-                  <input
-                    type="checkbox"
-                    checked={nodeActive}
-                    onChange={(e) => setNodeActive(e.target.checked)}
-                  />
-                  <span>Facility is active in corporate hierarchy and accessible for POS operations</span>
-                </label>
-              </div>
+              <p style={{ margin: '0 0 20px', color: '#64748b', fontSize: '12px' }}>
+                Facility status: {selectedNode?.isActive ? 'Active' : 'Inactive'}. Change status from the facility actions menu.
+              </p>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
                 <button
                   type="button"
                   onClick={() => setIsEditModalOpen(false)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', background: 'var(--retail-card)', color: 'var(--retail-muted)', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
+                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  style={{ padding: '9px 20px', borderRadius: '8px', background: 'var(--retail-accent)', color: '#fff', border: 'none', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
+                  style={{ padding: '9px 20px', borderRadius: '8px', background: '#1a62ea', color: '#fff', border: 'none', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
                 >
                   Save Facility Changes
                 </button>
@@ -1472,7 +1538,6 @@ export default function CompanySettingsPage() {
       {/* PROVISION NEW NODE MODAL */}
       {isAddModalOpen && (
         <div
-          className="admin-dialog-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1486,7 +1551,7 @@ export default function CompanySettingsPage() {
         >
           <div
             style={{
-              background: 'var(--retail-card)',
+              background: '#ffffff',
               borderRadius: '16px',
               maxWidth: '520px',
               width: '100%',
@@ -1496,16 +1561,16 @@ export default function CompanySettingsPage() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
               <div>
-                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--retail-ink)' }}>
+                <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: '#0f172a' }}>
                   Provision New Location Node
                 </h2>
-                <small style={{ color: 'var(--retail-muted)' }}>Add a warehouse or retail store to company topology.</small>
+                <small style={{ color: '#64748b' }}>Add a warehouse or retail store to company topology.</small>
               </div>
               <button
                 type="button"
                 aria-label="Close"
                 onClick={() => setIsAddModalOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: '18px', color: 'var(--retail-muted)', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
               >
                 <X size="1em" className="inline-icon" aria-hidden="true" />
               </button>
@@ -1513,7 +1578,7 @@ export default function CompanySettingsPage() {
 
             <form onSubmit={handleAddNode}>
               <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                   Location Facility Name *
                 </label>
                 <input
@@ -1522,51 +1587,45 @@ export default function CompanySettingsPage() {
                   placeholder="e.g. South Bay Retail Outlet"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
-                    Facility Code *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newCode}
-                    onChange={(e) => setNewCode(e.target.value.toUpperCase())}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', fontFamily: 'monospace' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+              <div style={{ marginBottom: '14px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Facility Type *
                   </label>
                   <select
                     value={newType}
-                    onChange={(e) => setNewType(e.target.value as any)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
+                    onChange={(e) => {
+                      const nextType = e.target.value as LocationNode['type'];
+                      setNewType(nextType);
+                      if (nextType === 'CENTRAL_WAREHOUSE') setNewParent('');
+                    }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
                   >
                     <option value="RETAIL_STORE">RETAIL_STORE</option>
                     <option value="SUB_WAREHOUSE">SUB_WAREHOUSE</option>
                     <option value="CENTRAL_WAREHOUSE">CENTRAL_WAREHOUSE</option>
                   </select>
-                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Parent Logistics Node
                   </label>
                   <select
                     value={newParent}
+                    required={newType !== 'CENTRAL_WAREHOUSE'}
+                    disabled={newType === 'CENTRAL_WAREHOUSE'}
                     onChange={(e) => setNewParent(e.target.value)}
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px', background: 'var(--retail-card)' }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
                   >
-                    <option value="">Enterprise Root Node</option>
-                    {nodes.map((n) => (
+                    <option value="">{newType === 'CENTRAL_WAREHOUSE' ? 'No parent required' : 'Select a parent warehouse'}</option>
+                    {nodes.filter((n) => n.isActive && (newType === 'SUB_WAREHOUSE'
+                      ? n.type === 'CENTRAL_WAREHOUSE'
+                      : n.type === 'CENTRAL_WAREHOUSE' || n.type === 'SUB_WAREHOUSE')).map((n) => (
                       <option key={n.id} value={n.id}>
                         {n.name} ({n.code})
                       </option>
@@ -1574,21 +1633,67 @@ export default function CompanySettingsPage() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                     Assigned Manager
                   </label>
-                  <input
-                    type="text"
-                    value={newManager}
-                    onChange={(e) => setNewManager(e.target.value)}
-                    placeholder="Manager name"
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
-                  />
+                  <select
+                    value={newManagerId}
+                    onChange={(e) => setNewManagerId(e.target.value)}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
+                  >
+                    <option value="">No manager assigned</option>
+                    {filteredManagerOptions.map((manager) => (
+                      <option key={manager.id} value={manager.id}>
+                        {manager.email} · {manager.role.replaceAll('_', ' ')} · {manager.locationIds.length ? `Assigned (${manager.locationIds.length} locations)` : 'Unassigned'}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '18px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    Manager assignment status
+                  </label>
+                  <select
+                    value={managerAssignmentFilter}
+                    onChange={(e) => {
+                      setManagerAssignmentFilter(e.target.value as 'UNASSIGNED' | 'ASSIGNED' | 'ALL');
+                      setNewManagerId('');
+                    }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
+                  >
+                    <option value="UNASSIGNED">Unassigned managers</option>
+                    <option value="ASSIGNED">Already assigned managers</option>
+                    <option value="ALL">All active managers</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
+                    Manager role
+                  </label>
+                  <select
+                    value={managerRoleFilter}
+                    onChange={(e) => {
+                      setManagerRoleFilter(e.target.value as 'ALL' | ManagerOption['role']);
+                      setNewManagerId('');
+                    }}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px', background: '#fff' }}
+                  >
+                    <option value="ALL">All manager roles</option>
+                    <option value="CENTRAL_MANAGER">Central manager</option>
+                    <option value="SUB_WAREHOUSE_MANAGER">Sub-warehouse manager</option>
+                    <option value="STORE_MANAGER">Store manager</option>
+                  </select>
+                </div>
+              </div>
+              <small style={{ display: 'block', margin: '-9px 0 18px', color: '#64748b', fontSize: '11.5px' }}>
+                Existing assignments are kept; the selected manager will also receive access to this location.
+              </small>
+
               <div style={{ marginBottom: '22px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', marginBottom: '5px' }}>
                   Physical Facility Address *
                 </label>
                 <input
@@ -1597,7 +1702,7 @@ export default function CompanySettingsPage() {
                   placeholder="Street, City, Postal Code"
                   value={newAddress}
                   onChange={(e) => setNewAddress(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid light-dark(#cbd5e1, #34455a)', fontSize: '13px' }}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 />
               </div>
 
@@ -1605,13 +1710,13 @@ export default function CompanySettingsPage() {
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid light-dark(#cbd5e1, #34455a)', background: 'var(--retail-card)', color: 'var(--retail-muted)', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
+                  style={{ padding: '9px 16px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  style={{ padding: '9px 20px', borderRadius: '8px', background: 'var(--retail-accent)', color: '#fff', border: 'none', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
+                  style={{ padding: '9px 20px', borderRadius: '8px', background: '#1a62ea', color: '#fff', border: 'none', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}
                 >
                   Provision Facility Node
                 </button>

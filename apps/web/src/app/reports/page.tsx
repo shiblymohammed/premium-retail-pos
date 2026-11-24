@@ -189,6 +189,25 @@ export default function ReportsPage() {
     return () => window.removeEventListener('premium-retail-location-change', syncLocation);
   }, []);
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    fetch(`${API}/reports/notifications`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || 'Could not load operational alerts.');
+        if (!cancelled) setNotifications(payload.data as Notifications);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setNotice(error instanceof Error ? error.message : 'Could not load operational alerts.');
+      });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('alerts') === '1') setShowNotifications(true);
+  }, []);
+
   // Deep link: /reports?tab=stock opens that tab; switching tabs keeps the URL in sync.
   useEffect(() => {
     const routeParams = new URLSearchParams(window.location.search);
@@ -246,25 +265,50 @@ export default function ReportsPage() {
     setTableData(null);
   }, [report]);
 
-  function markRead(id: string) {
-    if (!notifications) return;
-    const updated = notifications.items.map((item) => (item.id === id ? { ...item, readAt: new Date().toISOString() } : item));
-    setNotifications({
-      ...notifications,
-      unread: updated.filter(i => !i.readAt).length,
-      items: updated,
-    });
+  async function markRead(id: string) {
+    if (!notifications || !token) return;
+    try {
+      const response = await fetch(`${API}/reports/notifications/${encodeURIComponent(id)}/read`, {
+        method: 'PATCH', headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || 'Could not dismiss this alert.');
+      const readAt = new Date().toISOString();
+      setNotifications((current) => current ? {
+        ...current,
+        unread: Math.max(0, current.unread - (current.items.some((item) => item.id === id && !item.readAt) ? 1 : 0)),
+        items: current.items.map((item) => item.id === id ? { ...item, readAt } : item),
+      } : current);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not dismiss this alert.');
+    }
   }
 
-  function markAllRead() {
-    if (!notifications) return;
-    const updated = notifications.items.map((item) => ({ ...item, readAt: new Date().toISOString() }));
-    setNotifications({
-      ...notifications,
-      unread: 0,
-      items: updated,
-    });
-    setNotice('All operational notifications marked as read.');
+  async function markAllRead() {
+    if (!notifications || !token) return;
+    const unreadItems = notifications.items.filter((item) => !item.readAt);
+    let results: Array<{ id: string; ok: boolean; message?: string }>;
+    try {
+      results = await Promise.all(unreadItems.map(async (item) => {
+        const response = await fetch(`${API}/reports/notifications/${encodeURIComponent(item.id)}/read`, {
+          method: 'PATCH', headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+        });
+        const payload = await response.json().catch(() => ({}));
+        return { id: item.id, ok: response.ok, message: payload.message as string | undefined };
+      }));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not update all operational alerts.');
+      return;
+    }
+    const succeeded = new Set(results.filter((result) => result.ok).map((result) => result.id));
+    const readAt = new Date().toISOString();
+    setNotifications((current) => current ? {
+      ...current,
+      unread: Math.max(0, current.unread - succeeded.size),
+      items: current.items.map((item) => succeeded.has(item.id) ? { ...item, readAt } : item),
+    } : current);
+    const failed = results.find((result) => !result.ok);
+    setNotice(failed ? failed.message || 'Some alerts could not be marked as read.' : 'All operational notifications marked as read.');
   }
 
   function getExportData() {

@@ -29,8 +29,9 @@ export class CompanyController {
   @Post()
   @Roles(Role.SUPER_ADMIN)
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() createCompanyDto: CreateCompanyDto) {
-    return this.companyService.create(createCompanyDto);
+  async create(@Body() createCompanyDto: CreateCompanyDto) {
+    const company = await this.companyService.create(createCompanyDto);
+    return { message: 'Company created', data: company };
   }
 
   /**
@@ -38,14 +39,19 @@ export class CompanyController {
    */
   @Get()
   @Roles(Role.SUPER_ADMIN)
-  findAll() {
-    return this.companyService.findAll();
+  async findAll() {
+    const companies = await this.companyService.findAll();
+    return { data: companies };
   }
 
   /** Get a company and only the locations within the caller's authorized scope. */
   @Get(':id')
-  findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
-    return this.companyService.findOne(id, actor.role === Role.SUPER_ADMIN ? undefined : actor.locationIds);
+  async findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
+    const company = await this.companyService.findOne(
+      id,
+      actor.role === Role.SUPER_ADMIN ? undefined : actor.locationIds,
+    );
+    return { data: company };
   }
 
   /**
@@ -53,11 +59,12 @@ export class CompanyController {
    */
   @Get(':id/statistics')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER)
-  getStatistics(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
-    return this.companyService.getStatistics(
+  async getStatistics(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
+    const statistics = await this.companyService.getStatistics(
       id,
       actor.role === Role.SUPER_ADMIN ? undefined : actor.locationIds,
     );
+    return { data: statistics };
   }
 
   /**
@@ -65,8 +72,9 @@ export class CompanyController {
    */
   @Patch(':id')
   @Roles(Role.SUPER_ADMIN)
-  update(@Param('id') id: string, @Body() updateCompanyDto: UpdateCompanyDto) {
-    return this.companyService.update(id, updateCompanyDto);
+  async update(@Param('id') id: string, @Body() updateCompanyDto: UpdateCompanyDto) {
+    const company = await this.companyService.update(id, updateCompanyDto);
+    return { message: 'Company settings updated', data: company };
   }
 
   /**
@@ -74,10 +82,11 @@ export class CompanyController {
    */
   @Patch(':id/invoice-prefix')
   @Roles(Role.SUPER_ADMIN)
-  updateInvoicePrefix(
+  async updateInvoicePrefix(
     @Param('id') id: string,
     @Body('prefix') prefix: string,
   ) {
-    return this.companyService.updateInvoicePrefix(id, prefix);
+    const company = await this.companyService.updateInvoicePrefix(id, prefix);
+    return { message: 'Invoice prefix updated', data: company };
   }
 }

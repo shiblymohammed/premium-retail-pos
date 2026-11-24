@@ -15,6 +15,7 @@ import { UsersService } from './users.service';
 import { Roles } from '../../common/decorators';
 import { RolesGuard } from '../../common/guards';
 import { CreateUserDto } from './dto/create-user.dto';
+import { CreateUserWithEmployeeDto } from './dto/create-user-with-employee.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -42,6 +43,13 @@ export class UsersController {
       locationIds: dto.locationIds,
     }, actor);
     return { message: 'User created', data: user };
+  }
+
+  @Post('with-employee')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async createWithEmployee(@Body() dto: CreateUserWithEmployeeDto, @CurrentUser() actor: RequestUser) {
+    const user = await this.usersService.createUserWithEmployee(dto, actor);
+    return { message: 'User and employee profile created', data: user };
   }
 
   @Get()
@@ -88,6 +96,13 @@ export class UsersController {
   async deactivate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.deactivateUser(id, actor);
     return { message: 'User deactivated', data: { id: user.id } };
+  }
+
+  @Patch(':id/reactivate')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async reactivate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
+    const user = await this.usersService.reactivateUser(id, actor);
+    return { message: 'User reactivated', data: { id: user.id } };
   }
 
   @Patch(':id/discount-limit')

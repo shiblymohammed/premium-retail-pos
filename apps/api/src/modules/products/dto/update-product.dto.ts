@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   Max,
   MaxLength,
   Min,
@@ -22,6 +23,11 @@ export class UpdateProductDto {
   @IsString()
   @MaxLength(2000)
   description?: string | null;
+
+  @IsOptional()
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
+  @MaxLength(2048)
+  imageUrl?: string | null;
 
   @IsOptional()
   @IsString()

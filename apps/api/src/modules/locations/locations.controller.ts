@@ -16,6 +16,7 @@ import { Roles } from '../../common/decorators';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LocationScopeGuard, RolesGuard } from '../../common/guards';
 import { CreateLocationDto } from './dto/create-location.dto';
+import { UpdateLocationDto } from './dto/update-location.dto';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('locations')
@@ -65,11 +66,27 @@ export class LocationsController {
     return { data: location };
   }
 
+  @Patch(':id')
+  @UseGuards(LocationScopeGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async update(@Param('id') id: string, @Body() dto: UpdateLocationDto) {
+    const location = await this.locationsService.update(id, dto);
+    return { message: 'Location updated', data: location };
+  }
+
   @Patch(':id/deactivate')
   @UseGuards(LocationScopeGuard)
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   async deactivate(@Param('id') id: string) {
     const location = await this.locationsService.deactivate(id);
     return { message: 'Location deactivated', data: { id: location.id } };
+  }
+
+  @Patch(':id/reactivate')
+  @UseGuards(LocationScopeGuard)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  async reactivate(@Param('id') id: string) {
+    const location = await this.locationsService.reactivate(id);
+    return { message: 'Location reactivated', data: { id: location.id } };
   }
 }
