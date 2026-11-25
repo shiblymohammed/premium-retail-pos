@@ -1,3 +1,4 @@
+import { can } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
@@ -315,31 +316,55 @@ export class ReportsService {
     const locations = actor.role === Role.SUPER_ADMIN
       ? (await this.prisma.location.findMany({ where: { isActive: true }, select: { id: true } })).map((location) => location.id)
       : actor.locationIds;
-    if (locations.length === 0) return { generatedAt: new Date().toISOString(), total: 0, items: [] };
+    if (!locations.length) return { generatedAt: new Date().toISOString(), unread: 0, total: 0, items: [] };
+    const manager = [Role.ADMIN, Role.STORE_MANAGER, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER].some((role) => role === actor.role);
+    const approve = can(actor, 'transfers.approve', manager);
+    const receive = can(actor, 'transfers.receive', manager || actor.role === Role.CASHIER || actor.role === Role.STAFF);
+    const dispatch = can(actor, 'transfers.dispatch', manager);
+    const audits = can(actor, 'stock.auditManagement', manager);
+    const counter = !audits && (await this.prisma.user.findUnique({
+      where: { id: actor.userId }, select: { canCountStockAudits: true },
+    }))?.canCountStockAudits;
+    const replenishmentWhere: Prisma.ReplenishmentRequestWhereInput[] = [];
+    if (approve) {
+      replenishmentWhere.push(
+        { sourceLocationId: { in: locations }, destLocation: { type: { not: 'SUB_WAREHOUSE' } } },
+        { sourceLocationId: { in: locations }, destLocation: { type: 'SUB_WAREHOUSE' }, depotAuthorizedAt: { not: null }, depotAuthorizedByUserId: { not: actor.userId } },
+      );
+      if (actor.role === Role.SUB_WAREHOUSE_MANAGER || actor.role === Role.SUPER_ADMIN) {
+        replenishmentWhere.push({ destLocationId: { in: locations }, destLocation: { type: 'SUB_WAREHOUSE' }, depotAuthorizedAt: null });
+      }
+    }
     const [replenishments, recounts, highCounts, transfers] = await Promise.all([
       this.prisma.replenishmentRequest.findMany({
-        where: { status: 'DRAFT', sourceLocationId: { in: locations } },
-        select: { id: true, requestNumber: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true } }, createdAt: true },
+        where: { status: 'DRAFT', OR: replenishmentWhere },
+        select: { id: true, requestNumber: true, depotAuthorizedAt: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true, type: true } }, createdAt: true },
         orderBy: { createdAt: 'desc' }, take: 100,
       }),
-      this.prisma.auditCountItem.findMany({
+      audits || counter ? this.prisma.auditCountItem.findMany({
         where: { requiresRecount: true, recountQtyBase: null, auditSession: { locationId: { in: locations }, status: { in: ['ACTIVE', 'SUBMITTED'] } } },
         select: { id: true, variant: { select: { sku: true, name: true, product: { select: { name: true } } } }, auditSession: { select: { id: true, location: { select: { id: true, name: true } } } } },
         take: 200,
-      }),
-      this.prisma.auditCountItem.findMany({
+      }) : [],
+      audits || counter ? this.prisma.auditCountItem.findMany({
         where: { highCountAlert: true, auditSession: { locationId: { in: locations }, status: { in: ['ACTIVE', 'SUBMITTED'] } } },
         select: { id: true, variant: { select: { sku: true, name: true, product: { select: { name: true } } } }, auditSession: { select: { id: true, location: { select: { id: true, name: true } } } } },
         take: 200,
-      }),
+      }) : [],
       this.prisma.transfer.findMany({
-        where: { OR: [{ sourceLocationId: { in: locations } }, { destLocationId: { in: locations } }], lines: { some: { OR: [{ shortQtyBase: { gt: 0 } }, { damagedQtyBase: { gt: 0 } }, { excessQtyBase: { gt: 0 } }] } } },
+        where: { OR: [...(approve || dispatch ? [{ sourceLocationId: { in: locations } }] : []), ...(receive ? [{ destLocationId: { in: locations } }] : [])], lines: { some: { OR: [{ shortQtyBase: { gt: 0 } }, { damagedQtyBase: { gt: 0 } }, { excessQtyBase: { gt: 0 } }] } } },
         select: { id: true, transferNumber: true, updatedAt: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true } }, lines: { where: { OR: [{ shortQtyBase: { gt: 0 } }, { damagedQtyBase: { gt: 0 } }, { excessQtyBase: { gt: 0 } }] }, select: { shortQtyBase: true, damagedQtyBase: true, excessQtyBase: true } } },
         orderBy: { updatedAt: 'desc' }, take: 100,
       }),
     ]);
     const items = [
-      ...replenishments.map((row) => ({ id: `replenishment:${row.id}`, type: 'REPLENISHMENT_APPROVAL', severity: 'info', title: `Approval needed · ${row.requestNumber}`, message: `${row.sourceLocation.name} → ${row.destLocation.name}`, createdAt: row.createdAt, href: '/operations' })),
+      ...replenishments.map((row) => {
+        const stage = row.destLocation.type === 'SUB_WAREHOUSE' ? (row.depotAuthorizedAt ? 'release' : 'depot') : 'approve';
+        const action = stage === 'release' ? 'Warehouse release needed' : stage === 'depot' ? 'Depot authorization needed' : 'Approval needed';
+        return { id: stage === 'approve' ? `replenishment:${row.id}` : `replenishment:${row.id}:${stage}`, type: 'REPLENISHMENT_APPROVAL', severity: 'info',
+          title: `${action} · ${row.requestNumber}`, message: `${row.sourceLocation.name} → ${row.destLocation.name}`,
+          createdAt: row.depotAuthorizedAt ?? row.createdAt, href: `/operations#replenishment-${row.id}` };
+      }),
       ...recounts.map((row) => ({ id: `recount:${row.id}`, type: 'AUDIT_RECOUNT', severity: 'warning', title: `Recount required · ${row.variant.product.name}`, message: `${row.variant.name} (${row.variant.sku}) · ${row.auditSession.location.name}`, createdAt: null, href: `/audits?locationId=${encodeURIComponent(row.auditSession.location.id)}&sessionId=${encodeURIComponent(row.auditSession.id)}` })),
       ...highCounts.map((row) => ({ id: `audit-high-count:${row.id}`, type: 'AUDIT_HIGH_COUNT', severity: 'warning', title: `High count alert · ${row.variant.product.name}`, message: `${row.variant.name} (${row.variant.sku}) · ${row.auditSession.location.name}`, createdAt: null, href: `/audits?locationId=${encodeURIComponent(row.auditSession.location.id)}&sessionId=${encodeURIComponent(row.auditSession.id)}` })),
       ...transfers.map((row) => {
@@ -354,11 +379,11 @@ export class ReportsService {
       create: { userId: actor.userId, dedupeKey: item.id, type: item.type, title: item.title, message: item.message, href: item.href },
       update: { title: item.title, message: item.message, href: item.href },
     })));
-    const auditDue = await this.prisma.inAppNotification.findMany({
-      where: { userId: actor.userId, type: 'AUDIT_DUE' },
+    const auditDue = audits || counter ? await this.prisma.inAppNotification.findMany({
+      where: { userId: actor.userId, type: 'AUDIT_DUE', href: { in: locations.map((id) => `/audits?locationId=${encodeURIComponent(id)}`) } },
       orderBy: { createdAt: 'desc' },
       take: 50,
-    });
+    }) : [];
     const combined = [...notifications, ...auditDue].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     return { generatedAt: new Date().toISOString(), unread: combined.filter((item) => !item.readAt).length, total: combined.length, items: combined };
   }

@@ -40,6 +40,12 @@ export class UsersController {
     return { data: this.usersService.getRolePresets() };
   }
 
+  @Get('permission-definitions')
+  @Roles(Role.SUPER_ADMIN)
+  permissionDefinitions() {
+    return { data: PERMISSIONS };
+  }
+
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @RestrictedPermission('staff.manage')

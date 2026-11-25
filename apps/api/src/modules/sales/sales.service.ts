@@ -1,10 +1,10 @@
-import type { PermissionOverrides } from '../../common/decorators/permission.decorator';
+import { can, type PermissionOverrides } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InvoiceStatus, LocationType, MovementType, PaymentMethod, Prisma, RefundMethod, RefundType, ReturnDisposition, Role, StockState } from '@prisma/client';
 import { createHash } from 'crypto';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { checkoutLocationId } from '../pos/checkout-access';
+import { CHECKOUT_ROLES, checkoutLocationId } from '../pos/checkout-access';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreateSaleDto, SaleUnit } from './dto/create-sale.dto';
 import { CancelSaleDto } from './dto/cancel-sale.dto';
@@ -351,7 +351,7 @@ export class SalesService {
     const invoice = await this.prisma.invoice.findUnique({
       where: { invoiceNumber: invoiceNumber.trim() },
       include: {
-        location: { select: { id: true, name: true, company: { select: { currency: true } } } },
+        location: { select: { id: true, name: true, company: { select: { currency: true, invoicePrefix: true, requireCheckoutDrawer: true } } } },
         payment: { select: { method: true, amount: true, recordedAt: true } },
         lines: { include: { variant: { select: { id: true, sku: true, name: true, product: { select: { name: true, baseUnit: true } } } } } },
         returns: { include: { lines: true, refund: true } },
@@ -371,6 +371,20 @@ export class SalesService {
       const scopes = await this.prisma.userLocationScope.findMany({ where: { userId: actor.userId }, select: { locationId: true } });
       if (!scopes.some((scope) => scope.locationId === invoice.locationId)) throw new ForbiddenException('You are not authorized for this invoice location');
     }
+    const [operators, drawer] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { id: { in: [invoice.cashierUserId, ...(invoice.cancelledByUserId ? [invoice.cancelledByUserId] : [])] } },
+        select: { id: true, email: true, employee: { select: { firstName: true, lastName: true, employeeCode: true } } },
+      }),
+      invoice.location.company.requireCheckoutDrawer ? this.prisma.cashDrawerSession.findFirst({
+        where: { operatorId: actor.userId, locationId: invoice.locationId, closedAt: null }, select: { id: true },
+      }) : null,
+    ]);
+    const operatorName = (id: string | null) => {
+      const operator = operators.find((entry) => entry.id === id);
+      const employee = operator?.employee;
+      return employee ? `${employee.firstName} ${employee.lastName} · ${employee.employeeCode}` : operator?.email;
+    };
     const returnedQuantities = new Map<string, number>();
     const returnedRefunds = new Map<string, Prisma.Decimal>();
     for (const saleReturn of invoice.returns) {
@@ -387,6 +401,13 @@ export class SalesService {
       createdAt: invoice.createdAt,
       cancelledAt: invoice.cancelledAt,
       cancelledByUserId: invoice.cancelledByUserId,
+      cashierName: operatorName(invoice.cashierUserId),
+      cancelledByName: operatorName(invoice.cancelledByUserId),
+      refundDrawer: {
+        requiredForCash: invoice.location.company.requireCheckoutDrawer,
+        open: !!drawer,
+        canManage: can(actor, 'cash.drawer', CHECKOUT_ROLES.includes(user.role)),
+      },
       cancellationReason: invoice.cancellationReason,
       grossTotal: invoice.grossTotal,
       discountTotal: invoice.discountTotal,

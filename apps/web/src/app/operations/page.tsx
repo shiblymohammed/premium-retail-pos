@@ -68,6 +68,7 @@ interface StockTransfer {
   destLocationId: string;
   requestedByUserId: string;
   requestedByName?: string;
+  timezone?: string;
   transferCode: string;
   sourceLocation: string;
   destLocation: string;
@@ -86,9 +87,11 @@ interface ReplenishmentRequest {
   requestNumber: string;
   status: string;
   generatedByUserId: string;
+  depotAuthorizedAt?: string | null;
+  depotAuthorizedByUserId?: string | null;
   sourceLocation: { id: string; name: string; type: string };
   destLocation: { id: string; name: string; type: string };
-  lines: Array<{ variantId: string; systemSuggestedQtyBase: number; unitsPerCarton: number; variant?: { sku: string; name: string; product?: { name: string } } }>;
+  lines: Array<{ variantId: string; systemSuggestedQtyBase: number; managerApprovedQtyBase?: number | null; unitsPerCarton: number; variant?: { sku: string; name: string; product?: { name: string } } }>;
 }
 
 type LocationOption = { id: string; name: string; type: string; parentId: string | null };
@@ -139,7 +142,12 @@ function splitStamp(value: string) {
   return { day: d.split('-').slice(0, 2).join(' '), time: rest.join(' ') };
 }
 const unitsOf = (t: StockTransfer) => t.items.reduce((s, i) => s + i.totalUnits, 0);
-const cartonsOf = (t: StockTransfer) => t.items.reduce((s, i) => s + i.cartons, 0);
+const depotRequest = (request: ReplenishmentRequest) =>
+  request.sourceLocation.type === 'MAIN_WAREHOUSE' && request.destLocation.type === 'SUB_WAREHOUSE';
+
+function transferTime(date: string, timeZone?: string) {
+  return new Intl.DateTimeFormat('en-IN', { timeZone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date));
+}
 const hasIssues = (t: StockTransfer) => !!t.receipt && t.receipt.damaged + t.receipt.missing > 0;
 const isWarehouse = (loc: string) => /warehouse/i.test(loc);
 const activeTransfer = (t: StockTransfer) => !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status);
@@ -272,6 +280,7 @@ export default function OperationsPage() {
       transferCode: row.transferNumber,
       sourceLocation: row.sourceLocation?.name || row.sourceLocationId,
       destLocation: row.destLocation?.name || row.destLocationId,
+      timezone: row.destLocation?.company?.timezone,
       status: row.status,
       createdAt: row.createdAt,
       dispatchedAt: row.dispatchedAt,
@@ -362,6 +371,13 @@ export default function OperationsPage() {
     window.addEventListener('premium-retail-location-change', sync);
     return () => window.removeEventListener('premium-retail-location-change', sync);
   }, [locations]);
+
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (hash.startsWith('replenishment-') && replenishments.some((request) => hash === `replenishment-${request.id}`)) {
+      document.getElementById(hash)?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [replenishments]);
 
   // Escape closes modals / menus; clicking elsewhere closes the row menu
   useEffect(() => {
@@ -581,7 +597,7 @@ export default function OperationsPage() {
 
   function openReplenishment(request: ReplenishmentRequest) {
     setLineQuantities(Object.fromEntries(request.lines.map((line) => [
-      line.variantId, line.unitsPerCarton > 1 ? Math.ceil(line.systemSuggestedQtyBase / line.unitsPerCarton) : line.systemSuggestedQtyBase,
+      line.variantId, (request.depotAuthorizedAt ? line.managerApprovedQtyBase ?? 0 : line.systemSuggestedQtyBase) / Math.max(1, line.unitsPerCarton || 1),
     ])));
     setAddedVariant('');
     setLineError('');
@@ -600,9 +616,12 @@ export default function OperationsPage() {
     setIsSavingLines(true);
     setLineError('');
     try {
-      await mutate(`/transfers/replenishment/${replenishing.id}/approve`, 'POST', { lines });
+      const signOff = depotRequest(replenishing) && !replenishing.depotAuthorizedAt;
+      await mutate(`/transfers/replenishment/${replenishing.id}/${signOff ? 'depot-sign-off' : 'approve'}`, 'POST', { lines });
       setReplenishing(null);
-      setNotice(`Replenishment ${replenishing.requestNumber} approved and transfer draft created.`);
+      setNotice(signOff ? `Depot authorized ${replenishing.requestNumber} for main warehouse release.`
+        : depotRequest(replenishing) ? `Replenishment ${replenishing.requestNumber} released for packing.`
+        : `Replenishment ${replenishing.requestNumber} approved and transfer draft created.`);
     } catch (error) {
       setLineError(error instanceof Error ? error.message : 'Could not approve replenishment.');
     } finally {
@@ -669,7 +688,7 @@ export default function OperationsPage() {
 
   function exportCsv(list: StockTransfer[]) {
     setMenuFor(null);
-    const header = ['Transfer', 'Status', 'From', 'To', 'Carrier', 'Tracking', 'Created', 'Dispatched', 'Received', 'SKU', 'Product', 'Cartons', 'Units/carton', 'Requested loose', 'Requested units', 'Approved units', 'Packed units', 'In transit', 'Awaiting packing / approval', 'Received good', 'Damaged', 'Missing'];
+    const header = ['Transfer', 'Status', 'From', 'To', 'Carrier', 'Tracking', 'Created', 'Dispatched', 'Received', 'SKU', 'Product', 'Requested cartons', 'Units/carton', 'Requested loose', 'Requested units', 'Approved units', 'Packed units', 'In transit', 'Awaiting packing / approval', 'Received good', 'Damaged', 'Missing'];
     const rows = list.flatMap((t) => t.items.map((i) => [t.transferCode, STATUS_META[t.status].label, t.sourceLocation, t.destLocation, t.carrier, t.trackingNumber, t.createdAt, t.dispatchedAt ?? '', t.receivedAt ?? '', i.sku, i.name, i.cartons, i.unitsPerCarton, i.looseUnits, i.requestedQtyBase, i.approvedQtyBase, i.dispatchedQtyBase, activeTransfer(t) ? outstandingQuantity(i) : 0, pendingItemQuantity(t, i), i.receivedQtyBase - i.damagedQtyBase, i.damagedQtyBase, i.shortQtyBase]));
     const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -862,7 +881,7 @@ export default function OperationsPage() {
                   <span className={`${styles.items} ${styles.right}`}>
                     <strong>{t.status === 'RECEIVED' ? `${t.receipt?.good ?? 0} received good` : `${unitsInTransit(t)} in transit`}</strong>
                     {pendingUnits(t) > 0 && <small>{pendingUnits(t)} {awaitingPacking ? 'to pack' : 'to approve'}</small>}
-                    <small>{t.items.length} product{t.items.length === 1 ? '' : 's'} · {cartonsOf(t)} cartons</small>
+                    <small>{t.items.length} product{t.items.length === 1 ? '' : 's'} · {t.items.reduce((sum, item) => sum + item.cartons, 0)} cartons requested</small>
                   </span>
 
                   <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? `${meta.label} · issues` : meta.label}</span>{nextSteps.map((step) => <small className={styles.nextStep} key={step}>{step}</small>)}</span>
@@ -917,9 +936,9 @@ export default function OperationsPage() {
 
                     <div className={styles.detailSide}>
                       <ol className={styles.timeline}>
-                        <li className={styles.done}><i /><span><strong>Created</strong><small>{t.createdAt}</small></span></li>
-                        <li className={t.dispatchedAt ? styles.done : styles.next}><i /><span><strong>Dispatched</strong><small>{t.dispatchedAt ?? 'Waiting to be sent'}</small></span></li>
-                        <li className={t.receivedAt ? (issues ? styles.warn : styles.done) : t.dispatchedAt ? styles.next : ''}><i /><span><strong>Received</strong><small>{t.receivedAt ?? (t.dispatchedAt ? 'On the way' : '—')}</small></span></li>
+                        <li className={styles.done}><i /><span><strong>Created</strong><small>{transferTime(t.createdAt, t.timezone)}</small></span></li>
+                        <li className={t.dispatchedAt ? styles.done : styles.next}><i /><span><strong>Dispatched</strong><small>{t.dispatchedAt ? transferTime(t.dispatchedAt, t.timezone) : 'Waiting to be sent'}</small></span></li>
+                        <li className={t.receivedAt ? (issues ? styles.warn : styles.done) : t.dispatchedAt ? styles.next : ''}><i /><span><strong>Received</strong><small>{t.receivedAt ? transferTime(t.receivedAt, t.timezone) : (t.dispatchedAt ? 'On the way' : '—')}</small></span></li>
                       </ol>
                       <div className={styles.facts}><span><small>Transfer status</small><b>{meta.label}</b></span><span><small>Requested by</small><b>{t.requestedByName || 'See audit record'}</b></span></div>
                       {t.receipt && (
@@ -956,12 +975,23 @@ export default function OperationsPage() {
       {!receiveOnly && <section className={styles.tableCard} aria-labelledby="replenishment-heading">
         <div className={styles.tableTop}><div><div className="heading-with-info"><h2 id="replenishment-heading">Replenishment requests</h2><InfoHint label="About replenishment requests">Review suggested transfers to restock low inventory. A different manager must approve the request.</InfoHint></div><p>Server generated suggestions require approval by a different manager.</p></div></div>
         {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p><a href="/products">Open products and reorder levels</a></div> : (
-          <ul className={styles.rows}>{replenishments.map((request) => <li className={styles.row} key={request.id}>
-            <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
-            <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>
-            <span className={`${styles.status} ${request.status === 'DRAFT' ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{request.status.replaceAll('_', ' ')}</span>
-            {request.status === 'DRAFT' ? <span className={styles.rowActions}><button type="button" className={styles.actionButton} onClick={() => openReplenishment(request)} disabled={!canApproveTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Review quantities</button><button type="button" className={styles.ghostButton} onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) }); }} disabled={!canApproveTransfers || request.generatedByUserId === apiUserId || !canActAt(request.sourceLocation.id)}>Reject</button></span> : <span />}
-          </li>)}</ul>
+          <ul className={styles.rows}>{replenishments.map((request) => {
+            const isDepot = depotRequest(request);
+            const needsDepot = isDepot && !request.depotAuthorizedAt;
+            const canSignOff = canApproveTransfers && ['SUB_WAREHOUSE_MANAGER', 'SUPER_ADMIN'].includes(apiRole) && canActAt(request.destLocation.id);
+            const canRelease = canApproveTransfers && canActAt(request.sourceLocation.id) &&
+              request.generatedByUserId !== apiUserId && request.depotAuthorizedByUserId !== apiUserId;
+            const isDraft = request.status === 'DRAFT';
+            return <li className={styles.row} key={request.id} id={`replenishment-${request.id}`}>
+              <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
+              <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + (request.depotAuthorizedAt ? line.managerApprovedQtyBase ?? 0 : line.systemSuggestedQtyBase), 0)} {request.depotAuthorizedAt ? 'authorized' : 'suggested'} units</small></span>
+              <span className={`${styles.status} ${isDraft ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{isDraft && isDepot ? needsDepot ? 'Awaiting depot authorization' : 'Awaiting main warehouse release' : request.status.replaceAll('_', ' ')}</span>
+              {isDraft && <span className={styles.rowActions}>
+                <button type="button" className={styles.actionButton} onClick={() => openReplenishment(request)} disabled={needsDepot ? !canSignOff : !canRelease}>{needsDepot ? 'Review and authorize' : isDepot ? 'Review and release' : 'Review quantities'}</button>
+                {!needsDepot && <button type="button" className={styles.ghostButton} onClick={() => setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) })} disabled={!canRelease}>Reject</button>}
+              </span>}
+            </li>;
+          })}</ul>
         )}
       </section>}
 
@@ -969,7 +999,7 @@ export default function OperationsPage() {
         <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="transfer-quantities-title">
           <header className={styles.modalHead}>
             <div><h2 id="transfer-quantities-title">{packing ? `Confirm packing for ${packing.transferCode}` : `Review ${replenishing?.requestNumber}`}</h2>
-              <p>{packing ? 'Enter what was actually packed. The remaining quantities stay open.' : 'Adjust the suggested quantities or add products before approving.'}</p></div>
+              <p>{packing ? 'Enter what was actually packed. The remaining quantities stay open.' : replenishing?.depotAuthorizedAt ? 'Review the depot’s authorized quantities before releasing the transfer for packing.' : 'Adjust the suggested quantities or add products before approving.'}</p></div>
           </header>
           <form onSubmit={packing ? confirmPacking : approveReplenishment}>
             <div className={styles.modalBody}>
@@ -993,10 +1023,10 @@ export default function OperationsPage() {
                     const shipsInCartons = (suggested?.unitsPerCarton ?? variant?.unitsPerCarton ?? 1) > 1;
                     return <label className={styles.field} key={variantId}>
                       <span>{variant?.name ?? variantId} · {shipsInCartons ? 'Cartons' : 'Loose units'}</span>
-                      <input type="number" min="0" step="1" max="2147483647" value={quantity} disabled={isSavingLines} onChange={(event) => setLineQuantities((current) => ({ ...current, [variantId]: Number(event.target.value) }))} />
+                      <input type="number" min="0" step="1" max="2147483647" value={quantity} disabled={isSavingLines || !!replenishing.depotAuthorizedAt} onChange={(event) => setLineQuantities((current) => ({ ...current, [variantId]: Number(event.target.value) }))} />
                     </label>;
                   })}
-                  <label className={styles.field}><span>Add another product</span>
+                  {!replenishing.depotAuthorizedAt && <><label className={styles.field}><span>Add another product</span>
                     <select value={addedVariant} disabled={isSavingLines} onChange={(event) => setAddedVariant(event.target.value)}><option value="">Select a product</option>
                       {choices.map((variant) => <option key={variant.variantId} value={variant.variantId}>{variant.name} · {variant.sku}</option>)}
                     </select>
@@ -1004,14 +1034,14 @@ export default function OperationsPage() {
                   <button type="button" className={styles.ghostButton} disabled={!addedVariant || isSavingLines} onClick={() => {
                     setLineQuantities((current) => ({ ...current, [addedVariant]: 1 }));
                     setAddedVariant('');
-                  }}>Add product</button>
+                  }}>Add product</button></>}
                 </>;
               })()}
               {lineError && <Feedback tone="error">{lineError}</Feedback>}
             </div>
             <footer className={styles.modalFoot}>
               <button type="button" className={styles.ghostButton} disabled={isSavingLines} onClick={() => { setPacking(null); setReplenishing(null); }}>Cancel</button>
-              <button type="submit" className={styles.primaryButton} disabled={isSavingLines}>{isSavingLines ? 'Saving…' : packing ? 'Confirm and dispatch' : 'Approve request'}</button>
+              <button type="submit" className={styles.primaryButton} disabled={isSavingLines}>{isSavingLines ? 'Saving…' : packing ? 'Confirm and dispatch' : replenishing?.depotAuthorizedAt ? 'Release for packing' : replenishing && depotRequest(replenishing) ? 'Authorize and send upstream' : 'Approve request'}</button>
             </footer>
           </form>
         </section>

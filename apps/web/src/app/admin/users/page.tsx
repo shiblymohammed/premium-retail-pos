@@ -21,6 +21,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { AdminModal } from '@/components/admin';
 import { AdminActionMenu } from '@/components/admin/admin-action-menu';
+import { PermissionMatrix } from '@/components/ui/permission-matrix';
 import { Feedback } from '@/components/ui/feedback';
 import Link from 'next/link';
 
@@ -128,6 +129,9 @@ export default function UserManagementPage() {
   const [formSalary, setFormSalary] = useState('');
   const [formRole, setFormRole] = useState<ManagedUser['role']>('CASHIER');
   const [presets, setPresets] = useState<Record<string, PermissionPreset>>({});
+  const [permissionDefinitions, setPermissionDefinitions] = useState<Record<string, string> | null>(null);
+  const [permissionDefinitionError, setPermissionDefinitionError] = useState('');
+  const [accessOverrides, setAccessOverrides] = useState<Record<string, boolean>>({});
   const [presetError, setPresetError] = useState('');
   const [permissionOverrides, setPermissionOverrides] = useState<Partial<PermissionPreset>>({});
   const preset = presets[formRole];
@@ -189,6 +193,14 @@ export default function UserManagementPage() {
         setPresets(data);
       })
       .catch(() => setPresetError('Could not load role presets.'));
+    if (session.user.role === 'SUPER_ADMIN') {
+      void fetch(`${API_BASE}/users/permission-definitions`, { headers, cache: 'no-store' })
+        .then(async (response) => {
+          if (!response.ok) throw new Error('Could not load the complete permission list.');
+          setPermissionDefinitions((await response.json()).data);
+        })
+        .catch(() => setPermissionDefinitionError('Could not load the complete permission list. Reload the page to retry.'));
+    }
     Promise.all([
       fetch(`${API_BASE}/users`, { headers, cache: 'no-store' }),
       fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
@@ -268,6 +280,7 @@ export default function UserManagementPage() {
     setFormSalary('');
     setFormRole('CASHIER');
     setPermissionOverrides({});
+    setAccessOverrides({});
     setFormLocations([]);
     setIsModalOpen(true);
   };
@@ -300,7 +313,7 @@ export default function UserManagementPage() {
   const handleSaveUser = async (e: FormEvent) => {
     e.preventDefault();
     if (savingUser) return;
-    const needsEmployee = formRole !== 'SUPER_ADMIN' && formRole !== 'ADMIN';
+    const needsEmployee = formRole !== 'SUPER_ADMIN';
     if (!formEmail.trim() || (needsEmployee && !formName.trim())) {
       setFormError('Name and Email are required for employee accounts.');
       return;
@@ -321,8 +334,8 @@ export default function UserManagementPage() {
       setFormError('Remove inactive locations before saving this account.');
       return;
     }
-    const initialPermissions = !editingUser && currentUserRole === 'SUPER_ADMIN' && Object.keys(permissionOverrides).length
-      ? { initialPermissions: permissionOverrides } : {};
+    const initialPermissions = !editingUser && currentUserRole === 'SUPER_ADMIN' && formRole !== 'SUPER_ADMIN' && (Object.keys(permissionOverrides).length || Object.keys(accessOverrides).length)
+      ? { initialPermissions: { ...permissionOverrides, ...(Object.keys(accessOverrides).length && { permissionOverrides: accessOverrides }) } } : {};
     const nameParts = formName.trim().split(/\s+/);
     const createEmployeeProfile = !editingUser && needsEmployee;
     const employeeProfile = {
@@ -1147,7 +1160,7 @@ export default function UserManagementPage() {
 
             <form onSubmit={handleSaveUser}>
               {formError && <Feedback tone="error">{formError}</Feedback>}
-              {formRole !== 'SUPER_ADMIN' && formRole !== 'ADMIN' && (
+              {formRole !== 'SUPER_ADMIN' && (
               <div className="admin-form-grid">
                 <div>
                   <label htmlFor="user-name" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>
@@ -1199,7 +1212,7 @@ export default function UserManagementPage() {
                   </label>
                   <select id="user-role"
                     value={formRole}
-                    onChange={(event) => { setFormRole(event.target.value as ManagedUser['role']); setPermissionOverrides({}); }}
+                    onChange={(event) => { setFormRole(event.target.value as ManagedUser['role']); setPermissionOverrides({}); setAccessOverrides({}); }}
                     style={{ width: '100%', padding: '9px 12px', borderRadius: '7px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px', background: 'var(--retail-card)' }}
                   >
                     <option value="CASHIER">Cashier (POS Lane)</option>
@@ -1239,7 +1252,7 @@ export default function UserManagementPage() {
                 </> : <p role="status">{presetError || 'Loading role preset…'}</p>}
               </fieldset>}
 
-              {formRole !== 'SUPER_ADMIN' && formRole !== 'ADMIN' && <div className="admin-form-grid">
+              {formRole !== 'SUPER_ADMIN' && <div className="admin-form-grid">
                 <label>Joining date <input className="admin-profile-input" type="date" required value={formHireDate} onChange={(event) => setFormHireDate(event.target.value)} /></label>
                 <label>Phone <input className="admin-profile-input" type="tel" maxLength={21} value={formPhone} onChange={(event) => setFormPhone(event.target.value)} /></label>
                 <label>Designation <input className="admin-profile-input" maxLength={120} value={formDesignation} onChange={(event) => setFormDesignation(event.target.value)} /></label>
@@ -1247,6 +1260,13 @@ export default function UserManagementPage() {
                 <label>Address <input className="admin-profile-input" maxLength={400} value={formAddress} onChange={(event) => setFormAddress(event.target.value)} /></label>
               </div>}
 
+              {!editingUser && currentUserRole === 'SUPER_ADMIN' && formRole !== 'SUPER_ADMIN' &&
+                <details className="admin-user-permission-review">
+                  <summary>Review all permissions before creating the account</summary>
+                  {permissionDefinitions ? <PermissionMatrix definitions={permissionDefinitions} overrides={accessOverrides}
+                    setOverrides={setAccessOverrides} disabled={savingUser} />
+                    : <p role="status">{permissionDefinitionError || 'Loading permissions…'}</p>}
+                </details>}
               {!editingUser && (
                 <div style={{ marginBottom: '14px' }}>
                   <label htmlFor="user-password" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '5px' }}>

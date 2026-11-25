@@ -14,6 +14,7 @@ describe('product unit conversion', () => {
       .toThrow('This product has no carton conversion');
     expect(convertToBaseUnits({ cartons: 0, baseUnits: 7, unitsPerCarton: null })).toBe(7);
     expect(formatMixedUnitQuantity(7, 'packet', null)).toBe('7 packets');
+    expect(formatMixedUnitQuantity(7, 'packet', 10)).toBe('7 packets');
   });
 
   it('rejects fractional and overflowing stock quantities', () => {

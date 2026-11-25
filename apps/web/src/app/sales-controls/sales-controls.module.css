@@ -342,3 +342,6 @@
 .explainer { align-self: start; }
 .explainer summary { cursor: pointer; font-weight: 700; }
 .explainer p { margin: 12px 0 0; }
+
+.refundDrawer { display: grid; gap: 8px; justify-items: start; margin-block: 12px; }
+.refundDrawer p { margin: 0; }

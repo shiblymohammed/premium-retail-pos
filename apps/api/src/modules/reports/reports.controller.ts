@@ -103,11 +103,13 @@ export class ReportsController {
   }
 
   @Get('notifications')
+  @Roles(...Object.values(Role))
   async notifications(@CurrentUser() actor: RequestUser) {
     return { data: await this.reports.notifications(actor) };
   }
 
   @Patch('notifications/:id/read')
+  @Roles(...Object.values(Role))
   async markNotificationRead(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     await this.reports.markNotificationRead(id, actor.userId);
     return { message: 'Notification marked as read' };

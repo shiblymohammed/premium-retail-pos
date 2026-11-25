@@ -30,8 +30,10 @@ type Profile = {
   staff: DirectoryEntry & {
     designation: string | null; hireDate: string; phone: string | null; address: string | null; isActive: boolean;
     location: { name: string; company: { currency: string; timezone: string } };
-    user: { email: string; role: string; canCancelSales: boolean; canProcessReturns: boolean; canCountStockAudits: boolean; discountLimitPercent: string };
+    user: { email: string; role: string; canCancelSales: boolean; canProcessReturns: boolean; canCountStockAudits: boolean; discountLimitPercent: string; permissionOverrides?: Record<string, boolean> };
   };
+  permissionDefinitions?: Record<string, string>;
+  permissionDefaults?: { canProcessReturns: boolean; canCancelSales: boolean; canCountStockAudits: boolean; discountLimitPercent: number };
   attendance: Array<{ at: string; action: string; late: boolean }>;
   workMinutes: number;
   breakMinutes: number;
@@ -192,6 +194,15 @@ export default function StaffRecordsPage() {
       const monthDates = Array.from({ length: new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).getUTCDate() },
         (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      const access = Object.entries(staff.user.permissionOverrides ?? {}).map(([key, allow]) =>
+        `${profile.permissionDefinitions?.[key] ?? key} (${allow ? 'allowed' : 'denied'})`);
+      const defaults = profile.permissionDefaults;
+      if (defaults) {
+        for (const [key, label] of [['canProcessReturns', 'Returns'], ['canCancelSales', 'Cancel sales'], ['canCountStockAudits', 'Count stock']] as const) {
+          if (defaults[key] !== staff.user[key]) access.push(`${label} (${staff.user[key] ? 'allowed' : 'denied'})`);
+        }
+        if (defaults.discountLimitPercent !== Number(staff.user.discountLimitPercent)) access.push(`Discount limit (${staff.user.discountLimitPercent}%)`);
+      }
       const localTime = (at: string) => new Date(at).toLocaleString('en-IN', { timeZone: timezone });
       return <>
         <div className={styles.grid}>
@@ -202,7 +213,7 @@ export default function StaffRecordsPage() {
               ['Status', staff.isActive ? 'Active' : 'Inactive'], ['Designation', staff.designation], ['Joined', staff.hireDate.slice(0, 10)],
               ['Phone', staff.phone], ['Address', staff.address], ['Email', staff.user.email],
               ['Discount limit', staff.user.discountLimitPercent + '%'],
-              ['Permissions', [staff.user.canProcessReturns && 'Returns', staff.user.canCancelSales && 'Cancel sales', staff.user.canCountStockAudits && 'Count stock'].filter(Boolean).join(', ') || 'Role defaults'],
+              ['Permission overrides', access.length ? access.join(', ') : 'Using role defaults'],
             ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>)}</dl>
           </section>
           {sales && <section className={styles.panel}><h2>Sales performance</h2>

@@ -7,7 +7,7 @@ import { staffRequest } from './records-api';
 import styles from './records.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
-type Contact = { employeeCode: string; firstName: string; lastName: string; hireDate: string; phone: string | null };
+type Contact = { employeeCode: string; firstName: string; lastName: string; hireDate: string; phone: string | null; address?: string | null; designation?: string | null };
 
 export function OutletStaffEditor({ staff, onSaved, onCancel }: {
   staff?: Contact & { id: string }; onSaved: (id: string) => void; onCancel: () => void;
@@ -16,7 +16,7 @@ export function OutletStaffEditor({ staff, onSaved, onCancel }: {
   const [locationId, setLocationId] = useState('');
   const [values, setValues] = useState({
     firstName: staff?.firstName ?? '', lastName: staff?.lastName ?? '', employeeCode: staff?.employeeCode ?? '',
-    hireDate: staff?.hireDate.slice(0, 10) ?? '', phone: staff?.phone ?? '', email: '', password: '', role: 'STAFF',
+    hireDate: staff?.hireDate.slice(0, 10) ?? '', phone: staff?.phone ?? '', address: staff?.address ?? '', designation: staff?.designation ?? '', email: '', password: '', role: 'STAFF',
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -55,8 +55,9 @@ export function OutletStaffEditor({ staff, onSaved, onCancel }: {
     {error && <Feedback tone="error">{error}</Feedback>}
     <form className={styles.fields} onSubmit={(e) => void submit(e)}>
       {([['firstName', 'First name', 'text', 80], ['lastName', 'Last name', 'text', 80], ['employeeCode', 'Employee code', 'text', 32],
-        ['hireDate', 'Joining date', 'date', 10], ['phone', 'Phone', 'tel', 20]] as const).map(([key, label, type, max]) =>
-        <label key={key}>{label}<input type={type} value={values[key]} required={key !== 'phone'} maxLength={max}
+        ['hireDate', 'Joining date', 'date', 10], ['phone', 'Phone', 'tel', 20], ['address', 'Address', 'text', 400],
+        ['designation', 'Designation', 'text', 120]] as const).map(([key, label, type, max]) =>
+        <label key={key}>{label}<input type={type} value={values[key]} required={['firstName', 'lastName', 'employeeCode', 'hireDate'].includes(key)} maxLength={max}
           onChange={(event) => setValues((previous) => ({ ...previous, [key]: event.target.value }))} /></label>)}
       {!staff && <>
         <label>Email<input type="email" required maxLength={254} value={values.email} onChange={(event) => setValues((previous) => ({ ...previous, email: event.target.value }))} /></label>

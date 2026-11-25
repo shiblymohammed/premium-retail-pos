@@ -38,7 +38,7 @@ describe('InventoryService ledger balances', () => {
         ...row,
         stockState: StockState.IN_TRANSIT,
         quantityBaseUnits: 0,
-        formattedQuantity: '0 packets = 0 packets',
+        formattedQuantity: '0 packets',
       },
     ]);
   });
@@ -78,7 +78,7 @@ describe('InventoryService ledger balances', () => {
     });
     expect(result).toEqual(expect.objectContaining({
       balanceBaseUnits: -2,
-      formattedBalance: '-2 packets = -2 packets',
+      formattedBalance: '-2 packets',
       negativeAvailable: true,
       type: MovementType.STOCK_ADJUSTMENT,
       actorId: 'user-id',

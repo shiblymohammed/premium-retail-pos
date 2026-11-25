@@ -48,6 +48,18 @@ export class TransfersController {
     return { data: await this.transfers.findReplenishments(actor) };
   }
 
+  @Post('replenishment/:id/depot-sign-off')
+  @Roles(Role.SUB_WAREHOUSE_MANAGER, Role.SUPER_ADMIN)
+  @Permission('transfers.approve')
+  async authorizeDepotReplenishment(
+    @Param('id') id: string,
+    @Body() dto: ApproveReplenishmentDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @CurrentUser() actor: RequestUser,
+  ) {
+    return { data: await this.transfers.approveReplenishment(id, dto, actor, idempotencyKey, true) };
+  }
+
   @Post('replenishment/:id/approve')
   @Permission('transfers.approve')
   async approveReplenishment(

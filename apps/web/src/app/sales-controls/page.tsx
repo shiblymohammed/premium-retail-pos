@@ -1,5 +1,6 @@
 'use client';
 
+import { CashDrawer } from '../cash-drawer';
 import { Feedback } from '@/components/ui/feedback';
 import {
   Ban,
@@ -26,7 +27,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import styles from './sales-controls.module.css';
 
@@ -71,10 +72,14 @@ type Invoice = {
   invoiceNumber: string;
   status: 'FINALIZED' | 'CANCELLED';
   cashierName?: string;
+  cancelledByName?: string;
+  refundDrawer?: { requiredForCash: boolean; open: boolean; canManage: boolean };
   location: {
+    id: string;
     name: string;
     company: {
       currency: string;
+      invoicePrefix?: string;
     };
   };
   createdAt: string;
@@ -156,6 +161,7 @@ export default function SalesControlsPage() {
   const [permissions, setPermissions] = useState<SalePermissions | null>(null);
 
   // Invoices looked up from the server during this session, newest first
+  const [companyBilling, setCompanyBilling] = useState<{ currency: string; invoicePrefix: string }>();
   const [knownInvoices, setKnownInvoices] = useState<Invoice[]>([]);
 
   // Invoice lookup state
@@ -174,6 +180,8 @@ export default function SalesControlsPage() {
 
   // Return state
   const [returnRefundMethod, setReturnRefundMethod] = useState<RefundMethod>('CASH');
+  const [refundDrawerOpen, setRefundDrawerOpen] = useState(false);
+  const onRefundDrawer = useCallback((id: string | null) => setRefundDrawerOpen(!!id), []);
   const [returnRefundRef, setReturnRefundRef] = useState('');
   const [returnLines, setReturnLines] = useState<Record<string, ReturnLineSelection>>({});
 
@@ -182,12 +190,30 @@ export default function SalesControlsPage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const currency = (amount: number | string, code = invoice?.location.company.currency || 'INR') =>
+  const currency = (amount: number | string, code = invoice?.location.company.currency || companyBilling?.currency || 'INR') =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: code }).format(Number(amount) || 0);
   const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   /** Shows a bill and keeps the "recent bills" list in sync with any change to it. */
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    setCompanyBilling(undefined);
+    void fetch(API_BASE + '/locations?type=RETAIL_STORE&isActive=true', {
+      headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) return;
+      const { data } = await response.json() as { data: Array<{ company: { currency: string; invoicePrefix: string } }> };
+      const billing = data[0]?.company;
+      if (billing && data.every((location) => location.company.invoicePrefix === billing.invoicePrefix) && !controller.signal.aborted) {
+        setCompanyBilling(billing);
+      }
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [token]);
+
   function setInvoice(next: Invoice | null) {
+    setRefundDrawerOpen(next?.refundDrawer?.open ?? false);
     setInvoiceState(next);
     if (!next) return;
     setKnownInvoices((list) => [next, ...list.filter((i) => i.invoiceNumber !== next.invoiceNumber)]);
@@ -322,8 +348,21 @@ export default function SalesControlsPage() {
 
   const selectedCount = Object.values(returnLines).filter((s) => s.selected && s.quantity > 0).reduce((s, l) => s + l.quantity, 0);
 
+  const needsCondition = Object.values(returnLines).some((line) =>
+    line.selected && line.quantity > 0 && line.inspectionNotes.trim().length < 5);
+  const cashDrawerRequired = Boolean(invoice?.refundDrawer?.requiredForCash) &&
+    (activeTab === 'return' ? returnRefundMethod : cancelRefundMethod) === 'CASH';
+  const refundDrawerBlocked = cashDrawerRequired && !refundDrawerOpen;
+  const refundDrawerControl = cashDrawerRequired && invoice && <div className={styles.refundDrawer}>
+    {refundDrawerBlocked && <p role="status">{invoice.refundDrawer?.canManage
+      ? `Open your cash drawer at ${invoice.location.name} before recording the cash refund.`
+      : 'Ask a supervisor with drawer access at this store to record the cash refund.'}</p>}
+    {invoice.refundDrawer?.canManage && <CashDrawer key={invoice.location.id} api={API_BASE} token={token}
+      locationId={invoice.location.id} canClose={false} onDrawer={onRefundDrawer} formatMoney={currency} />}
+  </div>;
+
   async function handleCancelSale() {
-    if (!invoice || !confirmedGoodsReturned) return;
+    if (!invoice || !confirmedGoodsReturned || refundDrawerBlocked) return;
     const finalReason = `${cancelReasonCategory}: ${cancelDetailedNotes.trim() || 'No additional notes'}`;
     setBusy(true);
     setError('');
@@ -356,7 +395,7 @@ export default function SalesControlsPage() {
   }
 
   async function handleRecordReturn() {
-    if (!invoice) return;
+    if (!invoice || refundDrawerBlocked) return;
     const selectedLineEntries = Object.entries(returnLines).filter(([, sel]) => sel.selected && sel.quantity > 0);
     if (selectedLineEntries.length === 0) {
       setError('Choose at least one item the customer is bringing back.');
@@ -497,7 +536,7 @@ export default function SalesControlsPage() {
           <form onSubmit={findInvoice} className={styles.findForm}>
             <label className={styles.findInput}>
               <Icon name="receipt" size={17} />
-              <input type="text" placeholder="e.g. INV-2026-0842" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} aria-label="Bill number" />
+              <input type="text" placeholder={`e.g. ${invoice?.location.company.invoicePrefix || companyBilling?.invoicePrefix || 'INV'}-00000001`} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} aria-label="Bill number" />
             </label>
             <button type="submit" disabled={busy || !invoiceNumber.trim()} className={styles.primaryButton}><Icon name="search" size={16} /> Find bill</button>
           </form>
@@ -593,7 +632,7 @@ export default function SalesControlsPage() {
               <article className={`${styles.card} ${styles.cancelledCard}`}>
                 <span className={styles.cancelledIcon}><Icon name="ban" size={24} /></span>
                 <h2>This bill is cancelled</h2>
-                <p>Cancelled {invoice.cancelledAt ? when(invoice.cancelledAt) : ''} by {invoice.cancelledByUserId || 'a supervisor'}. No more returns or changes can be made.</p>
+                <p>Cancelled {invoice.cancelledAt ? when(invoice.cancelledAt) : ''} by {invoice.cancelledByName || 'a supervisor'}. No more returns or changes can be made.</p>
                 <div className={styles.reasonBox}><small>Reason</small><span>{invoice.cancellationReason}</span></div>
               </article>
             ) : (
@@ -642,7 +681,12 @@ export default function SalesControlsPage() {
                                     </div>
                                   </div>
                                 </div>
-                                <input className={styles.noteInput} type="text" placeholder="Condition note, e.g. seal intact" value={sel.inspectionNotes} onChange={(e) => updateLine(line.id, { inspectionNotes: e.target.value })} aria-label="Condition note" />
+                                <label>Condition note (required)
+                                  <input className={styles.noteInput} type="text" placeholder="e.g. Seal intact" value={sel.inspectionNotes}
+                                    required minLength={5} aria-invalid={sel.inspectionNotes.trim().length < 5}
+                                    aria-describedby={`inspection-${line.id}`} onChange={(e) => updateLine(line.id, { inspectionNotes: e.target.value })} />
+                                </label>
+                                <small id={`inspection-${line.id}`}>Enter at least 5 characters.</small>
                               </div>
                             )}
                           </div>
@@ -657,10 +701,11 @@ export default function SalesControlsPage() {
                       ))}
                     </div>
                     <input className={styles.noteInput} type="text" placeholder="Refund slip or card approval number (optional)" value={returnRefundRef} onChange={(e) => setReturnRefundRef(e.target.value)} aria-label="Refund reference" />
+                    {refundDrawerControl}
 
                     <div className={styles.payout}>
                       <div><small>Refund to customer</small><strong>{currency(calculatedReturnRefund)}</strong><span>{selectedCount ? `${selectedCount} item${selectedCount === 1 ? '' : 's'}${Number(invoice.discountTotal) > 0 ? ' · after bill discount' : ''}` : 'No items chosen yet'}</span></div>
-                      <button type="button" onClick={handleRecordReturn} disabled={busy || calculatedReturnRefund <= 0} className={styles.primaryButton}><Icon name="check" size={16} /> Record return</button>
+                      <button type="button" onClick={handleRecordReturn} disabled={busy || selectedCount === 0 || needsCondition || refundDrawerBlocked} className={styles.primaryButton}><Icon name="check" size={16} /> Record return</button>
                     </div>
                   </div>
                 )}
@@ -684,6 +729,7 @@ export default function SalesControlsPage() {
                       ))}
                     </div>
                     <input className={styles.noteInput} type="text" placeholder="Refund slip reference (optional)" value={cancelRefundRef} onChange={(e) => setCancelRefundRef(e.target.value)} aria-label="Refund slip reference" />
+                    {refundDrawerControl}
 
                     <h3 className={styles.step}><span>3</span> Confirm</h3>
                     <label className={styles.confirm}>
@@ -693,7 +739,7 @@ export default function SalesControlsPage() {
 
                     <div className={styles.payout}>
                       <div><small>Full refund</small><strong className={styles.redText}>{currency(invoice.netTotal)}</strong><span>{REFUND_METHODS.find((m) => m.value === cancelRefundMethod)?.label}</span></div>
-                      <button type="button" onClick={() => setCancelConfirmModalOpen(true)} disabled={!confirmedGoodsReturned || busy || (cancelReasonCategory.startsWith('Other') && !cancelDetailedNotes.trim())} className={styles.dangerButton}><Icon name="ban" size={16} /> Cancel bill</button>
+                      <button type="button" onClick={() => setCancelConfirmModalOpen(true)} disabled={!confirmedGoodsReturned || busy || refundDrawerBlocked || (cancelReasonCategory.startsWith('Other') && !cancelDetailedNotes.trim())} className={styles.dangerButton}><Icon name="ban" size={16} /> Cancel bill</button>
                     </div>
                   </div>
                 )}

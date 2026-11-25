@@ -28,13 +28,20 @@ function employeeProfileFields(profile: EmployeeProfileDto) {
   };
 }
 
-function roleDefaults(role: Role) {
+export function roleDefaults(role: Role) {
   return {
     discountLimitPercent: role === Role.ADMIN ? 100 : role === Role.STORE_MANAGER ? 10 : role === Role.CASHIER ? 5 : 0,
     canProcessReturns: role === Role.ADMIN || role === Role.STORE_MANAGER,
     canCancelSales: role === Role.ADMIN,
     canCountStockAudits: role === Role.INVENTORY,
   };
+}
+
+function validatePermissionOverrides(overrides: PermissionOverrides) {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides) ||
+    Object.entries(overrides).some(([key, value]) => !Object.prototype.hasOwnProperty.call(PERMISSIONS, key) || typeof value !== 'boolean')) {
+    throw new BadRequestException('Provide supported permission names and boolean values');
+  }
 }
 
 @Injectable()
@@ -67,10 +74,7 @@ export class UsersService {
 
   async setPermissionProfile(id: string, overrides: PermissionOverrides, actor: UserActor) {
     if (actor.role !== Role.SUPER_ADMIN || actor.userId === id) throw new ForbiddenException('Only a Super Admin can change staff permissions');
-    if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides) ||
-      Object.entries(overrides).some(([key, value]) => !Object.prototype.hasOwnProperty.call(PERMISSIONS, key) || typeof value !== 'boolean')) {
-      throw new BadRequestException('Provide supported permission names and boolean values');
-    }
+    validatePermissionOverrides(overrides);
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${id} FOR UPDATE`;
       const target = await tx.user.findUnique({ where: { id }, select: { role: true, isActive: true, permissionOverrides: true } });
@@ -183,12 +187,14 @@ export class UsersService {
     if (overrides && role === Role.SUPER_ADMIN) {
       throw new BadRequestException('Super Admin permissions are built in');
     }
+    if (overrides?.permissionOverrides !== undefined) validatePermissionOverrides(overrides.permissionOverrides);
     const defaults = roleDefaults(role);
     return {
       discountLimitPercent: overrides?.discountLimitPercent ?? defaults.discountLimitPercent,
       canCancelSales: overrides?.canCancelSales ?? defaults.canCancelSales,
       canProcessReturns: overrides?.canProcessReturns ?? defaults.canProcessReturns,
       canCountStockAudits: overrides?.canCountStockAudits ?? defaults.canCountStockAudits,
+      ...(overrides?.permissionOverrides && { permissionOverrides: overrides.permissionOverrides }),
     };
   }
 
@@ -278,8 +284,9 @@ export class UsersService {
     if (Buffer.byteLength(data.password, 'utf8') > 72) {
       throw new BadRequestException('Password exceeds the supported maximum length');
     }
-    if (data.role === Role.SUPER_ADMIN || data.role === Role.ADMIN) {
-      throw new BadRequestException('Administrative accounts cannot have employee profiles through this flow');
+    if (data.role === Role.SUPER_ADMIN) throw new BadRequestException('Super Admin accounts use the global account setup');
+    if (data.role === Role.ADMIN && actor.role !== Role.SUPER_ADMIN) {
+      throw new ForbiddenException('Only a Super Admin can assign administrative roles');
     }
     const locationIds = [...new Set(data.locationIds ?? [])];
     if (!locationIds.includes(data.locationId)) {

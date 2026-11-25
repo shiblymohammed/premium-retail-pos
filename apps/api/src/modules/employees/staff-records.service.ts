@@ -1,11 +1,11 @@
-import { can } from '../../common/decorators/permission.decorator';
+import { PERMISSIONS, can } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import type { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { shiftMetrics } from '../attendance/attendance.service';
 import type { CreateUserWithEmployeeDto } from '../users/dto/create-user-with-employee.dto';
-import { UsersService } from '../users/users.service';
+import { UsersService, roleDefaults } from '../users/users.service';
 import type { UpdateEmployeeDto } from './dto';
 import type { PayrollDto, PayrollLoanDto } from './staff-records.controller';
 
@@ -14,7 +14,7 @@ const employeeFields = {
   designation: true, hireDate: true, phone: true, address: true, isActive: true,
   location: { select: { name: true, company: { select: { currency: true, timezone: true } } } },
   user: { select: { email: true, role: true, canCancelSales: true, canProcessReturns: true,
-    canCountStockAudits: true, discountLimitPercent: true } },
+    canCountStockAudits: true, discountLimitPercent: true, permissionOverrides: true } },
 } satisfies Prisma.EmployeeSelect;
 
 const payrollFields = {
@@ -120,7 +120,7 @@ export class StaffRecordsService {
         started = null;
       }
     }
-    return { staff, attendance, canManagePayroll: canSeePayroll && canManagePayroll, ...totals, sales: actor.permissionOverrides?.['sales.reports'] === false ? undefined : sales[0],
+    return { staff, permissionDefinitions: PERMISSIONS, permissionDefaults: roleDefaults(staff.user.role), attendance, canManagePayroll: canSeePayroll && canManagePayroll, ...totals, sales: actor.permissionOverrides?.['sales.reports'] === false ? undefined : sales[0],
       drawers: actor.permissionOverrides?.['cash.reports'] === false ? undefined : drawers, payroll,
       baseSalary: baseSalary?.monthlyBaseSalary,
       loans: loans?.map(({ repayments, ...loan }) => ({

@@ -163,23 +163,48 @@ export class TransfersService {
     }
   }
 
-  async approveReplenishment(id: string, dto: ApproveReplenishmentDto, actor: TransferActor, idempotencyKey: string | undefined) {
+  async approveReplenishment(
+    id: string, dto: ApproveReplenishmentDto, actor: TransferActor, idempotencyKey: string | undefined,
+    depotSignOff = false,
+  ) {
     this.assertManager(actor, 'transfers.approve');
-    return this.runIdempotentMutation(idempotencyKey, 'POST', `/transfers/replenishment/${id}/approve`, actor, dto, async (tx) => {
+    const action = depotSignOff ? 'depot-sign-off' : 'approve';
+    return this.runIdempotentMutation(idempotencyKey, 'POST', `/transfers/replenishment/${id}/${action}`, actor, dto, async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "replenishment_requests" WHERE "id" = ${id} FOR UPDATE`);
       const request = await tx.replenishmentRequest.findUnique({ where: { id }, include: { lines: true } });
       if (!request) throw new NotFoundException('Replenishment request not found');
-      if (request.status !== ReplenishmentStatus.DRAFT) throw new ConflictException('Only a draft replenishment request can be approved');
-      if (request.generatedByUserId === actor.userId) throw new ForbiddenException('The requester cannot approve their own replenishment request');
-      this.assertLocationAccess(actor, request.sourceLocationId);
+      if (request.status !== ReplenishmentStatus.DRAFT) throw new ConflictException('Only a draft replenishment request can be reviewed');
       const source = await this.requireLocation(tx, request.sourceLocationId);
       const destination = await this.requireLocation(tx, request.destLocationId);
       this.assertOperationalLocations(source, destination);
       this.assertTransferRoute(source, destination);
+      const requiresDepotSignOff = source.type === LocationType.MAIN_WAREHOUSE && destination.type === LocationType.SUB_WAREHOUSE;
+      if (depotSignOff) {
+        this.assertLocationAccess(actor, destination.id);
+        if (actor.role !== Role.SUB_WAREHOUSE_MANAGER && actor.role !== Role.SUPER_ADMIN) {
+          throw new ForbiddenException('Only the depot manager or Super Admin can authorize the depot request');
+        }
+        if (!requiresDepotSignOff || request.depotAuthorizedAt) {
+          throw new ConflictException('This request is not awaiting depot authorization');
+        }
+      } else {
+        this.assertLocationAccess(actor, source.id);
+        if (requiresDepotSignOff && !request.depotAuthorizedAt) {
+          throw new ConflictException('The depot manager must authorize this request first');
+        }
+        if (request.generatedByUserId === actor.userId || request.depotAuthorizedByUserId === actor.userId) {
+          throw new ForbiddenException('A different manager at the supplying location must approve the request');
+        }
+      }
 
       const approvedByVariant = this.uniqueByVariant(dto.lines, 'approved quantity');
       if (request.lines.some((line) => !approvedByVariant.has(line.variantId))) {
         throw new BadRequestException('Approval must include a quantity for every suggested variant');
+      }
+      if (requiresDepotSignOff && !depotSignOff &&
+          (approvedByVariant.size !== request.lines.length || request.lines.some((line) =>
+            approvedByVariant.get(line.variantId)?.approvedQtyBase !== line.managerApprovedQtyBase))) {
+        throw new BadRequestException('Release must match the quantities authorized by the depot');
       }
       const positive = dto.lines.filter((line) => line.approvedQtyBase > 0);
       if (!positive.length) throw new BadRequestException('At least one replenishment quantity must be approved');
@@ -208,17 +233,36 @@ export class TransfersService {
       }) : [];
       const availableByVariant = new Map(destinationBalances.map((line) => [line.variantId, line._sum.quantityBaseUnits ?? 0]));
 
+      const lineUpdates = {
+        update: request.lines.map((line) => ({
+          where: { id: line.id },
+          data: { managerApprovedQtyBase: approvedByVariant.get(line.variantId)!.approvedQtyBase },
+        })),
+        create: addedLines.map(({ cartonRequired: _cartonRequired, ...line }) => ({
+          ...line,
+          availableQtyBase: availableByVariant.get(line.variantId) ?? 0,
+          reorderLevelBase: variants.get(line.variantId)!.product.reorderLevel ?? 0,
+        })),
+      };
+      if (depotSignOff) return tx.replenishmentRequest.update({
+        where: { id },
+        data: { depotAuthorizedAt: new Date(), depotAuthorizedByUserId: actor.userId, lines: lineUpdates },
+        include: { lines: true, sourceLocation: true, destLocation: true },
+      });
+
       const transfer = await tx.transfer.create({
         data: {
           transferNumber: this.makeNumber('TR'),
           sourceLocationId: request.sourceLocationId,
           destLocationId: request.destLocationId,
           requestedByUserId: request.generatedByUserId,
+          ...(requiresDepotSignOff ? { status: TransferStatus.APPROVED, approvedAt: new Date(), approvedByUserId: actor.userId } : {}),
           notes: `Generated from replenishment ${request.requestNumber}`,
           lines: {
             create: transferLines.map((line) => ({
               variant: { connect: { id: line.variantId } },
               requestedQtyBase: line.managerApprovedQtyBase,
+              ...(requiresDepotSignOff ? { approvedQtyBase: line.managerApprovedQtyBase } : {}),
               cartonRequired: line.cartonRequired,
               systemSuggestedQtyBase: line.systemSuggestedQtyBase,
               unitsPerCarton: line.unitsPerCarton,
@@ -235,17 +279,7 @@ export class TransfersService {
           approvedByUserId: actor.userId,
           approvedAt: new Date(),
           transferId: transfer.id,
-          lines: {
-            update: request.lines.map((line) => ({
-              where: { id: line.id },
-              data: { managerApprovedQtyBase: approvedByVariant.get(line.variantId)!.approvedQtyBase },
-            })),
-            create: addedLines.map(({ cartonRequired: _cartonRequired, ...line }) => ({
-              ...line,
-              availableQtyBase: availableByVariant.get(line.variantId) ?? 0,
-              reorderLevelBase: variants.get(line.variantId)!.product.reorderLevel ?? 0,
-            })),
-          },
+          lines: lineUpdates,
         },
         include: { lines: true, transfer: { include: transferInclude } },
       });
@@ -262,7 +296,13 @@ export class TransfersService {
       const request = await tx.replenishmentRequest.findUnique({ where: { id } });
       if (!request) throw new NotFoundException('Replenishment request not found');
       if (request.status !== ReplenishmentStatus.DRAFT) throw new ConflictException('Only a draft replenishment request can be rejected');
-      if (request.generatedByUserId === actor.userId) throw new ForbiddenException('The requester cannot reject their own replenishment request');
+      if (request.generatedByUserId === actor.userId || request.depotAuthorizedByUserId === actor.userId) {
+        throw new ForbiddenException('A different manager at the supplying location must reject the request');
+      }
+      const destination = await this.requireLocation(tx, request.destLocationId);
+      if (destination.type === LocationType.SUB_WAREHOUSE && !request.depotAuthorizedAt) {
+        throw new ConflictException('The depot manager must authorize this request first');
+      }
       this.assertLocationAccess(actor, request.sourceLocationId);
       return tx.replenishmentRequest.update({
         where: { id },
@@ -926,6 +966,6 @@ export class TransfersService {
 const transferInclude = {
   requestedBy: { select: { email: true, employee: { select: { firstName: true, lastName: true } } } },
   sourceLocation: { select: { id: true, name: true, type: true, parentId: true } },
-  destLocation: { select: { id: true, name: true, type: true, parentId: true } },
+  destLocation: { select: { id: true, name: true, type: true, parentId: true, company: { select: { timezone: true } } } },
   lines: { include: { variant: { select: { id: true, sku: true, name: true, product: { select: { id: true, name: true, baseUnit: true } } } } } },
 } satisfies Prisma.TransferInclude;

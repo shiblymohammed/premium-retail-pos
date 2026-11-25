@@ -30,7 +30,7 @@ export function formatMixedUnitQuantity(quantity: number, baseUnit: string, unit
   const absolute = Math.abs(quantity);
   const sign = quantity < 0 ? '-' : '';
   const pluralUnit = pluralize(unit);
-  if (unitsPerCarton === null) return `${sign}${absolute} ${absolute === 1 ? unit : pluralUnit}`;
+  if (unitsPerCarton === null || absolute < unitsPerCarton) return `${sign}${absolute} ${absolute === 1 ? unit : pluralUnit}`;
 
   const cartonCount = Math.floor(absolute / unitsPerCarton);
   const remainder = absolute % unitsPerCarton;

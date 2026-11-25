@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { PermissionMatrix } from '@/components/ui/permission-matrix';
 import { Feedback } from '@/components/ui/feedback';
 import { getStoredSession } from '@/lib/auth';
 import styles from '../../../staff-records/records.module.css';
@@ -9,9 +10,6 @@ import styles from '../../../staff-records/records.module.css';
 const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 type Staff = { id: string; email: string; role: string; isActive: boolean };
 type StaffAccess = { permissionOverrides: Record<string, boolean>; definitions: Record<string, string> };
-const categories = { sales: 'Sales', cash: 'Cash', stock: 'Inventory', products: 'Catalogue', transfers: 'Transfers',
-  purchasing: 'Purchasing', customers: 'Customer accounts', staff: 'Team', attendance: 'Attendance', payroll: 'Payroll' };
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getStoredSession()?.accessToken;
   const response = await fetch(API + '/users' + path, {
@@ -82,20 +80,7 @@ export default function StaffPermissionsPage() {
     {error && <Feedback tone="error">{error}</Feedback>}
     {notice && <Feedback tone="success">{notice}</Feedback>}
     {profile && id && <form onSubmit={(event) => void save(event)} className={styles.panel}>
-      <div className={styles.grid}>{Object.entries(categories).map(([prefix, title]) => <fieldset className={styles.panel} key={prefix} disabled={saving}>
-        <legend>{title}</legend>
-        {Object.entries(profile.definitions).filter(([key]) => key.startsWith(prefix + '.')).map(([key, label]) => <div className={styles.fields} key={key}>
-          <label>{label}<select aria-label={label} value={overrides[key] === undefined ? 'default' : overrides[key] ? 'allow' : 'deny'}
-            onChange={(event) => setOverrides((current) => {
-              const next = { ...current };
-              if (event.target.value === 'default') delete next[key];
-              else next[key] = event.target.value === 'allow';
-              return next;
-            })}>
-            <option value="default">Use role default</option><option value="allow">Allow</option><option value="deny">Deny</option>
-          </select></label>
-        </div>)}
-      </fieldset>)}</div>
+      <PermissionMatrix definitions={profile.definitions} overrides={overrides} setOverrides={setOverrides} disabled={saving} />
       <div className={styles.fields}>
         <button className="admin-primary" disabled={saving}>Save access</button>
         <Link className="admin-secondary" href="/admin/sales-permissions">Returns, cancellations and stock counting</Link>

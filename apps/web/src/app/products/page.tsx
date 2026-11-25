@@ -136,7 +136,7 @@ export default function ProductsPage() {
   const [intakeMode, setIntakeMode] = useState<IntakeMode | null>(null);
   const [operator, setOperator] = useState({ token: '', role: '' });
   const { can } = useAccess(operator.token);
-  const canImport = can('stock.intake', ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER'].includes(operator.role));
+  const canImport = can('stock.intake', ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER', 'STORE_MANAGER', 'INVENTORY'].includes(operator.role));
   const canEditPrices = can('products.prices', operator.role === 'SUPER_ADMIN');
   const canSeeCost = can('products.cost', ['SUPER_ADMIN', 'ADMIN', 'INVENTORY'].includes(operator.role));
   const [priceTarget, setPriceTarget] = useState<ProductItem | null>(null);

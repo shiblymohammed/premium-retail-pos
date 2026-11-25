@@ -30,7 +30,7 @@ export class InventoryController {
   }
 
   @Post('opening-stock/import')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER, Role.STORE_MANAGER, Role.INVENTORY)
   @Permission('stock.intake')
   async importOpeningStock(
     @Body() dto: OpeningStockImportDto,

@@ -490,3 +490,14 @@ body { font: 14px/1.5 var(--retail-font); }
 .admin-location-results label { display: flex; align-items: center; gap: 8px; }
 .admin-active-label { color: light-dark(#177245, #8fdaa8); font-weight: 650; }
 .admin-inactive-label { color: var(--retail-muted); font-weight: 600; }
+
+.utility-notifications { position: relative; }
+.utility-unread { position: absolute; top: 0; right: 0; min-width: 17px; padding: 1px 4px; border-radius: 10px; background: var(--retail-accent-strong); color: white; font-size: 10px; font-weight: 750; }
+.utility-inbox { width: min(360px, calc(100vw - 24px)); max-height: min(560px, calc(100dvh - 80px)); overflow-y: auto; }
+.utility-inbox ul { list-style: none; margin: 0; padding: 0; }
+.utility-inbox li { border-bottom: 1px solid var(--retail-edge); padding-block: 5px; }
+.utility-inbox li .utility-option { overflow-wrap: anywhere; }
+.utility-inbox small { display: block; margin-top: 3px; color: var(--retail-muted); }
+.utility-read, .utility-inbox-error button { margin: 0 8px 4px; border: 0; padding: 4px; background: transparent; color: var(--retail-ink); text-decoration: underline; cursor: pointer; }
+.admin-user-permission-review { margin-block: 12px; padding: 10px; border: 1px solid var(--retail-edge); border-radius: 8px; min-width: 0; }
+.admin-user-permission-review summary { cursor: pointer; font-weight: 650; }

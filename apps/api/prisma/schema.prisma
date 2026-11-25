@@ -168,6 +168,7 @@ model User {
   openingStockImports     OpeningStockImport[]
   supplierReceipts        SupplierReceipt[]
   replenishmentsGenerated ReplenishmentRequest[] @relation("ReplenishmentGeneratedBy")
+  depotAuthorizedReplenishments ReplenishmentRequest[] @relation("ReplenishmentDepotAuthorizedBy")
   replenishmentsApproved  ReplenishmentRequest[] @relation("ReplenishmentApprovedBy")
   replenishmentsRejected  ReplenishmentRequest[] @relation("ReplenishmentRejectedBy")
   transfersRequested      Transfer[]             @relation("TransferRequestedBy")
@@ -574,6 +575,8 @@ model ReplenishmentRequest {
   payloadHash       String              @map("payload_hash")
   approvedAt        DateTime?           @map("approved_at")
   rejectedAt        DateTime?           @map("rejected_at")
+  depotAuthorizedAt DateTime?           @map("depot_authorized_at")
+  depotAuthorizedByUserId String?      @map("depot_authorized_by_user_id")
   rejectionReason   String?             @map("rejection_reason")
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
@@ -583,6 +586,7 @@ model ReplenishmentRequest {
   destLocation   Location                   @relation("ReplenishmentDestination", fields: [destLocationId], references: [id], onDelete: Restrict)
   generatedBy    User                       @relation("ReplenishmentGeneratedBy", fields: [generatedByUserId], references: [id], onDelete: Restrict)
   approvedBy     User?                      @relation("ReplenishmentApprovedBy", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+  depotAuthorizedBy User?                   @relation("ReplenishmentDepotAuthorizedBy", fields: [depotAuthorizedByUserId], references: [id], onDelete: Restrict)
   rejectedBy     User?                      @relation("ReplenishmentRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: Restrict)
   transfer       Transfer?                  @relation(fields: [transferId], references: [id], onDelete: Restrict)
   lines          ReplenishmentRequestLine[]

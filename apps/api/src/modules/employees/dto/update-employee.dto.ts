@@ -27,6 +27,12 @@ export class UpdateEmployeeDto {
   @IsOptional() @IsUUID()
   reportingToId?: string;
 
+  @IsOptional() @IsString() @MaxLength(400)
+  address?: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  designation?: string;
+
   @IsOptional() @IsDateString()
   hireDate?: string;
 }
