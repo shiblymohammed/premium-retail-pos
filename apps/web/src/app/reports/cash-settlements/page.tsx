@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Feedback } from '@/components/ui/feedback';
 import { downloadCsv, downloadPdf } from '@/lib/report-download';
+import { addCalendarDays, businessDate } from '@/lib/business-date';
 import { getStoredSession } from '@/lib/auth';
 import styles from './settlements.module.css';
 
@@ -15,6 +16,7 @@ type Settlement = {
   location: string;
   operator: string;
   currency: string;
+  timezone?: string;
   cadence: string;
   period: string;
   closedAt: string;
@@ -26,10 +28,6 @@ type Settlement = {
   cashDifference: string;
   cardDifference: string;
 };
-
-function dateInput(date: Date) {
-  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
-}
 
 export default function CashSettlementsPage() {
   const [token, setToken] = useState('');
@@ -44,9 +42,6 @@ export default function CashSettlementsPage() {
   const [locationError, setLocationError] = useState('');
 
   useEffect(() => {
-    const now = new Date();
-    setFrom(dateInput(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)));
-    setTo(dateInput(now));
     const session = getStoredSession();
     if (!session?.accessToken) {
       setError('Sign in again to view cash settlements.');
@@ -63,6 +58,9 @@ export default function CashSettlementsPage() {
         const payload = await response.json();
         const stores = payload.data.filter((entry: { type: string }) => entry.type === 'RETAIL_STORE');
         setLocations(stores);
+        const today = businessDate(new Date(), stores[0]?.company?.timezone ?? 'UTC');
+        setFrom(addCalendarDays(today, -29));
+        setTo(today);
         if (!consolidated) setLocationId(stores[0]?.id ?? '');
         setToken(session.accessToken);
         if (!consolidated && !stores.length) setLoading(false);
@@ -103,7 +101,7 @@ export default function CashSettlementsPage() {
 
   const cashToRemove = (row: Settlement) => Math.max(0, Number(row.countedCash) - Number(row.openingCash));
   const exportSettlement = (format: 'csv' | 'pdf') => {
-    const headers = ['Store', 'Operator', 'Closed at', 'Currency', 'Reporting period', 'Opening float', 'Expected cash',
+    const headers = ['Store', 'Operator', 'Closed at (UTC)', 'Currency', 'Reporting period', 'Opening float', 'Expected cash',
       'Counted cash', 'Cash variance', 'Cash to remove', 'Expected card', 'Counted card', 'Card variance'];
     const records = rows.map((row) => [row.location, row.operator, row.closedAt, row.currency, row.period,
       row.openingCash, row.expectedCash, row.countedCash, row.cashDifference, cashToRemove(row).toFixed(2),
@@ -149,7 +147,7 @@ export default function CashSettlementsPage() {
         <table>
           <thead><tr><th scope="col">Drawer</th>{drawerColumns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead>
           <tbody>{entries.map((row) => <tr key={row.id}>
-            <th scope="row">{row.location}<small>{row.operator} · {new Date(row.closedAt).toLocaleString()}</small></th>
+            <th scope="row">{row.location}<small>{row.operator} · {new Date(row.closedAt).toLocaleString(undefined, { timeZone: row.timezone })}</small></th>
             {[row.openingCash, row.expectedCash, row.countedCash, row.cashDifference, row.expectedCard, row.countedCard, row.cardDifference, cashToRemove(row).toFixed(2)].map((amount, index) => <td key={index} data-label={drawerColumns[index]} className={(index === 3 || index === 6) && Number(amount) < 0 ? styles.shortage : ''}>{money(amount, row.currency)}</td>)}
           </tr>)}</tbody>
         </table>

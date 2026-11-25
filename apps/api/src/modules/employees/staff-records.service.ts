@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma, Role } from '@prisma/client';
 import type { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { shiftMetrics } from '../attendance/attendance.service';
+import { attendanceDay } from '../attendance/attendance.service';
 import type { CreateUserWithEmployeeDto } from '../users/dto/create-user-with-employee.dto';
 import { UsersService, roleDefaults } from '../users/users.service';
 import type { UpdateEmployeeDto } from './dto';
@@ -106,19 +106,21 @@ export class StaffRecordsService {
       breaksByShift.set(pause.clockInId, shiftBreaks);
     }
     const totals = { workMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, earlyCheckouts: 0 };
-    let started: (typeof attendance)[number] | null = null;
+    const shiftsByDay = new Map<string, Array<{
+      punchType: string; punchTimestamp: Date; scheduledEndAt: Date | null; breaks?: typeof breaks;
+    }>>();
     for (const punch of attendance) {
-      if (punch.action === 'IN') started = punch;
-      if (punch.action === 'OUT' && started) {
-        const metrics = shiftMetrics({
-          punchTimestamp: started.at, scheduledEndAt: started.scheduledEndAt, breaks: breaksByShift.get(started.id),
-        }, punch.at);
-        totals.workMinutes += metrics.workMinutes;
-        totals.breakMinutes += metrics.breakMinutes;
-        totals.overtimeMinutes += metrics.overtimeMinutes;
-        if (metrics.earlyMinutes > 0) totals.earlyCheckouts += 1;
-        started = null;
-      }
+      const day = localDay(punch.at, timezone);
+      const shifts = shiftsByDay.get(day) ?? [];
+      shifts.push({ punchType: punch.action, punchTimestamp: punch.at, scheduledEndAt: punch.scheduledEndAt, breaks: breaksByShift.get(punch.id) });
+      shiftsByDay.set(day, shifts);
+    }
+    for (const shifts of shiftsByDay.values()) {
+      const metrics = attendanceDay(shifts);
+      totals.workMinutes += metrics.workMinutes;
+      totals.breakMinutes += metrics.breakMinutes;
+      totals.overtimeMinutes += metrics.overtimeMinutes;
+      if (metrics.earlyMinutes > 0) totals.earlyCheckouts += 1;
     }
     return { staff, permissionDefinitions: PERMISSIONS, permissionDefaults: roleDefaults(staff.user.role), attendance, canManagePayroll: canSeePayroll && canManagePayroll, ...totals, sales: actor.permissionOverrides?.['sales.reports'] === false ? undefined : sales[0],
       drawers: actor.permissionOverrides?.['cash.reports'] === false ? undefined : drawers, payroll,

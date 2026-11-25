@@ -1,7 +1,7 @@
 'use client';
 
 import { InfoHint } from '@/components/ui/info-hint';
-import { ArrowRight, Boxes, Check, ChevronRight, Circle, IndianRupee, PackageSearch, ReceiptText, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Boxes, Check, ChevronRight, Circle, Banknote, PackageSearch, ReceiptText, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { AuthSession, getStoredSession } from '@/lib/auth';
@@ -10,6 +10,7 @@ import { ManagerOverview, ShiftOverview } from './role-overview';
 import styles from './dashboard.module.css';
 
 type SalesSummary = {
+  company?: { currency: string; timezone: string } | null;
   totals: { netSales: string | number; completedInvoices: number; cancelledInvoices: number };
   daily: Array<{ date: string; netSales: string | number; invoices: number }>;
   invoices?: Array<{ id: string; invoiceNumber: string; locationName: string; netTotal: string | number; status: string; createdAt: string }>;
@@ -24,8 +25,6 @@ const emptyData: DashboardData = { sales: undefined, stock: undefined, lowStock:
 const count = (rows: unknown[] | null) => rows ? rows.length : null;
 const overviewRoles = ['SUPER_ADMIN', 'ADMIN'];
 const managerRoles = ['STORE_MANAGER', 'CENTRAL_MANAGER', 'WAREHOUSE_MANAGER', 'SUB_WAREHOUSE_MANAGER'];
-const SHORT_DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
-const CURRENCY = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
 function asNumber(value: string | number | undefined) {
   const parsed = Number(value ?? 0);
@@ -92,6 +91,11 @@ export default function DashboardPage() {
   if (['CASHIER', 'STAFF'].includes(role)) return <ShiftOverview session={session} />;
   if (!overviewRoles.includes(role)) return <main className={styles.page}><h1>Overview</h1><Link href="/settings">Open settings</Link></main>;
 
+  const company = data.sales?.company;
+  const formatMoney = (value: number) => company
+    ? new Intl.NumberFormat('en', { style: 'currency', currency: company.currency }).format(value)
+    : '—';
+  const shortDate = new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', timeZone: company?.timezone });
   const totals = data.sales?.totals;
   const states = (data.stock?.rows ?? []).reduce((sum, row) => ({
     available: sum.available + row.available,
@@ -121,7 +125,7 @@ export default function DashboardPage() {
   const openSetup = setupSteps.filter((step) => !step.review && step.value === 0).length;
   const unavailable = Object.values(data).some((result) => result === null) || (setup !== null && [setup.locations, setup.products, setup.users, ...(role === 'SUPER_ADMIN' ? [setup.companies] : [])].includes(null));
   const cards = [
-    { label: 'Net sales · last 30 days', icon: IndianRupee, value: totals ? CURRENCY.format(asNumber(totals.netSales)) : '—', detail: 'Finalized invoices in your authorized scope', href: '/reports' },
+    { label: 'Net sales · last 30 days', icon: Banknote, value: totals ? formatMoney(asNumber(totals.netSales)) : '—', detail: 'After refunds in your authorized scope', href: '/reports' },
     { label: 'Completed invoices', icon: ReceiptText, value: totals?.completedInvoices ?? '—', detail: `${totals ? totals.cancelledInvoices : '—'} cancelled in the same period`, href: '/reports' },
     { label: 'Low stock variants', icon: PackageSearch, value: data.stock?.totals.lowStockVariants ?? '—', detail: 'At or below configured reorder level', href: '/products' },
     { label: 'Negative stock warnings', icon: Boxes, value: data.stock?.totals.negativeStockVariants ?? '—', detail: 'Available balance below zero', href: '/products' },
@@ -170,11 +174,11 @@ export default function DashboardPage() {
         <div className={styles.chartInset}>
           <div className={styles.chartLegend}><i /> Net sales</div>
           {daily.length ? <div className={styles.plot}>
-            <div className={styles.chartAxis} aria-hidden="true">{[1, .75, .5, .25, 0].map((level) => <span key={level}>{CURRENCY.format(peak * level)}</span>)}</div>
+            <div className={styles.chartAxis} aria-hidden="true">{[1, .75, .5, .25, 0].map((level) => <span key={level}>{formatMoney(peak * level)}</span>)}</div>
             <div className={styles.chart} style={{ gridTemplateColumns: `repeat(${daily.length}, minmax(0, 1fr))` }}>
-              {daily.map((day) => <div className={styles.chartColumn} key={day.date} aria-label={`${day.date}: ${CURRENCY.format(asNumber(day.netSales))}`} title={`${day.date}: ${CURRENCY.format(asNumber(day.netSales))}`}>
+              {daily.map((day) => <div className={styles.chartColumn} key={day.date} aria-label={`${day.date}: ${formatMoney(asNumber(day.netSales))}`} title={`${day.date}: ${formatMoney(asNumber(day.netSales))}`}>
                 <div className={styles.barTrack}><i style={{ height: `${Math.max(0, (asNumber(day.netSales) / peak) * 100)}%` }} /></div>
-                <span className={styles.barLabel}>{SHORT_DATE.format(new Date(`${day.date}T12:00:00`))}</span>
+                <span className={styles.barLabel}>{shortDate.format(new Date(`${day.date}T12:00:00`))}</span>
               </div>)}
             </div>
           </div> : <div className={styles.chartEmpty}><span>{data.sales === undefined ? 'Loading sales activity…' : data.sales === null ? 'Sales data unavailable.' : 'No finalized sales in this period.'}</span></div>}
@@ -191,7 +195,7 @@ export default function DashboardPage() {
             <tbody>{(data.sales?.invoices ?? []).slice(0, 5).map((invoice) => <tr key={invoice.id}>
               <td>{invoice.invoiceNumber}</td><td>{invoice.locationName}</td>
               <td><span className={invoice.status === 'CANCELLED' ? styles.invoiceCancelled : styles.invoiceComplete}>{invoice.status === 'CANCELLED' ? 'Cancelled' : 'Finalized'}</span></td>
-              <td>{SHORT_DATE.format(new Date(invoice.createdAt))}</td><td>{CURRENCY.format(asNumber(invoice.netTotal))}</td>
+              <td>{shortDate.format(new Date(invoice.createdAt))}</td><td>{formatMoney(asNumber(invoice.netTotal))}</td>
             </tr>)}
             {!data.sales?.invoices?.length && <tr><td colSpan={5}>{data.sales === undefined ? 'Loading invoices…' : data.sales === null ? 'Invoices unavailable.' : 'No invoices to show.'}</td></tr>}
             </tbody>

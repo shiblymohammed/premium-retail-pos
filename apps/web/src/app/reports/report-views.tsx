@@ -172,7 +172,7 @@ export function SalesView({ currency, sales, matches, rangeLabel }: { currency: 
           rows={daily.map((d) => {
             const v = Number(d.netSales);
             return [
-              <span key="d" className={styles.cellStack}><strong>{formatDay(d.date)}</strong><small>{new Date(d.date).toLocaleDateString('en-IN', { weekday: 'long' })}</small></span>,
+              <span key="d" className={styles.cellStack}><strong>{formatDay(d.date)}</strong><small>{new Date(d.date).toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'UTC' })}</small></span>,
               d.invoices,
               d.cancelled ? <Chip key="c" tone="bad">{d.cancelled}</Chip> : <span key="c" className={styles.mutedText}>0</span>,
               formatMoney(currency, d.invoices ? v / d.invoices : 0),
@@ -188,19 +188,20 @@ export function SalesView({ currency, sales, matches, rangeLabel }: { currency: 
 
 /* ---------- 2. Invoices ---------- */
 
-export function InvoicesView({ currency, details, matches }: { currency: string; details: SalesDetails; matches: Matches }) {
-  const [status, setStatus] = useState<'all' | 'FINALIZED' | 'CANCELLED'>('all');
+export function InvoicesView({ currency, timezone, details, matches }: { currency: string; timezone: string; details: SalesDetails; matches: Matches }) {
+  const labels = { FINALIZED: 'Finalized', PARTLY_RETURNED: 'Partly returned', RETURNED: 'Returned', CANCELLED: 'Cancelled' };
+  const [status, setStatus] = useState<'all' | keyof typeof labels>('all');
   const finalized = details.rows.filter((r) => r.status === 'FINALIZED');
   const cancelled = details.rows.filter((r) => r.status !== 'FINALIZED');
-  const finalizedValue = finalized.reduce((s, r) => s + Number(r.netTotal), 0);
+  const netValue = details.rows.reduce((sum, row) => sum + Number(row.netAfterRefunds), 0);
   const largest = [...finalized].sort((a, b) => Number(b.netTotal) - Number(a.netTotal))[0];
-  const rows = details.rows.filter((r) => (status === 'all' || r.status === status) && matches(r.invoiceNumber, r.location.name, r.status));
+  const rows = details.rows.filter((r) => (status === 'all' || r.reportStatus === status) && matches(r.invoiceNumber, r.location.name, labels[r.reportStatus]));
 
   return (
     <>
       <KpiStrip items={[
         { label: 'Invoices recorded', value: String(details.total), icon: 'receipt', chip: `page ${details.page} of ${details.totalPages}` },
-        { label: 'Finalized value', value: formatMoney(currency, finalizedValue), icon: 'money', chip: `${finalized.length} finalized`, tone: 'good', highlight: 'teal' },
+        { label: 'Net after refunds', value: formatMoney(currency, netValue, 2), icon: 'money', chip: 'Shown on this page', tone: 'good', highlight: 'teal' },
         { label: 'Largest bill', value: largest ? formatMoney(currency, Number(largest.netTotal)) : '—', icon: 'up', chip: largest?.invoiceNumber, tone: 'info' },
         { label: 'Cancelled', value: String(cancelled.length), icon: 'x', chip: formatMoney(currency, cancelled.reduce((s, r) => s + Number(r.netTotal), 0)) + ' voided', tone: 'bad' },
       ]} />
@@ -208,17 +209,19 @@ export function InvoicesView({ currency, details, matches }: { currency: string;
       <Card
         title="Itemised sales transactions"
         subtitle="Latest invoices across the selected stores"
-        action={<Segmented label="Invoice status" value={status} onChange={setStatus} options={[{ value: 'all', label: 'All' }, { value: 'FINALIZED', label: 'Finalized' }, { value: 'CANCELLED', label: 'Cancelled' }]} />}
+        action={<Segmented label="Invoice status" value={status} onChange={setStatus} options={[{ value: 'all', label: 'All' }, { value: 'FINALIZED', label: 'Finalized' }, { value: 'PARTLY_RETURNED', label: 'Partly returned' }, { value: 'RETURNED', label: 'Returned' }, { value: 'CANCELLED', label: 'Cancelled' }]} />}
       >
         <Table
-          headers={['Invoice', 'Store', 'Status', 'Created', 'Net total']}
-          alignRight={[4]}
+          headers={['Invoice', 'Store', 'Status', 'Created', 'Original total', 'Refunds', 'Net after refunds']}
+          alignRight={[4, 5, 6]}
           rows={rows.map((r) => [
             <span key="i" className={styles.invoiceCell}><span className={`${styles.skuBadge} ${r.status === 'FINALIZED' ? styles.toneTeal : styles.toneRed}`}><Icon name="receipt" size={14} /></span><span className={styles.cellStack}><span className={styles.mono}>{r.invoiceNumber}</span><small>{relativeTime(r.createdAt)}</small></span></span>,
             <span key="s" className={styles.withIcon}><Icon name="store" size={14} />{r.location.name}</span>,
-            <Chip key="st" tone={r.status === 'FINALIZED' ? 'good' : 'bad'}>{r.status === 'FINALIZED' ? 'Finalized' : 'Cancelled'}</Chip>,
-            new Date(r.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
-            <strong key="n" className={r.status === 'FINALIZED' ? '' : styles.strike}>{formatMoney(currency, Number(r.netTotal), 2)}</strong>,
+            <Chip key="st" tone={r.reportStatus === 'FINALIZED' ? 'good' : r.reportStatus === 'CANCELLED' ? 'bad' : 'warn'}>{labels[r.reportStatus]}</Chip>,
+            new Date(r.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: timezone }),
+            formatMoney(currency, Number(r.originalTotal), 2),
+            formatMoney(currency, Number(r.refundedTotal), 2),
+            <strong key="n">{formatMoney(currency, Number(r.netAfterRefunds), 2)}</strong>,
           ])}
         />
       </Card>

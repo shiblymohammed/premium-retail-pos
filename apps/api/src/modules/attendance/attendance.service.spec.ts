@@ -1,6 +1,6 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { AttendanceService, shiftMetrics } from './attendance.service';
+import { AttendanceService, attendanceDay, shiftMetrics } from './attendance.service';
 
 describe('AttendanceService basic daily punches', () => {
   afterEach(() => jest.useRealTimers());
@@ -60,10 +60,39 @@ describe('AttendanceService basic daily punches', () => {
     expect(result.status).toBe('COMPLETED');
   });
 
-  it('does not allow another punch after the daily OUT punch', async () => {
+  it('requires an explicit clock-in to resume after a daily OUT punch', async () => {
     const { service, tx } = setup([{ id: 'out', punchType: 'OUT', punchTimestamp: new Date() }]);
     await expect(service.punch(actor)).rejects.toBeInstanceOf(ConflictException);
     expect(tx.attendance.create).not.toHaveBeenCalled();
+  });
+
+  it('clocks back in without recording a second late arrival', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-15T09:00:00Z'));
+    const { service, tx } = setup([
+      { id: 'in', punchType: 'IN', punchTimestamp: new Date('2026-11-15T03:30:00Z') },
+      { id: 'out', punchType: 'OUT', punchTimestamp: new Date('2026-11-15T07:30:00Z') },
+    ]);
+    await expect(service.punch(actor, 'IN')).resolves.toMatchObject({
+      nextAction: 'OUT', status: 'WORKING', workMinutes: 240, earlyMinutes: 0,
+    });
+    expect(tx.attendance.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ punchType: 'IN', isLate: false, targetStartTime: null }),
+    }));
+  });
+
+  it('adds worked intervals, deducts breaks and excludes the same-day time away', () => {
+    const time = (time: string) => new Date(`2026-11-15T${time}Z`);
+    const scheduledEndAt = time('18:00:00');
+    const day = attendanceDay([
+      { punchType: 'IN', punchTimestamp: time('09:00:00'), scheduledEndAt,
+        breaks: [{ startedAt: time('10:00:00'), endedAt: time('10:15:00') }] },
+      { punchType: 'OUT', punchTimestamp: time('12:00:00') },
+      { punchType: 'IN', punchTimestamp: time('14:00:00'), scheduledEndAt,
+        breaks: [{ startedAt: time('18:05:00'), endedAt: time('18:15:00') }] },
+      { punchType: 'OUT', punchTimestamp: time('18:30:00') },
+    ]);
+    expect(day).toMatchObject({ workMinutes: 425, breakMinutes: 25, overtimeMinutes: 20, earlyMinutes: 0 });
+    expect(day.clockOut?.punchTimestamp).toEqual(time('18:30:00'));
   });
 
   it('requires the employee account to have access to the assigned workplace', async () => {

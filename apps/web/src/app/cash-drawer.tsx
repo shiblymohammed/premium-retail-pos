@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { Feedback } from '@/components/ui/feedback';
 
 type Drawer = {
@@ -15,12 +16,14 @@ type Drawer = {
 };
 
 export function CashDrawer({
-  api, token, locationId, canClose, onDrawer, formatMoney,
+  api, token, locationId, timezone, canClose, closeHref, onDrawer, formatMoney,
 }: {
   api: string;
   token: string;
   locationId: string;
+  timezone?: string;
   canClose: boolean;
+  closeHref?: string;
   onDrawer: (id: string | null) => void;
   formatMoney: (amount: number | string) => string;
 }) {
@@ -98,19 +101,21 @@ export function CashDrawer({
         <form onSubmit={(event) => void submit(event)}>
           {drawer ? <>
             <p>Opening float {formatMoney(drawer.openingCash)} · Expected cash {formatMoney(drawer.expectedCash ?? drawer.openingCash)} · Expected card {formatMoney(drawer.expectedCard ?? 0)}</p>
-            <label className="discount-input">Cash counted, including float<input type="number" min="0" max="9999999999.99" step="0.01" required value={cash} onChange={(event) => setCash(event.target.value)} /></label>
+            {!closeHref && <>
+              <label className="discount-input">Cash counted, including float<input type="number" min="0" max="9999999999.99" step="0.01" required value={cash} onChange={(event) => setCash(event.target.value)} /></label>
             <label className="discount-input">Card terminal net total<input type="number" min="-9999999999.99" max="9999999999.99" step="0.01" required value={card} onChange={(event) => setCard(event.target.value)} /></label>
-            {!canClose && <p>Complete or clear your basket and sync queued sales before closing.</p>}
+            </>}
+            {!canClose && <p>{closeHref ? 'Settle this drawer from Checkout, where you can check the basket and sync queued sales.' : 'Complete or clear your basket and sync queued sales before closing.'}</p>}
           </> : <label className="discount-input">Opening cash float<input type="number" min="0" max="9999999999.99" step="0.01" required value={opening} onChange={(event) => setOpening(event.target.value)} /></label>}
           <div className="device-lock-actions">
             <button type="button" className="admin-secondary" disabled={busy} onClick={() => setOpen(false)}>Done</button>
-            <button type="submit" className="admin-primary" disabled={busy || !ready || (!!drawer && !canClose)}>{busy ? 'Saving…' : drawer ? 'Settle and close' : 'Open drawer'}</button>
+            {drawer && closeHref ? <Link className="admin-primary" href={closeHref}>Open Checkout to settle</Link> : <button type="submit" className="admin-primary" disabled={busy || !ready || (!!drawer && !canClose)}>{busy ? 'Saving…' : drawer ? 'Settle and close' : 'Open drawer'}</button>}
           </div>
         </form>
         {history.length > 0 && <section aria-label="Recent closures">
           <h3>Recent closures</h3>
           {history.map((row) => <div className="receipt-line" key={row.id}>
-            <span>{new Date(row.closedAt!).toLocaleString()} <small>Counted cash {formatMoney(row.countedCash ?? 0)} · Card {formatMoney(row.countedCard ?? 0)}</small></span>
+            <span>{new Date(row.closedAt!).toLocaleString(undefined, { timeZone: timezone })} <small>Counted cash {formatMoney(row.countedCash ?? 0)} · Card {formatMoney(row.countedCard ?? 0)}</small></span>
             <span>Cash difference {formatMoney(Number(row.countedCash) - Number(row.expectedCash))}<small>Card difference {formatMoney(Number(row.countedCard) - Number(row.expectedCard))}</small></span>
           </div>)}
         </section>}

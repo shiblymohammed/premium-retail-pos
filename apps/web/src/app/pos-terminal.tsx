@@ -54,7 +54,7 @@ type Product = {
 type TerminalContext = {
   access?: { checkout: boolean; drawer: boolean; receipts: boolean };
   cashierUserId: string;
-  location: { id: string; name: string; type: string; currency: string; requireCheckoutDrawer?: boolean };
+  location: { id: string; name: string; type: string; currency: string; timezone?: string; isAuditLocked?: boolean; requireCheckoutDrawer?: boolean };
 };
 
 type SaleUnit = 'BASE_UNIT' | 'CARTON';
@@ -408,7 +408,8 @@ export default function PosTerminal() {
   };
   const stockBlocksCheckout = isOnline && !stockError && !saleRetryPending && cart.some(hasStockShortage);
   const drawerBlocksCheckout = terminal?.location.requireCheckoutDrawer && !cashDrawerId && !saleRetryPending;
-  const checkoutDisabled = busy || !!removingVariantId || drawerBlocksCheckout || cart.length === 0 || cart.some((line) => !baseQuantity(line))
+  const auditBlocksCheckout = Boolean(terminal?.location.isAuditLocked && !saleRetryPending);
+  const checkoutDisabled = auditBlocksCheckout || busy || !!removingVariantId || drawerBlocksCheckout || cart.length === 0 || cart.some((line) => !baseQuantity(line))
     || stockBlocksCheckout || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001);
 
   const formatMoney = (amount: number | string) => new Intl.NumberFormat('en-IN', {
@@ -440,7 +441,7 @@ export default function PosTerminal() {
   }
 
   function downloadReceipt(receipt: SaleReceipt) {
-    downloadPdf(`Receipt ${receipt.invoiceNumber}`, `${terminal?.location.name ?? ''} · ${new Date(receipt.createdAt).toLocaleString()}`,
+    downloadPdf(`Receipt ${receipt.invoiceNumber}`, `${terminal?.location.name ?? ''} · ${new Date(receipt.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })}`,
       ['Item', 'Quantity and unit price', 'Amount'],
       [...receipt.lines.map((line) => [
         `${line.variant.product.name} · ${line.variant.sku}`, receiptQuantity(line), formatMoney(line.lineTotal),
@@ -713,6 +714,12 @@ export default function PosTerminal() {
   }, [checkoutDisabled, checkoutDisabledForClear, checkoutOpen, clearBasketOpen, customerLookupOpen, terminal]);
 
   function addToCart(product: Product, variant: Variant) {
+    const stock = stockBalances[variant.id];
+    if (stock && Number(stock.quantityBaseUnits) <= 0) {
+      setNotice('');
+      setError(`${product.name} is out of stock at this store.`);
+      return;
+    }
     setCart((current) => {
       const existing = current.find((line) => line.variantId === variant.id && line.unit === 'BASE_UNIT');
       if (existing) return current.map((line) => line === existing && baseQuantity(line) < 2147483647
@@ -785,7 +792,8 @@ export default function PosTerminal() {
       if (!active) return;
       setStoreOptions(data);
       if (!data.length) throw new Error('Your account has no active retail locations for checkout.');
-      const selected = checkoutLocation || (data.length === 1 ? data[0].id : '');
+      const requestedLocation = new URLSearchParams(window.location.search).get('locationId');
+      const selected = checkoutLocation || data.find((store) => store.id === requestedLocation)?.id || (data.length === 1 ? data[0].id : '');
       if (selected) await loadTerminalSession(accessToken, selected);
     }
 
@@ -818,6 +826,28 @@ export default function PosTerminal() {
     }, 200);
     return () => { controller.abort(); window.clearTimeout(timeout); };
   }, [receiptHistoryOpen, terminal, token, receiptQuery]);
+
+  useEffect(() => {
+    if (!terminal || !token || !isOnline) return;
+    const controller = new AbortController();
+    const locationId = terminal.location.id;
+    async function refreshLock() {
+      try {
+        const response = await fetch(`${API_BASE}/pos/terminal/context?locationId=${encodeURIComponent(locationId)}`, {
+          headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const { data } = await response.json() as { data: TerminalContext };
+        if (!controller.signal.aborted) setTerminal((current) => current?.location.id === locationId &&
+          current.location.isAuditLocked !== data.location.isAuditLocked ? { ...current, location: data.location } : current);
+      } catch {
+        // The sale endpoint still enforces the lock if status refresh fails.
+      }
+    }
+    const timer = window.setInterval(refreshLock, 15_000);
+    window.addEventListener('focus', refreshLock);
+    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener('focus', refreshLock); };
+  }, [terminal, token, isOnline]);
 
   function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== 'Enter') return;
@@ -1221,13 +1251,18 @@ export default function PosTerminal() {
       <div className={`pos-content${canCreateSale ? '' : ' pos-utility-only'}`}>
         {!canCreateSale && <header><h1>Register tools</h1><p>{terminal.location.name}</p></header>}
         <div className="pos-history-actions">
-          {can('cash.drawer', terminal.access?.drawer ?? true) && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id}
+          {can('cash.drawer', terminal.access?.drawer ?? true) && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id} timezone={terminal.location.timezone}
             onDrawer={setCashDrawerId} formatMoney={formatMoney}
             canClose={!cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length} />}
         {canCreateSale && <button type="button" ref={customerButton} className="admin-secondary" onClick={() => setCustomerLookupOpen(true)}>Customers</button>}
           {can('sales.receipts', terminal.access?.receipts ?? true) && <button className="admin-secondary" type="button" onClick={() => { setReceiptHistory(null); setReceiptHistoryOpen(true); }}><ReceiptText size={16} /> Receipt history</button>}
           {storeOptions.length > 1 && <button className="admin-secondary" type="button" disabled={cart.length > 0 || busy || saleRetryPending || syncingSales}
-            onClick={() => { setTerminal(null); setCashDrawerId(null); setResults([]); setSaleControl(null); setOfflineSales([]); setCheckoutLocation(''); }}>Change store</button>}
+            onClick={() => {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('locationId');
+              window.history.replaceState(null, '', url);
+              setTerminal(null); setCashDrawerId(null); setResults([]); setSaleControl(null); setOfflineSales([]); setCheckoutLocation('');
+            }}>Change store</button>}
         </div>
         {canCreateSale && <>
         <section className="catalog-panel">
@@ -1282,7 +1317,7 @@ export default function PosTerminal() {
                         <strong className="product-price">{formatMoney(product.sellingPrice)} <small>/ {product.baseUnit}</small></strong>
                         <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-hidden="true"><TriangleAlert size={10} aria-hidden="true" /></b>}{isNegative ? 'Out of stock' : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
                       </div>
-                      <button className="tile-add-button" aria-label={`Add ${product.name} to basket`} disabled={busy || saleRetryPending} onClick={() => addToCart(product, variant)}><span><Plus size="1em" className="inline-icon" aria-hidden="true" /></span><span className="tile-add-label">Add</span></button>
+                      <button className="tile-add-button" aria-label={`Add ${product.name} to basket`} disabled={busy || saleRetryPending || Boolean(isNegative)} onClick={() => addToCart(product, variant)}><span><Plus size="1em" className="inline-icon" aria-hidden="true" /></span><span className="tile-add-label">Add</span></button>
                     </article>
                   );
                 })}
@@ -1370,7 +1405,7 @@ export default function PosTerminal() {
               const quote = offlineQuotes[sale.idempotencyKey];
               const totalMatch = sale.error?.match(/Current server total is ([0-9]+\.[0-9]{2})/);
               return <div className="offline-sale-row" key={sale.idempotencyKey}>
-                <strong>{new Date(sale.createdAt).toLocaleString()} · {sale.status === 'needs_review' ? 'Needs review' : 'Waiting to sync'}</strong>
+                <strong>{new Date(sale.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })} · {sale.status === 'needs_review' ? 'Needs review' : 'Waiting to sync'}</strong>
                 {sale.error && <p>{sale.error}</p>}
                 {sale.status === 'needs_review' && <>
                   <div className="offline-quote-actions"><button className="small-action-button" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale)}>Quote with discounts</button><button className="small-action-button secondary" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale, true)}>Remove discounts and quote</button></div>
@@ -1392,7 +1427,7 @@ export default function PosTerminal() {
             {controlNotice && <Feedback tone="success">{controlNotice}</Feedback>}
             {saleControl && <div className="invoice-control-card">
               <div className="invoice-control-heading"><strong>{saleControl.invoiceNumber}</strong><span>{saleControl.status} · {saleControl.location.name}</span></div>
-              {saleControl.cancellationReason && <p className="field-hint">Cancelled {saleControl.cancelledAt ? `on ${new Date(saleControl.cancelledAt).toLocaleString()}` : ''}: {saleControl.cancellationReason}</p>}
+              {saleControl.cancellationReason && <p className="field-hint">Cancelled {saleControl.cancelledAt ? `on ${new Date(saleControl.cancelledAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })}` : ''}: {saleControl.cancellationReason}</p>}
               <div className="invoice-control-totals"><span>Total {formatMoney(saleControl.netTotal)}</span><span>Paid by {saleControl.payment?.method || 'unknown'}</span></div>
               {saleControl.returns.map((saleReturn) => <div className="prior-return" key={saleReturn.returnNumber}>{saleReturn.returnNumber} · {saleReturn.refund ? `Manual refund ${formatMoney(saleReturn.refund.amount)} (${saleReturn.refund.method})` : 'No money refunded'}</div>)}
               {saleControl.status === 'FINALIZED' && <>
@@ -1422,6 +1457,7 @@ export default function PosTerminal() {
             <button className="checkout-button" disabled={checkoutDisabled} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
             <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
             {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
+            {auditBlocksCheckout && <p className="basket-stock-warning" role="status">Checkout is paused while this store’s stock count is open.</p>}
             {drawerBlocksCheckout && <p role="status">Open your cash drawer to complete a sale.</p>}
             {stockBlocksCheckout && <p className="basket-stock-warning" role="status">Reduce the flagged quantities or restock to continue.</p>}
           </div>
@@ -1482,7 +1518,7 @@ export default function PosTerminal() {
           <label className="discount-input">Invoice number<input autoFocus value={receiptQuery} onChange={(event) => setReceiptQuery(event.target.value)} /></label>
           {receiptHistoryError ? <Feedback tone="error">{receiptHistoryError}</Feedback> : receiptHistory === null ? <p role="status">Loading receipts…</p> :
             receiptHistory.length === 0 ? <p>No matching receipts.</p> : receiptHistory.map((receipt) => <div className="receipt-line" key={receipt.id}>
-              <span><b>{receipt.invoiceNumber}</b><small>{new Date(receipt.createdAt).toLocaleString()} · {formatMoney(receipt.netTotal)}</small></span>
+              <span><b>{receipt.invoiceNumber}</b><small>{new Date(receipt.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })} · {formatMoney(receipt.netTotal)}</small></span>
               <button type="button" className="admin-secondary" onClick={() => { setReceiptHistoryOpen(false); setLastReceipt(receipt); }}>Open receipt</button>
             </div>)}
           <button type="button" className="admin-secondary" onClick={() => setReceiptHistoryOpen(false)}>Close</button>
@@ -1493,7 +1529,7 @@ export default function PosTerminal() {
           onKeyDown={(event) => { if (event.key === 'Escape') setLastReceipt(null); }}>
           <div className="eyebrow">{terminal.location.name}</div>
           <h2>{lastReceipt.invoiceNumber}</h2>
-          <p>{new Date(lastReceipt.createdAt).toLocaleString()}</p>
+          <p>{new Date(lastReceipt.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })}</p>
           {lastReceipt.lines.map((line) => <div className="receipt-line" key={line.id}>
             <span>{line.variant.product.name} · {line.variant.name}
               <small>{receiptQuantity(line)} · {line.variant.sku}</small>

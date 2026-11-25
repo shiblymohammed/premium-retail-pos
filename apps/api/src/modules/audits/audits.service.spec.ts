@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
-import { LocationType, Role } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { AuditSessionStatus, LocationType, Role } from '@prisma/client';
 import { AuditsService } from './audits.service';
 
 describe('AuditsService location audit windows', () => {
@@ -7,12 +7,12 @@ describe('AuditsService location audit windows', () => {
 
   afterEach(() => jest.useRealTimers());
 
-  function serviceFor(location: { type: LocationType; isAuditLocked?: boolean; dailyAuditTime?: string }) {
+  function serviceFor(location: { type: LocationType; isAuditLocked?: boolean; dailyAuditTime?: string; timezone?: string }) {
     const tx = {
       $queryRaw: jest.fn().mockResolvedValue([{
         id: 'location-id',
         type: location.type,
-        timezone: 'Asia/Kolkata',
+        timezone: location.timezone ?? 'Asia/Kolkata',
         dailyAuditTime: location.dailyAuditTime ?? '19:00',
         isActive: true,
         isAuditLocked: location.isAuditLocked ?? true,
@@ -62,6 +62,50 @@ describe('AuditsService location audit windows', () => {
     const { service } = serviceFor({ type: LocationType.SUB_WAREHOUSE });
 
     await expect(service.start('location-id', actor)).rejects.toThrow('already has an active stock audit');
+  });
+
+  it.each([
+    ['2026-07-13T01:59:00Z', false],
+    ['2026-07-13T02:00:00Z', true],
+    ['2026-11-30T02:59:00Z', false],
+    ['2026-11-30T03:00:00Z', true],
+  ])('uses Sunday evening in Los Angeles across daylight saving time at %s', async (time, inWindow) => {
+    jest.useFakeTimers().setSystemTime(new Date(time));
+    const { service } = serviceFor({ type: LocationType.MAIN_WAREHOUSE, timezone: 'America/Los_Angeles' });
+    await expect(service.start('location-id', actor)).rejects.toThrow(
+      inWindow ? 'already has an active stock audit' : 'only after 7:00 PM on Sundays',
+    );
+  });
+
+  it('prompts the warehouse manager at the threshold and accepts the original counter’s recount', async () => {
+    const manager = { ...actor, role: Role.CENTRAL_MANAGER, locationIds: ['location-id'] };
+    const session = { id: 'audit', locationId: 'location-id', status: AuditSessionStatus.ACTIVE,
+      location: { type: LocationType.MAIN_WAREHOUSE }, countItems: [] };
+    let item = {
+      id: 'item', expectedQtyBase: 40, countedQtyBase: null as number | null, recountQtyBase: null as number | null,
+      countedByUserId: null as string | null, requiresRecount: false, recountRequestReason: null,
+      recountThresholdUnits: 5, recountThresholdPercent: 2, recountMeasure: 'either', highCountAlertQty: null,
+    };
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([session]),
+      auditCountItem: { findFirst: jest.fn(async () => item), update: jest.fn(async ({ data }) => { item = { ...item, ...data }; return item; }) },
+    };
+    const prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue({ isActive: true, canCountStockAudits: false }) },
+      auditSession: { findUnique: jest.fn(async () => ({ ...session, countItems: [item] })) },
+      $transaction: jest.fn((work: (db: typeof tx) => unknown) => work(tx)),
+    };
+    const service = new AuditsService(prisma as any, {} as any);
+    await expect(service.recordCount(session.id, item.id, { quantityBaseUnits: 30 }, manager))
+      .resolves.toMatchObject({ requiresRecount: true, recountComparison: { expected: 40, counted: 30 } });
+    const reopened = await service.get(session.id, manager);
+    expect(reopened.countItems[0]).toMatchObject({ recountComparison: { expected: 40, counted: 30 } });
+    const observer = await service.get(session.id, { ...manager, userId: 'another-manager' });
+    expect(observer.countItems[0]).not.toHaveProperty('recountComparison');
+    await expect(service.recordCount(session.id, item.id, { quantityBaseUnits: 39 }, { ...manager, userId: 'another-manager' }))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    await service.recordCount(session.id, item.id, { quantityBaseUnits: 39 }, manager);
+    expect(item).toMatchObject({ countedQtyBase: 30, recountQtyBase: 39, countedByUserId: manager.userId });
   });
 
   it('refuses to disable the confirmed audit cadence', async () => {

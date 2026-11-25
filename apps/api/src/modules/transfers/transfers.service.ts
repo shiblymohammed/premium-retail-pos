@@ -965,7 +965,7 @@ export class TransfersService {
 
 const transferInclude = {
   requestedBy: { select: { email: true, employee: { select: { firstName: true, lastName: true } } } },
-  sourceLocation: { select: { id: true, name: true, type: true, parentId: true } },
-  destLocation: { select: { id: true, name: true, type: true, parentId: true, company: { select: { timezone: true } } } },
+  sourceLocation: { select: { id: true, name: true, type: true, parentId: true, isAuditLocked: true } },
+  destLocation: { select: { id: true, name: true, type: true, parentId: true, isAuditLocked: true, company: { select: { timezone: true } } } },
   lines: { include: { variant: { select: { id: true, sku: true, name: true, product: { select: { id: true, name: true, baseUnit: true } } } } } },
 } satisfies Prisma.TransferInclude;

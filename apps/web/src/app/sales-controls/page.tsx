@@ -43,6 +43,8 @@ type InvoiceLine = {
   id: string;
   quantityBaseUnits: number;
   returnedQuantityBaseUnits: number;
+  enteredUnit?: string;
+  conversionRatioUsed?: number | null;
   unitPriceAtSale: string;
   lineTotal: string;
   refundedAmount?: string;
@@ -55,6 +57,18 @@ type InvoiceLine = {
     };
   };
 };
+
+function soldPackaging(line: InvoiceLine) {
+  const base = line.variant.product.baseUnit;
+  const ratio = line.conversionRatioUsed;
+  if (line.enteredUnit === 'carton' && ratio) {
+    const cartons = line.quantityBaseUnits / ratio;
+    return `${cartons} ${cartons === 1 ? 'carton' : 'cartons'} · ${ratio} ${base} per carton`;
+  }
+  return line.enteredUnit === 'mixed' && ratio
+    ? `Cartons and loose units · ${ratio} ${base} per carton`
+    : `${line.quantityBaseUnits} ${base}${line.quantityBaseUnits === 1 ? '' : 's'}`;
+}
 
 type SaleReturnRecord = {
   returnNumber: string;
@@ -79,6 +93,7 @@ type Invoice = {
     name: string;
     company: {
       currency: string;
+      timezone?: string;
       invoicePrefix?: string;
     };
   };
@@ -192,7 +207,7 @@ export default function SalesControlsPage() {
 
   const currency = (amount: number | string, code = invoice?.location.company.currency || companyBilling?.currency || 'INR') =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: code }).format(Number(amount) || 0);
-  const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: invoice?.location.company.timezone });
 
   /** Shows a bill and keeps the "recent bills" list in sync with any change to it. */
   useEffect(() => {
@@ -358,7 +373,7 @@ export default function SalesControlsPage() {
       ? `Open your cash drawer at ${invoice.location.name} before recording the cash refund.`
       : 'Ask a supervisor with drawer access at this store to record the cash refund.'}</p>}
     {invoice.refundDrawer?.canManage && <CashDrawer key={invoice.location.id} api={API_BASE} token={token}
-      locationId={invoice.location.id} canClose={false} onDrawer={onRefundDrawer} formatMoney={currency} />}
+      locationId={invoice.location.id} timezone={invoice.location.company.timezone} canClose={false} closeHref={`/pos-terminal?locationId=${encodeURIComponent(invoice.location.id)}`} onDrawer={onRefundDrawer} formatMoney={currency} />}
   </div>;
 
   async function handleCancelSale() {
@@ -591,7 +606,7 @@ export default function SalesControlsPage() {
                 <div className={styles.linesHead}><span>Item</span><span className={styles.num}>Sold</span><span className={styles.num}>Returned</span><span className={styles.num}>Price</span></div>
                 {invoice.lines.map((line) => (
                   <div key={line.id} className={styles.lineRow}>
-                    <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{line.variant.product.name}</strong><small>{line.variant.name} · {line.variant.sku}</small></span></span>
+                    <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{line.variant.product.name}</strong><small>{line.variant.name} · {line.variant.sku}</small><small>{soldPackaging(line)}</small></span></span>
                     <span className={styles.num}>{line.quantityBaseUnits}</span>
                     <span className={`${styles.num} ${line.returnedQuantityBaseUnits ? styles.amberText : styles.mutedText}`}>{line.returnedQuantityBaseUnits}</span>
                     <span className={styles.num}>{currency(line.unitPriceAtSale)}</span>
@@ -660,16 +675,16 @@ export default function SalesControlsPage() {
                           <div key={line.id} className={`${styles.returnItem} ${sel.selected ? styles.returnOn : ''} ${!eligible ? styles.returnOff : ''}`}>
                             <button type="button" className={styles.returnPick} onClick={() => eligible && updateLine(line.id, { selected: !sel.selected })} disabled={!eligible} aria-pressed={sel.selected}>
                               <span className={styles.check}>{sel.selected && <Icon name="check" size={12} />}</span>
-                              <span className={styles.returnName}><strong>{line.variant.product.name}</strong><small>{eligible ? `${remaining} of ${line.quantityBaseUnits} can be returned` : 'Already fully returned'}</small></span>
+                              <span className={styles.returnName}><strong>{line.variant.product.name}</strong><small>{soldPackaging(line)}</small><small>{eligible ? `${remaining} of ${line.quantityBaseUnits} can be returned` : 'Already fully returned'}</small></span>
                               <span className={styles.returnPrice}>{currency(line.unitPriceAtSale)}</span>
                             </button>
                             {sel.selected && (
                               <div className={styles.returnDetail}>
                                 <div className={styles.returnRow}>
-                                  <label><small>How many</small>
+                                  <label><small>Quantity to return in {line.variant.product.baseUnit}s</small>
                                     <span className={styles.stepper}>
                                       <button type="button" onClick={() => updateLine(line.id, { quantity: Math.max(1, sel.quantity - 1) })} disabled={sel.quantity <= 1} aria-label="One less"><Icon name="minus" size={13} /></button>
-                                      <input type="number" min="1" max={remaining} value={sel.quantity} onChange={(e) => updateLine(line.id, { quantity: Math.min(remaining, Math.max(1, parseInt(e.target.value, 10) || 1)) })} aria-label="Quantity to return" />
+                                      <input type="number" min="1" max={remaining} value={sel.quantity} onChange={(e) => updateLine(line.id, { quantity: Math.min(remaining, Math.max(1, parseInt(e.target.value, 10) || 1)) })} aria-label={`Quantity to return in ${line.variant.product.baseUnit}s`} />
                                       <button type="button" onClick={() => updateLine(line.id, { quantity: Math.min(remaining, sel.quantity + 1) })} disabled={sel.quantity >= remaining} aria-label="One more"><Icon name="plus" size={13} /></button>
                                     </span>
                                   </label>

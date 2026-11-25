@@ -351,7 +351,7 @@ export class SalesService {
     const invoice = await this.prisma.invoice.findUnique({
       where: { invoiceNumber: invoiceNumber.trim() },
       include: {
-        location: { select: { id: true, name: true, company: { select: { currency: true, invoicePrefix: true, requireCheckoutDrawer: true } } } },
+        location: { select: { id: true, name: true, company: { select: { currency: true, timezone: true, invoicePrefix: true, requireCheckoutDrawer: true } } } },
         payment: { select: { method: true, amount: true, recordedAt: true } },
         lines: { include: { variant: { select: { id: true, sku: true, name: true, product: { select: { name: true, baseUnit: true } } } } } },
         returns: { include: { lines: true, refund: true } },

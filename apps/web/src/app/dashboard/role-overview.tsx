@@ -47,10 +47,10 @@ export function ShiftOverview({ session }: { session: AuthSession }) {
   }, [cashier, session.accessToken, revision]);
 
   const shift = attendance === undefined ? 'Checking shift…' : !attendance ? 'Shift status unavailable' : {
-    NOT_STARTED: 'Not clocked in', WORKING: 'Clocked in', COMPLETED: 'Shift completed',
+    NOT_STARTED: 'Not clocked in', WORKING: 'Clocked in', COMPLETED: 'Clocked out',
   }[attendance.status];
   const location = terminal?.location.name ?? attendance?.location.name;
-  const shiftAction = attendance?.nextAction === 'IN' ? 'Start shift' : attendance?.nextAction === 'OUT' ? 'Clock out' : attendance?.status === 'COMPLETED' ? 'View shift record' : 'Open attendance';
+  const shiftAction = attendance?.nextAction === 'IN' ? (attendance.status === 'COMPLETED' ? 'Clock back in' : 'Start shift') : attendance?.nextAction === 'OUT' ? 'Clock out' : 'Open attendance';
 
   return <main className={styles.page}>
     <header className={styles.overviewTitle}><div><h1>{cashier ? 'Cashier workspace' : 'My shift'}</h1><p>{cashier ? 'Start a sale or check your shift.' : 'Check in, check out and review today’s attendance.'}</p></div>{location && <span className={styles.deskScope}><MapPin size={16} aria-hidden="true" /> {location}</span>}</header>

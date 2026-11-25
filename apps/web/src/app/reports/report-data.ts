@@ -38,13 +38,13 @@ function table(title: string, headers: string[], rows: string[][], description =
   return { title, headers, rows, description };
 }
 
-export function toReportTable(report: keyof typeof EXTRA_REPORTS, raw: unknown): TableData {
+export function toReportTable(report: keyof typeof EXTRA_REPORTS, raw: unknown, timezone = 'UTC'): TableData {
   const list = records(raw);
   switch (report) {
     case 'ledger':
-      return table('Movement ledger', ['Date', 'Movement', 'Location', 'Product', 'SKU', 'Quantity', 'Stock state', 'Route', 'Reference', 'Actor'],
+      return table('Movement ledger', [`Date (${timezone})`, 'Movement', 'Location', 'Product', 'SKU', 'Quantity', 'Stock state', 'Route', 'Reference', 'Actor'],
         list.map((item) => [
-          cell(item.createdAt), cell(item.type), at(item, 'location', 'name'),
+          item.createdAt ? new Date(String(item.createdAt)).toLocaleString('en', { timeZone: timezone, timeZoneName: 'short' }) : '—', cell(item.type), at(item, 'location', 'name'),
           at(item, 'variant', 'product', 'name'), at(item, 'variant', 'sku'),
           `${cell(item.quantityBaseUnits)} ${at(item, 'variant', 'product', 'baseUnit')}`,
           cell(item.stockState), item.transferRoute ? route(item.transferRoute) : '—',
@@ -75,12 +75,12 @@ export function toReportTable(report: keyof typeof EXTRA_REPORTS, raw: unknown):
           at(line, 'variant', 'sku'), cell(line.shortQtyBase), cell(line.damagedQtyBase), cell(line.excessQtyBase),
         ])));
     case 'auditVariances':
-      return table('Stock audit variances', ['Audit', 'Location', 'Status', 'Product', 'SKU', 'Expected', 'Counted', 'Variance', 'Recount'],
+      return table('Stock audit variances', ['Audit', 'Location', 'Status', 'Product', 'SKU', 'Expected', 'First count', 'Recounted', 'Approved', 'Variance', 'Recount status'],
         list.map((item) => [
           at(item, 'auditSession', 'id'), at(item, 'auditSession', 'location', 'name'), at(item, 'auditSession', 'status'),
           at(item, 'variant', 'product', 'name'), at(item, 'variant', 'sku'), cell(item.expectedQtyBase),
-          cell(item.approvedQtyBase ?? item.recountQtyBase ?? item.countedQtyBase), cell(item.varianceBase),
-          item.requiresRecount ? 'Required' : 'No',
+          cell(item.countedQtyBase), cell(item.recountQtyBase), cell(item.approvedQtyBase), cell(item.varianceBase),
+          item.recountedAt || item.recountQtyBase != null ? 'Completed' : item.requiresRecount ? 'Required' : 'No recount',
         ]));
     case 'priceChanges':
       return table('Price change history', ['Date', 'Product', 'Field', 'Old value', 'New value', 'Reason', 'Changed by'],

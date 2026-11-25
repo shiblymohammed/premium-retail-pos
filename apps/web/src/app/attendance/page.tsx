@@ -172,7 +172,8 @@ export default function AttendancePage() {
   const recentHistory = useMemo(() => history.filter((day) => ['present', 'late'].includes(day.status) && (!today || day.date < today.localDate)).slice(-7).reverse(), [history, today]);
 
   const clockIn = today?.punches.find((punch) => punch.punchType === 'IN');
-  const clockOut = today?.punches.find((punch) => punch.punchType === 'OUT');
+  const lastPunch = today?.punches.at(-1);
+  const clockOut = lastPunch?.punchType === 'OUT' ? lastPunch : undefined;
   function netShiftMs(inPunch: Punch, until: Date) {
     const end = until.getTime();
     const start = new Date(inPunch.punchTimestamp).getTime();
@@ -181,16 +182,23 @@ export default function AttendancePage() {
     return Math.max(0, end - start - breakMs);
   }
 
-  const elapsedEnd = clockOut ? new Date(clockOut.punchTimestamp) : clockNow;
-  const elapsed = clockIn && elapsedEnd ? formatDuration(netShiftMs(clockIn, elapsedEnd)) : '00:00:00';
+  function netDayMs(punches: Punch[], now: Date) {
+    return punches.reduce((total, punch, index) => {
+      if (punch.punchType !== 'IN') return total;
+      const next = punches[index + 1];
+      return total + netShiftMs(punch, next?.punchType === 'OUT' ? new Date(next.punchTimestamp) : now);
+    }, 0);
+  }
+
+  const elapsed = today && clockNow ? formatDuration(netDayMs(today.punches, clockNow)) : '00:00:00';
 
   function updateTodayPattern(punches: Punch[], metrics?: Today) {
     if (!today) return;
     const inPunch = punches.find((punch) => punch.punchType === 'IN');
-    const outPunch = punches.find((punch) => punch.punchType === 'OUT');
+    const last = punches.at(-1);
+    const outPunch = last?.punchType === 'OUT' ? last : undefined;
     if (!inPunch) return;
-    const end = outPunch ? new Date(outPunch.punchTimestamp) : new Date();
-    const workMinutes = Math.floor(netShiftMs(inPunch, end) / 60_000);
+    const workMinutes = Math.floor(netDayMs(punches, new Date()) / 60_000);
     const nextDay: HistoryDay = {
       date: today.localDate,
       status: inPunch.isLate ? 'late' : 'present',
@@ -263,11 +271,11 @@ export default function AttendancePage() {
   if (loading) return <main className={`${styles.page} app-page`}><div className={styles.loading}>Loading your attendance…</div></main>;
   if (!today) return <main className={`${styles.page} app-page`}><div className={styles.loadError}><strong>Attendance unavailable</strong><p>{error || 'Your account does not have an employee attendance profile.'}</p><button type="button" onClick={() => window.location.reload()}>Try again</button></div></main>;
 
-  const statusLabel = today.status === 'NOT_STARTED' ? 'Not clocked in' : today.status === 'WORKING' ? (today.onBreak ? 'On break' : 'On shift') : 'Shift complete';
+  const statusLabel = today.status === 'NOT_STARTED' ? 'Not clocked in' : today.status === 'WORKING' ? (today.onBreak ? 'On break' : 'On shift') : 'Clocked out';
   const statusClass = today.status === 'WORKING' ? styles.live : today.status === 'COMPLETED' ? styles.done : styles.waiting;
   const patternHistory = history.map((day) => {
     if (day.date !== today.localDate || today.status !== 'WORKING' || !clockIn || !clockNow) return day;
-    const workMinutes = Math.floor(netShiftMs(clockIn, clockNow) / 60_000);
+    const workMinutes = Math.floor(netDayMs(today.punches, clockNow) / 60_000);
     return { ...day, workMinutes, hours: formatWorkMinutes(workMinutes) };
   });
   const historyMap = new Map(patternHistory.map((day) => [day.date, day]));
@@ -326,10 +334,15 @@ export default function AttendancePage() {
                   </button>
                 </div>
               </>}
-              {today.status === 'COMPLETED' && <div>
-                <small>Net time worked</small><strong>{elapsed}</strong>
-                <p>{clockIn ? formatTime(clockIn.punchTimestamp, today.timezone) : '—'} to {clockOut ? formatTime(clockOut.punchTimestamp, today.timezone) : '—'}</p>
-              </div>}
+              {today.status === 'COMPLETED' && <>
+                <div>
+                  <small>Net time worked</small><strong>{elapsed}</strong>
+                  <p>Last clock-out {clockOut ? formatTime(clockOut.punchTimestamp, today.timezone) : '—'}</p>
+                </div>
+                {today.nextAction === 'IN' && <button className="admin-primary" type="button" disabled={busy} onClick={handlePunch}>
+                  <ArrowUpRight size={18} /> {busy ? 'Saving…' : 'Clock back in'}
+                </button>}
+              </>}
             </div>
             {clockIn && <p className={styles.shiftMetrics}>
               {clockIn.scheduledEndAt ? `Scheduled end ${formatTime(clockIn.scheduledEndAt, today.timezone)}` : today.targetEndTime ? `Shift end setting ${today.targetEndTime}` : 'No scheduled end recorded'}
@@ -337,12 +350,12 @@ export default function AttendancePage() {
               {(today.overtimeMinutes ?? 0) > 0 && ` · Overtime ${formatWorkMinutes(today.overtimeMinutes!)}`}
               {(today.earlyMinutes ?? 0) > 0 && ` · Clocked out ${today.earlyMinutes} min early`}
             </p>}
-            {clockIn?.breaks?.map((pause) => <div className={styles.shiftMetrics} key={pause.id}>
+            {today.punches.flatMap((punch) => punch.breaks ?? []).map((pause) => <div className={styles.shiftMetrics} key={pause.id}>
               Break {formatTime(pause.startedAt, today.timezone)} – {pause.endedAt ? formatTime(pause.endedAt, today.timezone) : 'in progress'}
             </div>)}
             {confirmOut && <ConfirmAction title="Clock out now?" confirmLabel="Yes, clock out" cancelLabel="No, stay on shift"
               onCancel={() => setConfirmOut(false)} onConfirm={() => { setConfirmOut(false); void handlePunch(); }}>
-              This records the end of today’s shift at {today.location.name}.
+              This records your time out at {today.location.name}. If you return today, select Clock back in.
             </ConfirmAction>}
 
             <div className={styles.todayTimeline}>

@@ -43,6 +43,7 @@ interface TransferItem {
   variantId: string;
   sku: string;
   name: string;
+  baseUnit: string;
   cartons: number;
   unitsPerCarton: number;
   looseUnits: number;
@@ -69,6 +70,7 @@ interface StockTransfer {
   requestedByUserId: string;
   requestedByName?: string;
   timezone?: string;
+  auditLocked?: boolean;
   transferCode: string;
   sourceLocation: string;
   destLocation: string;
@@ -95,7 +97,7 @@ interface ReplenishmentRequest {
 }
 
 type LocationOption = { id: string; name: string; type: string; parentId: string | null };
-type CatalogOption = { variantId: string; sku: string; name: string; unitsPerCarton: number };
+type CatalogOption = { variantId: string; sku: string; name: string; baseUnit: string; unitsPerCarton: number };
 
 
 const isReceiver = (role?: string) => role === 'STAFF' || role === 'CASHIER';
@@ -133,10 +135,10 @@ function parseStamp(value?: string) {
   return new Date(Number(m[3]), months.indexOf(m[2].toLowerCase()), Number(m[1]), h, Number(m[5])).getTime();
 }
 /** "18-Nov-2026 09:30 AM" → { day: "18 Nov", time: "09:30 AM" } */
-function splitStamp(value: string) {
+function splitStamp(value: string, timeZone?: string) {
   if (value.includes('T')) {
     const date = new Date(value);
-    return { day: date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }), time: date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) };
+    return { day: date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone }), time: date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone }) };
   }
   const [d, ...rest] = value.split(' ');
   return { day: d.split('-').slice(0, 2).join(' '), time: rest.join(' ') };
@@ -256,6 +258,7 @@ export default function OperationsPage() {
         variantId: line.variantId,
         sku: variant.sku || line.variantId,
         name: variant.product?.name || variant.name || variant.sku || 'Product',
+        baseUnit: line.baseUnitSnapshot ?? variant.product?.baseUnit ?? 'unit',
         cartons: unitsPerCarton > 1 ? Math.floor(requestedQtyBase / unitsPerCarton) : 0,
         unitsPerCarton,
         looseUnits: unitsPerCarton > 1 ? requestedQtyBase % unitsPerCarton : requestedQtyBase,
@@ -281,6 +284,7 @@ export default function OperationsPage() {
       sourceLocation: row.sourceLocation?.name || row.sourceLocationId,
       destLocation: row.destLocation?.name || row.destLocationId,
       timezone: row.destLocation?.company?.timezone,
+      auditLocked: Boolean(row.sourceLocation?.isAuditLocked || row.destLocation?.isAuditLocked),
       status: row.status,
       createdAt: row.createdAt,
       dispatchedAt: row.dispatchedAt,
@@ -342,6 +346,7 @@ export default function OperationsPage() {
       variantId: variant.id,
       sku: variant.sku,
       name: typeof product.name === 'string' && product.name.trim() ? product.name : variant.name || variant.sku || 'Product',
+      baseUnit: product.baseUnit ?? 'unit',
       unitsPerCarton: Number(product.unitsPerCarton || 1),
     }))));
   };
@@ -653,7 +658,7 @@ export default function OperationsPage() {
     const q = draft[p.sku];
     const loose = p.unitsPerCarton > 1 ? 0 : q.loose;
     const totalUnits = q.cartons * p.unitsPerCarton + loose;
-    return { variantId: p.variantId, sku: p.sku, name: p.name, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: loose, cartonRequired: p.unitsPerCarton > 1, totalUnits, requestedQtyBase: totalUnits, approvedQtyBase: 0, dispatchedQtyBase: 0, receivedQtyBase: 0, shortQtyBase: 0, damagedQtyBase: 0 };
+    return { variantId: p.variantId, sku: p.sku, name: p.name, baseUnit: p.baseUnit, cartons: q.cartons, unitsPerCarton: p.unitsPerCarton, looseUnits: loose, cartonRequired: p.unitsPerCarton > 1, totalUnits, requestedQtyBase: totalUnits, approvedQtyBase: 0, dispatchedQtyBase: 0, receivedQtyBase: 0, shortQtyBase: 0, damagedQtyBase: 0 };
   });
   const draftTotal = draftItems.reduce((s, i) => s + i.totalUnits, 0);
   const setQty = (sku: string, key: keyof DraftQty, value: number) => setDraft((d) => ({ ...d, [sku]: { ...d[sku], [key]: Math.max(0, value) } }));
@@ -848,7 +853,7 @@ export default function OperationsPage() {
             const meta = STATUS_META[t.status];
             const isOpen = expanded === t.id;
             const issues = hasIssues(t);
-            const created = splitStamp(t.createdAt);
+            const created = splitStamp(t.createdAt, t.timezone);
             const canApprove = canApproveTransfers && t.requestedByUserId !== apiUserId && canActAt(t.sourceLocationId);
             const canDispatch = canDispatchTransfers && canActAt(t.sourceLocationId) && ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && t.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (item.cartonRequired ? item.unitsPerCarton : 1));
             const hasOutstanding = t.items.some((item) => outstandingQuantity(item) > 0);
@@ -889,8 +894,9 @@ export default function OperationsPage() {
                   <span className={styles.rowActions}>
                     {canRequestTransfers && t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
                     {t.status === 'PENDING_APPROVAL' && (canApprove ? <button type="button" className={styles.actionButton} onClick={() => approveTransfer(t)}>Approve</button> : <small>Waiting for another manager</small>)}
-                    {canDispatch && <button type="button" className={styles.actionButton} onClick={() => openPacking(t)}>Confirm packing</button>}
-                    {canReceive && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
+                    {t.auditLocked && (canDispatch || canReceive) && <small role="status">Paused for stock count</small>}
+                    {canDispatch && !t.auditLocked && <button type="button" className={styles.actionButton} onClick={() => openPacking(t)}>Confirm packing</button>}
+                    {canReceive && !t.auditLocked && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
                     <span className={styles.menuWrap} data-row-menu>
                       <button type="button" className={`${styles.moreButton} ${menuFor === t.id ? styles.moreOn : ''}`} onClick={() => setMenuFor(menuFor === t.id ? null : t.id)} aria-haspopup="menu" aria-expanded={menuFor === t.id} aria-label={`Options for ${t.transferCode}`}><Icon name="more" size={16} /></button>
                       {menuFor === t.id && (
@@ -900,8 +906,8 @@ export default function OperationsPage() {
                           {canRequestTransfers && t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
                           {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => approveTransfer(t)}><Icon name="check" size={15} /><span><b>Approve</b><small>Approver cannot be the requester</small></span></button>}
                           {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${t.transferCode}?`, submit: (reason) => rejectTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
-                          {canDispatch && <button type="button" role="menuitem" onClick={() => openPacking(t)}><Icon name="send" size={15} /><span><b>Confirm packed quantities</b><small>Server checks available inventory</small></span></button>}
-                          {canReceive && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
+                          {canDispatch && !t.auditLocked && <button type="button" role="menuitem" onClick={() => openPacking(t)}><Icon name="send" size={15} /><span><b>Confirm packed quantities</b><small>Server checks available inventory</small></span></button>}
+                          {canReceive && !t.auditLocked && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
                           {canApproveTransfers && !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
                           <button type="button" role="menuitem" onClick={() => copyTracking(t)}><Icon name="copy" size={15} /><span><b>Copy tracking number</b><small>{t.trackingNumber}</small></span></button>
                           <div className={styles.menuDivider} />
@@ -1067,10 +1073,12 @@ export default function OperationsPage() {
                     const issues = receiptIssues[item.variantId] ?? { damaged: 0, missing: 0 };
                     return <fieldset key={item.variantId} className={styles.receiptLine}>
                       <legend>{item.name} · {item.sku}</legend>
-                      <span>Expected <strong>{expected} units</strong></span>
+                      <span>Expected <strong>{expected} {item.baseUnit}{expected === 1 ? '' : 's'}</strong>
+                        {item.unitsPerCarton > 1 && <small> · {item.unitsPerCarton} per carton</small>}
+                      </span>
                       <label>Damaged<input type="number" min="0" step="1" max={expected} value={issues.damaged} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, damaged: Number(event.target.value) } }))} /></label>
                       <label>Missing<input type="number" min="0" step="1" max={expected} value={issues.missing} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, missing: Number(event.target.value) } }))} /></label>
-                      <span>Into stock <strong>{Math.max(0, expected - issues.damaged - issues.missing)}</strong></span>
+                      <span>Into stock <strong>{Math.max(0, expected - issues.damaged - issues.missing)} {item.baseUnit}{expected - issues.damaged - issues.missing === 1 ? '' : 's'}</strong></span>
                     </fieldset>;
                   })}
                 </div>

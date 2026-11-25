@@ -28,8 +28,7 @@ type Shift = {
   breaks?: Array<{ startedAt: Date; endedAt: Date | null }>;
 };
 
-export function shiftMetrics(clockIn: Shift | null, finishedAt: Date | null, activeUntil?: Date) {
-  if (!clockIn) return { workMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, earlyMinutes: 0, onBreak: false };
+function shiftDuration(clockIn: Shift, finishedAt: Date | null, activeUntil?: Date) {
   const start = clockIn.punchTimestamp.getTime();
   const finish = (finishedAt ?? activeUntil ?? clockIn.punchTimestamp).getTime();
   const scheduled = clockIn.scheduledEndAt?.getTime();
@@ -42,11 +41,46 @@ export function shiftMetrics(clockIn: Shift | null, finishedAt: Date | null, act
     if (scheduled !== undefined) overtimeBreakMs += overlap(Math.max(start, scheduled), pause.startedAt.getTime(), breakEnd);
   }
   return {
-    workMinutes: Math.floor(Math.max(0, finish - start - breakMs) / 60_000),
-    breakMinutes: Math.floor(breakMs / 60_000),
-    overtimeMinutes: finishedAt && scheduled !== undefined ? Math.floor(Math.max(0, finish - Math.max(start, scheduled) - overtimeBreakMs) / 60_000) : 0,
+    workMs: Math.max(0, finish - start - breakMs),
+    breakMs,
+    overtimeMs: finishedAt && scheduled !== undefined ? Math.max(0, finish - Math.max(start, scheduled) - overtimeBreakMs) : 0,
     earlyMinutes: finishedAt && scheduled !== undefined ? Math.ceil(Math.max(0, scheduled - finish) / 60_000) : 0,
     onBreak: !finishedAt && (clockIn.breaks ?? []).some((pause) => !pause.endedAt),
+  };
+}
+
+export function shiftMetrics(clockIn: Shift | null, finishedAt: Date | null, activeUntil?: Date) {
+  if (!clockIn) return { workMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, earlyMinutes: 0, onBreak: false };
+  const { workMs, breakMs, overtimeMs, ...state } = shiftDuration(clockIn, finishedAt, activeUntil);
+  return {
+    workMinutes: Math.floor(workMs / 60_000), breakMinutes: Math.floor(breakMs / 60_000),
+    overtimeMinutes: Math.floor(overtimeMs / 60_000), ...state,
+  };
+}
+
+export function attendanceDay<T extends Shift & { punchType: string }>(punches: T[], now?: Date) {
+  const clockIn = punches.find((punch) => punch.punchType === 'IN') ?? null;
+  const clockOut = punches.at(-1)?.punchType === 'OUT' ? punches.at(-1)! : null;
+  let workMs = 0;
+  let breakMs = 0;
+  let overtimeMs = 0;
+  let earlyMinutes = 0;
+  let onBreak = false;
+  for (const [index, punch] of punches.entries()) {
+    if (punch.punchType !== 'IN') continue;
+    const next = punches[index + 1];
+    const finishedAt = next?.punchType === 'OUT' ? next.punchTimestamp : null;
+    const interval = shiftDuration(punch, finishedAt, now);
+    workMs += interval.workMs;
+    breakMs += interval.breakMs;
+    overtimeMs += interval.overtimeMs;
+    if (next === clockOut) earlyMinutes = interval.earlyMinutes;
+    if (!next) onBreak = interval.onBreak;
+  }
+  return {
+    clockIn, clockOut,
+    workMinutes: Math.floor(workMs / 60_000), breakMinutes: Math.floor(breakMs / 60_000),
+    overtimeMinutes: Math.floor(overtimeMs / 60_000), earlyMinutes, onBreak,
   };
 }
 
@@ -65,6 +99,7 @@ export class AttendanceService {
     });
     const last = punches.at(-1);
     const status = !last ? 'NOT_STARTED' : last.punchType === 'IN' ? 'WORKING' : 'COMPLETED';
+    const { clockIn: _clockIn, clockOut: _clockOut, ...metrics } = attendanceDay(punches, now);
     return {
       employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode },
       location: { id: employee.location.id, name: employee.location.name },
@@ -72,9 +107,9 @@ export class AttendanceService {
       timezone: employee.location.company.timezone,
       targetStartTime: employee.location.attendanceStartTime,
       targetEndTime: employee.location.attendanceEndTime ?? null,
-      ...shiftMetrics(punches.find((row) => row.punchType === 'IN') ?? null, last?.punchType === 'OUT' ? last.punchTimestamp : null, now),
+      ...metrics,
       status,
-      nextAction: status === 'WORKING' ? 'OUT' : status === 'NOT_STARTED' ? 'IN' : null,
+      nextAction: status === 'WORKING' ? 'OUT' : 'IN',
       punches,
     };
   }
@@ -106,9 +141,7 @@ export class AttendanceService {
       const date = new Date(Date.UTC(startYear, startMonth - 1, startDay + index));
       const dateKey = localDateKey(date, 'UTC');
       const dayPunches = byDay.get(dateKey) ?? [];
-      const clockIn = dayPunches.find((punch) => punch.punchType === 'IN') ?? null;
-      const clockOut = dayPunches.find((punch) => punch.punchType === 'OUT') ?? null;
-      const metrics = shiftMetrics(clockIn, clockOut?.punchTimestamp ?? null, dateKey === today ? now : undefined);
+      const { clockIn, clockOut, ...metrics } = attendanceDay(dayPunches, dateKey === today ? now : undefined);
       return {
         date: dateKey,
         status: !clockIn ? 'off' : clockIn.isLate ? 'late' : 'present',
@@ -143,25 +176,29 @@ export class AttendanceService {
         orderBy: { punchTimestamp: 'asc' },
       });
       const last = punches.at(-1);
-      if (last?.punchType === 'OUT') throw new ConflictException('Your attendance is already complete for today');
+      if (last?.punchType === 'OUT' && action !== 'IN') throw new ConflictException('Use Clock back in to resume today’s attendance');
+      const firstIn = punches.find((row) => row.punchType === 'IN');
       if (last?.breaks?.some((pause) => !pause.endedAt)) throw new ConflictException('End your break before clocking out');
       const punchType = last?.punchType === 'IN' ? 'OUT' : 'IN';
       if (action && action !== punchType) throw new ConflictException('The shift changed. Refresh attendance before trying again');
       const endTime = employee.location.attendanceEndTime;
-      const scheduledEndAt = punchType === 'IN' && endTime ? localScheduledTime(now, endTime, employee.location.company.timezone) : null;
-      const targetStartTime = punchType === 'IN' ? employee.location.attendanceStartTime ?? null : null;
+      const scheduledEndAt = punchType === 'IN'
+        ? firstIn ? firstIn.scheduledEndAt ?? null : endTime ? localScheduledTime(now, endTime, employee.location.company.timezone) : null
+        : null;
+      const targetStartTime = punchType === 'IN' && !firstIn ? employee.location.attendanceStartTime ?? null : null;
       const isLate = punchType === 'IN' && targetStartTime !== null && isAfterLocalTarget(now, targetStartTime, employee.location.company.timezone);
       const punch = await tx.attendance.create({
         data: { employeeId: employee.id, locationId: employee.locationId, punchType, punchTimestamp: now, isLate, targetStartTime, scheduledEndAt },
-        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields },
+        select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
       });
+      const { clockIn: _clockIn, clockOut: _clockOut, ...metrics } = attendanceDay([...punches, punch], now);
       return {
         employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode },
         location: { id: employee.location.id, name: employee.location.name },
         punch,
         status: punchType === 'IN' ? 'WORKING' : 'COMPLETED',
-        nextAction: punchType === 'IN' ? 'OUT' : null,
-        ...shiftMetrics(punchType === 'IN' ? punch : last ?? null, punchType === 'OUT' ? now : null, now),
+        nextAction: punchType === 'IN' ? 'OUT' : 'IN',
+        ...metrics,
       };
     });
   }
@@ -220,8 +257,7 @@ export class AttendanceService {
       targetStartTime: location.attendanceStartTime,
       targetEndTime: location.attendanceEndTime ?? null,
       employees: employees.map((employee) => {
-        const clockIn = employee.attendances.find((punch) => punch.punchType === 'IN') ?? null;
-        const clockOut = employee.attendances.find((punch) => punch.punchType === 'OUT') ?? null;
+        const { clockIn, clockOut, ...metrics } = attendanceDay(employee.attendances, now);
         return {
           employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode },
           status: clockOut ? 'COMPLETED' : clockIn ? 'WORKING' : 'NOT_STARTED',
@@ -231,7 +267,7 @@ export class AttendanceService {
           clockOutAt: clockOut?.punchTimestamp ?? null,
           isLate: clockIn?.isLate ?? false,
           targetStartTime: clockIn?.targetStartTime ?? location.attendanceStartTime,
-          ...shiftMetrics(clockIn, clockOut?.punchTimestamp ?? null, now),
+          ...metrics,
           clockInCorrectionReason: clockIn?.correctionReason ?? null,
           clockOutCorrectionReason: clockOut?.correctionReason ?? null,
         };
@@ -294,13 +330,17 @@ export class AttendanceService {
         orderBy: { punchTimestamp: 'asc' },
       });
       const timeline = dayPunches.map((item) => ({ ...item, punchTimestamp: item.id === attendanceId ? correctedAt : item.punchTimestamp })).sort((a, b) => a.punchTimestamp.getTime() - b.punchTimestamp.getTime());
-      if (timeline.length > 2 || timeline.some((item, index) => item.punchType !== (index % 2 === 0 ? 'IN' : 'OUT'))) {
+      if (timeline.some((item, index) => item.punchType !== (index % 2 === 0 ? 'IN' : 'OUT') ||
+        (index > 0 && item.punchTimestamp <= timeline[index - 1].punchTimestamp))) {
         throw new ConflictException('This correction would make the daily IN/OUT order invalid');
       }
-      const [clockIn, clockOut] = timeline;
-      if (clockIn?.breaks?.some((pause) => pause.startedAt < clockIn.punchTimestamp ||
-        (clockOut && (!pause.endedAt || pause.endedAt > clockOut.punchTimestamp)))) {
-        throw new ConflictException('The corrected shift must contain all recorded breaks');
+      for (let index = 0; index < timeline.length; index += 2) {
+        const clockIn = timeline[index];
+        const clockOut = timeline[index + 1];
+        if (clockIn.breaks?.some((pause) => pause.startedAt < clockIn.punchTimestamp ||
+          (clockOut && (!pause.endedAt || pause.endedAt > clockOut.punchTimestamp)))) {
+          throw new ConflictException('The corrected shift must contain all recorded breaks');
+        }
       }
       const targetStartTime = punch.targetStartTime;
       const isLate = punch.punchType === 'IN' && targetStartTime !== null && isAfterLocalTarget(correctedAt, targetStartTime, location.company.timezone);
@@ -356,9 +396,7 @@ export class AttendanceService {
         byDate.set(date, [...(byDate.get(date) ?? []), punch]);
       }
       const entries = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, punches]) => {
-        const clockIn = punches.find((punch) => punch.punchType === 'IN') ?? null;
-        const clockOut = punches.find((punch) => punch.punchType === 'OUT') ?? null;
-        const metrics = shiftMetrics(clockIn, clockOut?.punchTimestamp ?? null);
+        const { clockIn, clockOut, ...metrics } = attendanceDay(punches);
         return { date, clockInAt: clockIn?.punchTimestamp ?? null, clockOutAt: clockOut?.punchTimestamp ?? null, isLate: clockIn?.isLate ?? false, targetStartTime: clockIn?.targetStartTime ?? null, ...metrics };
       });
       const presentDays = entries.filter((entry) => entry.clockInAt).length;

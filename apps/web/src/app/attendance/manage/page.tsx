@@ -497,7 +497,7 @@ export default function AttendanceManagerPage() {
             icon={<Icon name="store" size={14} />}
             options={locations.map((l) => ({ value: l.id, label: l.name }))}
             disabled={saving}
-            onChange={(id) => { setReport(null); setLocationId(id); }}
+            onChange={(id) => setLocationId(id)}
           />
           <button type="button" className={styles.ghostButton} onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}><Icon name="settings" size={15} /> Shift settings</button>
           <button type="button" className={styles.primaryButton} onClick={exportReport} disabled={!report || day.location.id !== locationId}><Icon name="download" size={15} /> Export report</button>

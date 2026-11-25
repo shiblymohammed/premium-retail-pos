@@ -45,6 +45,7 @@ type AuditItem = {
   countedAt?: string | null;
   recountedAt?: string | null;
   recountRequestReason?: string | null;
+  recountComparison?: { expected: number; counted: number };
   countedBy?: { id: string; email: string } | null;
   recountedBy?: { id: string; email: string } | null;
   varianceBase: number | null;
@@ -55,7 +56,7 @@ type AuditItem = {
     id: string;
     sku: string;
     name: string;
-    product: { name: string; baseUnit: string };
+    product: { name: string; baseUnit: string; unitsPerCarton?: number | null };
   };
 };
 
@@ -79,7 +80,7 @@ type SessionRow = {
   _count: { countItems: number };
 };
 
-type Capabilities = { canCount: boolean; canManage: boolean; canChangeThresholds: boolean };
+type Capabilities = { canCount: boolean; canCountWarehouse?: boolean; canManage: boolean; canChangeThresholds: boolean };
 
 type Threshold = {
   scopeKey: string;
@@ -182,6 +183,7 @@ export default function AuditsPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const selectedLocation = locations.find((l) => l.id === locationId) || locations[0];
+  const canEnterCounts = capabilities.canCount || (selectedLocation?.type !== 'RETAIL_STORE' && capabilities.canCountWarehouse);
   const isLocationFrozen = session?.status === 'ACTIVE' || session?.status === 'SUBMITTED';
   const locationName = selectedLocation?.name ?? 'your assigned location';
 
@@ -480,10 +482,12 @@ export default function AuditsPage() {
     };
     if (session.status === 'SUBMITTED') return {
       tone: recountCount ? styles.heroWarn : styles.heroActive, icon: 'eye', eyebrow: 'Step 3 of 3',
-      title: recountCount ? `${plural(recountCount, 'product')} need${recountCount === 1 ? 's' : ''} a second count` : 'Check the results',
-      text: recountCount
+      title: !capabilities.canManage ? 'Submitted for manager review' : recountCount ? `${plural(recountCount, 'product')} need${recountCount === 1 ? 's' : ''} a second count` : 'Check the results',
+      text: !capabilities.canManage
+        ? 'A manager will review the recorded counts and approve any stock adjustment.'
+        : recountCount
         ? 'The difference is bigger than allowed. Count those items again, then approve.'
-        : `${mismatchCount ? plural(mismatchCount, 'product') + ' differ slightly.' : 'Everything matches.'} Add a short note and approve to update stock.`,
+        : `${mismatchCount ? plural(mismatchCount, 'product') + (mismatchCount === 1 ? ' differs.' : ' differ.') : 'Everything matches.'} Add a short note and approve to update stock.`,
     };
     if (session.status === 'ABORTED') return {
       tone: styles.heroIdle, icon: 'x', eyebrow: 'Cancelled',
@@ -606,7 +610,7 @@ export default function AuditsPage() {
                   const draft = counts[item.id] ?? '';
                   const unit = item.variant.product.baseUnit;
                   const done = Boolean(item.countedAt || item.countedQtyBase != null);
-                  const canEditCount = capabilities.canCount && (!done || (item.requiresRecount && !item.recountedAt));
+                  const canEditCount = canEnterCounts && (!done || (item.requiresRecount && !item.recountedAt));
                   const typo = draft !== '' && Number(draft) > highCountLimit;
                   return (
                     <li key={item.id} className={`${styles.item} ${item.requiresRecount ? styles.itemWarn : ''} ${session.status === 'ACTIVE' && done ? styles.itemDone : ''}`}>
@@ -615,10 +619,11 @@ export default function AuditsPage() {
                         <div>
                           <strong>{item.variant.product.name}</strong>
                           <small>{item.variant.name} · {item.variant.sku}</small>
+                          {(item.variant.product.unitsPerCarton ?? 0) > 1 && <small>1 carton = {item.variant.product.unitsPerCarton} {unit}s</small>}
                         </div>
                       </div>
 
-                      {session.status === 'ACTIVE' && capabilities.canCount && (
+                      {session.status === 'ACTIVE' && canEnterCounts && (
                         <div className={styles.itemCount}>
                           <div className={styles.countRow}>
                           <div className={styles.counter}>
@@ -633,12 +638,16 @@ export default function AuditsPage() {
                             <button type="button" onClick={() => void handleSaveCount(item)} className={styles.saveButton} disabled={draft === '' || busy}>Save</button>
                           )}
                           </div>
-                          {item.requiresRecount && !item.recountedAt && <span className={styles.typo}><Icon name="rotateCcw" size={12} /> Threshold exceeded. Enter a second count.</span>}
+                          {item.requiresRecount && !item.recountedAt && <span className={styles.typo}><Icon name="rotateCcw" size={12} /> {item.recountRequestReason ? 'Recount requested.' : 'Threshold exceeded. Enter a second count.'}</span>}
+                          {item.recountComparison && <button type="button" className={styles.saveButton} onClick={() => {
+                            const { expected, counted } = item.recountComparison!;
+                            setRecountPrompt({ id: item.id, name: item.variant.product.name, unit, expected, counted });
+                          }}>Review variance</button>}
                           {typo && <span className={styles.typo}><Icon name="alert" size={12} /> That&apos;s a lot. Please double-check.</span>}
                         </div>
                       )}
 
-                      {session.status === 'ACTIVE' && !capabilities.canCount && (
+                      {session.status === 'ACTIVE' && !canEnterCounts && (
                         <div className={styles.itemResult}><span className={styles.badge}>Waiting for authorized counters</span></div>
                       )}
 

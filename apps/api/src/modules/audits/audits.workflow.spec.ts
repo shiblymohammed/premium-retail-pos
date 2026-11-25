@@ -1,4 +1,4 @@
-import { AuditSessionStatus, MovementType, Role, StockState } from '@prisma/client';
+import { AuditSessionStatus, LocationType, MovementType, Role, StockState } from '@prisma/client';
 import { AuditsService } from './audits.service';
 
 describe('AuditsService count, recount, and approval workflow', () => {
@@ -18,7 +18,7 @@ describe('AuditsService count, recount, and approval workflow', () => {
       auditCountItem: { findFirst: jest.fn().mockResolvedValue(item), update },
     };
     const prisma = {
-      auditSession: { findUnique: jest.fn().mockResolvedValue({ status: AuditSessionStatus.ACTIVE, locationId: 'location-id', countItems: [item] }) },
+      auditSession: { findUnique: jest.fn().mockResolvedValue({ status: AuditSessionStatus.ACTIVE, locationId: 'location-id', location: { type: LocationType.RETAIL_STORE }, countItems: [item] }) },
       $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
     };
     const inventory = { recordMovement: jest.fn() };
@@ -44,7 +44,7 @@ describe('AuditsService count, recount, and approval workflow', () => {
       },
     };
     const prisma = {
-      auditSession: { findUnique: jest.fn().mockResolvedValue({ status: AuditSessionStatus.ACTIVE, locationId: 'location-id', countItems: [item] }) },
+      auditSession: { findUnique: jest.fn().mockResolvedValue({ status: AuditSessionStatus.ACTIVE, locationId: 'location-id', location: { type: LocationType.RETAIL_STORE }, countItems: [item] }) },
       $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
     };
     const service = new AuditsService(prisma as any, {} as any);

@@ -1108,10 +1108,11 @@ export default function CompanySettingsPage() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
-                  Operating Timezone *
+                <label htmlFor="company-timezone" style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: 'var(--retail-ink)', marginBottom: '6px' }}>
+                  Operating timezone *
                 </label>
                 <select
+                  id="company-timezone"
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
                   style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontSize: '13px', background: 'var(--retail-card)' }}
@@ -1119,9 +1120,18 @@ export default function CompanySettingsPage() {
                   <option value="Asia/Kolkata">Asia/Kolkata (UTC +05:30 - Standard)</option>
                   <option value="Asia/Dubai">Asia/Dubai (UTC +04:00)</option>
                   <option value="UTC">UTC (Coordinated Universal Time)</option>
-                  <option value="America/New_York">America/New_York (EST / EDT)</option>
+                  <option value="America/New_York">US Eastern (New York)</option>
+                  <option value="America/Chicago">US Central (Chicago)</option>
+                  <option value="America/Denver">US Mountain (Denver)</option>
+                  <option value="America/Phoenix">US Arizona (Phoenix)</option>
+                  <option value="America/Los_Angeles">US Pacific (Los Angeles)</option>
+                  <option value="America/Anchorage">US Alaska (Anchorage)</option>
+                  <option value="Pacific/Honolulu">US Hawaii (Honolulu)</option>
                   <option value="Europe/London">Europe/London (GMT / BST)</option>
+                  {!['Asia/Kolkata', 'Asia/Dubai', 'UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu', 'Europe/London'].includes(timezone) &&
+                    <option value={timezone}>{timezone}</option>}
                 </select>
+                <small>Applies across the POS to receipts, shifts, stock-count windows, and report dates.</small>
               </div>
 
               <div>

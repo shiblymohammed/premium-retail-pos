@@ -107,7 +107,7 @@ export class LocationsService {
         ...(filters?.allowedLocationIds ? { id: { in: filters.allowedLocationIds } } : {}),
       },
       include: {
-        company: { select: { currency: true, invoicePrefix: true } },
+        company: { select: { currency: true, invoicePrefix: true, timezone: true } },
         parent: { select: { id: true, name: true, type: true } },
         children: {
           ...(filters?.allowedLocationIds !== undefined

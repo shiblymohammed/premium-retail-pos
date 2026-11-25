@@ -13,6 +13,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { AuditThresholdDto, BulkAuditScheduleDto, DailyAuditScheduleDto } from './dto/audit-count.dto';
 
 const TERMINAL: AuditSessionStatus[] = [AuditSessionStatus.APPROVED, AuditSessionStatus.CLOSED, AuditSessionStatus.ABORTED];
+const WAREHOUSE_MANAGERS: Role[] = [Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER];
 const MANAGERS: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER];
 
 @Injectable()
@@ -208,6 +209,7 @@ export class AuditsService {
     const active = Boolean(user?.isActive);
     return {
       canCount: active && (actor.role === Role.SUPER_ADMIN || Boolean(user?.canCountStockAudits)),
+      canCountWarehouse: active && WAREHOUSE_MANAGERS.includes(actor.role as Role) && can(actor, 'stock.auditManagement', true),
       canManage: active && can(actor, 'stock.auditManagement', MANAGERS.includes(actor.role as Role)),
       canChangeThresholds: active && actor.role === Role.SUPER_ADMIN,
     };
@@ -275,14 +277,17 @@ export class AuditsService {
       const blind = this.hideExpectedForBlindCount(session);
       return canCount ? blind : this.hideCountValues(blind);
     }
-    // Active counts remain blind for every viewer. Counter timestamps and the
-    // recount-required flag provide workflow state without exposing quantities.
+    // Keep first counts blind. Only the warehouse counter sees the expected
+    // quantity when the threshold requires that person to check it again.
     return {
       ...session,
       countItems: session.countItems.map((item) => {
         const { expectedQtyBase: _expected, countedQtyBase: _counted, recountQtyBase: _recounted,
           varianceBase: _variance, variancePercent: _variancePercent, highCountAlert: _alert, ...blind } = item;
-        return blind;
+        const comparison = canCount && session.location.type !== LocationType.RETAIL_STORE && item.requiresRecount &&
+          !item.recountRequestReason && item.countedByUserId === actor.userId && item.countedQtyBase !== null &&
+          item.recountQtyBase === null;
+        return comparison ? { ...blind, recountComparison: { expected: item.expectedQtyBase, counted: item.countedQtyBase! } } : blind;
       }),
     };
   }
@@ -291,7 +296,9 @@ export class AuditsService {
     const session = await this.get(sessionId, actor);
     if (actor.role !== Role.SUPER_ADMIN) {
       const counter = await this.prisma.user.findUnique({ where: { id: actor.userId }, select: { role: true, canCountStockAudits: true, isActive: true } });
-      if (!counter?.isActive || !counter.canCountStockAudits) {
+      const warehouseManager = session.location.type !== LocationType.RETAIL_STORE
+        && WAREHOUSE_MANAGERS.includes(actor.role as Role) && can(actor, 'stock.auditManagement', true);
+      if (!counter?.isActive || (!counter.canCountStockAudits && !warehouseManager)) {
         throw new ForbiddenException('A Super Admin must grant you stock audit count permission before you can enter counts');
       }
     }
@@ -305,6 +312,10 @@ export class AuditsService {
       }
       if (item.requiresRecount && item.recountQtyBase !== null) {
         throw new ConflictException('A recount is already saved. Ask a manager to request another recount.');
+      }
+      if (session.location.type !== LocationType.RETAIL_STORE && item.requiresRecount && !item.recountRequestReason &&
+        item.countedByUserId && item.countedByUserId !== actor.userId) {
+        throw new ForbiddenException('Ask the original counter to recount or a manager to reassign the recount');
       }
       const variance = dto.quantityBaseUnits - item.expectedQtyBase;
       const variancePercent = item.expectedQtyBase === 0

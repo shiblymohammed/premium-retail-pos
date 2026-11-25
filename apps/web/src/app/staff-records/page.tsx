@@ -48,7 +48,7 @@ type Profile = {
 };
 
 export default function StaffRecordsPage() {
-  const { can } = useAccess();
+  const { can, loading: accessLoading } = useAccess();
   const [manager, setManager] = useState(false);
   const [editor, setEditor] = useState<'new' | 'edit' | null>(null);
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
@@ -83,6 +83,10 @@ export default function StaffRecordsPage() {
   }, [reload]);
 
   useEffect(() => {
+    setInputs({ base: '', ...payrollInputs });
+  }, [selected, month]);
+
+  useEffect(() => {
     if (!selected || !month) return;
     const controller = new AbortController();
     setProfile(null);
@@ -95,7 +99,7 @@ export default function StaffRecordsPage() {
       .then((result) => {
         if (controller.signal.aborted) return;
         setProfile(result);
-        setInputs({ base: result.baseSalary ?? '', ...payrollInputs });
+        setInputs((current) => ({ ...current, base: current.base || result.baseSalary || '' }));
       }).catch((error) => { if (!controller.signal.aborted) setError(error.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -144,14 +148,24 @@ export default function StaffRecordsPage() {
     } finally { setBusy(false); }
   }
 
+  const canMaintainOutlet = manager && !accessLoading && can('staff.manage', true);
+  const canEditOutlet = canMaintainOutlet && profile?.staff.id === selected &&
+    ['STAFF', 'CASHIER', 'INVENTORY'].includes(profile.staff.user.role);
+
   return <main className={`app-page ${styles.page}`}>
-    <header className={styles.top}><div><h1>Staff records</h1><p className={styles.muted}>Monthly activity at the employee’s assigned workplace.</p></div></header>
+    <header className={styles.top}>
+      <div><h1>Staff records</h1><p className={styles.muted}>Monthly activity at the employee’s assigned workplace.</p></div>
+      {canMaintainOutlet && <button type="button" className="admin-primary" disabled={busy || !!editor} onClick={() => setEditor('new')}>Add outlet staff</button>}
+    </header>
     <div className={styles.fields}>
       <label>Employee<select value={selected} disabled={busy || !!editor || !directory.length} onChange={(e) => setSelected(e.target.value)}>
         {directory.map((row) => <option key={row.id} value={row.id}>{row.firstName} {row.lastName} · {row.employeeCode} · {row.location.name}</option>)}
       </select></label>
       <label>Month<input type="month" value={month} disabled={busy || !!editor} onChange={(e) => { if (e.target.value) setMonth(e.target.value); }} /></label>
+      {canEditOutlet && <button type="button" className="admin-secondary" disabled={busy || !!editor} onClick={() => setEditor('edit')}>Edit selected staff</button>}
     </div>
+    {canMaintainOutlet && editor && (editor === 'new' || canEditOutlet) && <OutletStaffEditor staff={editor === 'edit' ? profile?.staff : undefined}
+      onCancel={() => setEditor(null)} onSaved={(id) => { setSelected(id); setEditor(null); setReload((value) => value + 1); }} />}
     {can('staff.view', true) && <section className={styles.panel}>
       <button className="admin-secondary" type="button" aria-expanded={comparisonOpen} onClick={() => setComparisonOpen(!comparisonOpen)}>
         {comparisonOpen ? 'Hide staff comparison' : 'Compare staff for this month'}
@@ -178,13 +192,6 @@ export default function StaffRecordsPage() {
         </>}
       </>}
     </section>}
-    {can('staff.manage', manager) && <div className={styles.fields}>
-      <button type="button" className="admin-secondary" disabled={!!editor} onClick={() => setEditor('new')}>Add outlet staff</button>
-      {profile && ['STAFF', 'CASHIER', 'INVENTORY'].includes(profile.staff.user.role) &&
-        <button type="button" className="admin-secondary" disabled={!!editor} onClick={() => setEditor('edit')}>Edit selected staff</button>}
-    </div>}
-    {editor && <OutletStaffEditor staff={editor === 'edit' ? profile?.staff : undefined}
-      onCancel={() => setEditor(null)} onSaved={(id) => { setSelected(id); setEditor(null); setReload((value) => value + 1); }} />}
     {error && <Feedback tone="error">{error}</Feedback>}
     {loading && <p role="status">Loading staff records…</p>}
     {!loading && !directory.length && !error && <p>No employees in your assigned workplaces.</p>}

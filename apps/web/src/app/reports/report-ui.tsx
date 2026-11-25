@@ -52,6 +52,10 @@ export type SalesDetails = {
     location: { name: string };
     status: string;
     netTotal: string;
+    reportStatus: 'FINALIZED' | 'PARTLY_RETURNED' | 'RETURNED' | 'CANCELLED';
+    originalTotal: string;
+    refundedTotal: string;
+    netAfterRefunds: string;
     createdAt: string;
   }>;
 };

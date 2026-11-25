@@ -1,5 +1,6 @@
 'use client';
 
+import { addCalendarDays, businessDate, businessMidnight } from '@/lib/business-date';
 import { downloadPdf } from '@/lib/report-download';
 
 import { useAccess } from '@/lib/permissions';
@@ -16,7 +17,7 @@ import { SalesView, InvoicesView, StockView, Card, Table } from './report-views'
 
 const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
-type Location = { id: string; name: string; type: string; isActive: boolean; company: { currency: string } };
+type Location = { id: string; name: string; type: string; isActive: boolean; company: { currency: string; timezone?: string } };
 
 async function requestData<T>(path: string, token: string, signal: AbortSignal): Promise<T> {
   const response = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal });
@@ -83,14 +84,10 @@ const REPORT_GROUPS: Array<{ label: string; keys: ReportKind[] }> = [
   { label: 'Operations', keys: ['transferDiscrepancies', 'auditVariances'] },
 ];
 
-const isoDate = (date: Date) => [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
-
-function reportParams(from: string, to: string, locationId: string) {
-  const rangeEnd = new Date(`${to}T00:00:00`);
-  rangeEnd.setDate(rangeEnd.getDate() + 1);
+function reportParams(from: string, to: string, locationId: string, timezone: string) {
   const params = new URLSearchParams({
-    from: new Date(`${from}T00:00:00`).toISOString(),
-    to: rangeEnd.toISOString(),
+    from: businessMidnight(from, timezone),
+    to: businessMidnight(addCalendarDays(to, 1), timezone),
   });
   if (locationId) params.set('locationId', locationId);
   return params;
@@ -107,8 +104,9 @@ export default function ReportsPage() {
   const [invoicePage, setInvoicePage] = useState(1);
   const [productOrder, setProductOrder] = useState<'top' | 'slow' | 'unsold'>('top');
   const [locationId, setLocationId] = useState('');
-  const [from, setFrom] = useState(isoDate(new Date(Date.now() - 30 * 86400000)));
-  const [to, setTo] = useState(isoDate(new Date()));
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [rangePreset, setRangePreset] = useState<RangePreset>('last30');
   const [report, setReport] = useState<ReportKind>('overview');
 
   const [sales, setSales] = useState<SalesSummary | null>(null);
@@ -264,12 +262,21 @@ export default function ReportsPage() {
     : locations.filter((location) => canConsolidate && location.isActive);
   const currencies = [...new Set(scopedLocations.map((location) => location.company?.currency).filter(Boolean))];
   const currency = currencies[0] ?? '';
+  const timezones = new Set(scopedLocations.map((location) => location.company?.timezone ?? 'UTC'));
+  const timezone = timezones.values().next().value ?? 'UTC';
+  useEffect(() => {
+    if (rangePreset === 'custom' || locationState !== 'ready') return;
+    const today = businessDate(new Date(), timezone);
+    setTo(today);
+    setFrom(addCalendarDays(today, rangePreset === 'last7' ? -6 : -29));
+  }, [rangePreset, timezone, locationState]);
   const needsCurrency = ['overview', 'sales', 'salesDetails', 'cancellations', 'productPerformance'].includes(report);
   const scopeError = locationState !== 'ready' ? '' :
     !scopedLocations.length ? 'No authorized locations are available for reporting.' :
     needsCurrency && currencies.length !== 1 ? 'Choose a location to report sales in its currency.' :
+    timezones.size > 1 ? 'Choose a location to use its company’s reporting time zone.' :
     !from || !to || from > to ? 'Choose a valid reporting period.' : '';
-  const reportKey = JSON.stringify([report, locationId, from, to, report === 'salesDetails' ? invoicePage : 1, reportRetry]);
+  const reportKey = JSON.stringify([report, locationId, from, to, timezone, report === 'salesDetails' ? invoicePage : 1, reportRetry]);
   const loaded = locationState === 'ready' && !scopeError && reportResult.key === reportKey && !reportResult.error;
   const failure = reportResult.key === reportKey ? reportResult.error : '';
   const formatAmount = (value: number, digits = 2) => formatMoney(currency, value, digits);
@@ -278,7 +285,7 @@ export default function ReportsPage() {
   useEffect(() => {
     if (!token || locationState !== 'ready' || scopeError || accessLoading || !canReadReport) return;
     const controller = new AbortController();
-    const params = reportParams(from, to, locationId);
+    const params = reportParams(from, to, locationId, timezone);
     const read = <T,>(route: string) => requestData<T>(`/reports/${route}?${params}`, token, controller.signal);
 
     async function loadReport() {
@@ -301,7 +308,7 @@ export default function ReportsPage() {
       } else {
         if (report === 'ledger') params.set('limit', '500');
         const raw = await read<unknown>(EXTRA_REPORTS[report]);
-        if (!controller.signal.aborted) setTableData(toReportTable(report, raw));
+        if (!controller.signal.aborted) setTableData(toReportTable(report, raw, timezone));
       }
       if (!controller.signal.aborted) setReportResult({ key: reportKey, error: '' });
     }
@@ -369,8 +376,8 @@ export default function ReportsPage() {
       headers = ['Date', 'Invoices', 'Cancelled', `Net Sales (${currency})`];
       rows = (sales?.daily ?? []).map(r => [r.date, r.invoices, r.cancelled, r.netSales]);
     } else if (report === 'salesDetails') {
-      headers = ['Invoice Number', 'Location', 'Status', `Net Total (${currency})`, 'Created At'];
-      rows = invoiceRows.map(r => [r.invoiceNumber, r.location.name, r.status, r.netTotal, r.createdAt]);
+      headers = ['Invoice Number', 'Location', 'Status', `Original Total (${currency})`, `Refunds (${currency})`, `Net After Refunds (${currency})`, 'Created At (UTC)'];
+      rows = invoiceRows.map(r => [r.invoiceNumber, r.location.name, r.reportStatus, r.originalTotal, r.refundedTotal, r.netAfterRefunds, r.createdAt]);
     } else if (report === 'stock') {
       headers = ['Location', 'SKU', 'Product', 'Variant', 'Available', 'Base Unit', 'Cartons', 'Loose', 'In-Transit', 'Reserved', 'Quarantined'];
       rows = (stock?.rows ?? []).map(r => [r.locationName, r.sku, r.productName, r.variantName, r.available, r.baseUnit, r.cartons ?? 0, r.looseBaseUnits, r.inTransit, r.reserved, r.quarantined]);
@@ -396,7 +403,7 @@ export default function ReportsPage() {
     setExportError('');
     try {
       const invoiceRows = report === 'salesDetails'
-        ? await requestData<SalesDetails['rows']>(`/reports/sales-details/export?${reportParams(from, to, locationId)}`, token, new AbortController().signal)
+        ? await requestData<SalesDetails['rows']>(`/reports/sales-details/export?${reportParams(from, to, locationId, timezone)}`, token, new AbortController().signal)
         : undefined;
       const { headers, rows } = getExportData(invoiceRows);
       const filename = `Premium-Retail-Report-${report}-${from}-to-${to}.csv`;
@@ -464,9 +471,7 @@ export default function ReportsPage() {
   const heatMax = STOCK_STATES.map((_, col) => Math.max(...heat.map((h) => h.values[col]), 1));
   const heatLevel = (value: number, col: number) => (value <= 0 ? -1 : Math.min(4, Math.floor((value / heatMax[col]) * 4.999)));
 
-  const rangeDays = Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000));
-  const rangePreset: RangePreset = to === isoDate(new Date()) && (rangeDays === 7 || rangeDays === 30) ? (rangeDays === 7 ? 'last7' : 'last30') : 'custom';
-  const rangeLabel = `${formatDay(from)} – ${formatDay(to)}`;
+  const rangeLabel = from && to ? `${formatDay(from)} – ${formatDay(to)}` : 'Reporting period';
   const reportLabel = visibleReportTabs.find((t) => t.key === report)?.label ?? 'Overview';
   const reportGroup = REPORT_GROUPS.find((group) => group.keys.includes(report)) ?? REPORT_GROUPS[0];
   const groupTabs = visibleReportTabs.filter((tab) => reportGroup.keys.includes(tab.key));
@@ -533,15 +538,13 @@ export default function ReportsPage() {
               { value: 'custom', label: 'Custom range' },
             ]}
             onChange={(next) => {
-              if (next === 'custom') return;
-              setFrom(isoDate(new Date(Date.now() - (next === 'last7' ? 7 : 30) * 86400000)));
-              setTo(isoDate(new Date()));
+              setRangePreset(next);
               setInvoicePage(1);
             }}
             footer={
               <div className={styles.rangeInputs}>
-                <label>From<input type="date" value={from} max={to} onChange={(e) => { setFrom(e.target.value); setInvoicePage(1); }} /></label>
-                <label>To<input type="date" value={to} min={from} onChange={(e) => { setTo(e.target.value); setInvoicePage(1); }} /></label>
+                <label>From<input type="date" value={from} max={to} onChange={(e) => { setRangePreset('custom'); setFrom(e.target.value); setInvoicePage(1); }} /></label>
+                <label>To<input type="date" value={to} min={from} onChange={(e) => { setRangePreset('custom'); setTo(e.target.value); setInvoicePage(1); }} /></label>
               </div>
             }
           />
@@ -770,7 +773,7 @@ export default function ReportsPage() {
       {/* ---------- Report tabs ---------- */}
       {loaded && report === 'sales' && sales && <SalesView currency={currency} sales={sales} matches={matches} rangeLabel={rangeLabel} />}
       {loaded && report === 'salesDetails' && salesDetails && <>
-        <InvoicesView currency={currency} details={salesDetails} matches={matches} />
+        <InvoicesView currency={currency} timezone={timezone} details={salesDetails} matches={matches} />
         {salesDetails.totalPages > 1 && <div className={styles.headerActions} aria-label="Invoice pages">
           <button type="button" className={styles.textButton} disabled={invoicePage <= 1} onClick={() => setInvoicePage((page) => page - 1)}>Previous</button>
           <span>Page {invoicePage} of {salesDetails.totalPages} · {salesDetails.total} invoices</span>

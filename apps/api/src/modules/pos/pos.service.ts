@@ -29,6 +29,8 @@ export class PosService {
         name: location.name,
         type: location.type,
         currency: location.company.currency,
+        timezone: location.company.timezone,
+        isAuditLocked: location.isAuditLocked,
         requireCheckoutDrawer: location.company.requireCheckoutDrawer,
       },
     };
@@ -174,7 +176,7 @@ export class PosService {
     const locationId = checkoutLocationId(actor, requestedLocationId, permission);
     const location = await this.prisma.location.findUnique({
       where: { id: locationId },
-      select: { id: true, name: true, type: true, isActive: true, company: { select: { currency: true, requireCheckoutDrawer: true } } },
+      select: { id: true, name: true, type: true, isActive: true, isAuditLocked: true, company: { select: { currency: true, timezone: true, requireCheckoutDrawer: true } } },
     });
     if (!location) throw new NotFoundException('Retail store not found');
     if (!location.isActive || location.type !== LocationType.RETAIL_STORE) {

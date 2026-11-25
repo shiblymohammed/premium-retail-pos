@@ -6,6 +6,23 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { ReportQuery } from './reports.controller';
 
+function invoiceAmounts<T extends {
+  status: string;
+  netTotal: Prisma.Decimal;
+  refunds: { amount: Prisma.Decimal }[];
+  lines: { quantityBaseUnits: number }[];
+  returns: { lines: { quantityBaseUnits: number }[] }[];
+}>(invoice: T) {
+  const { refunds, returns, ...row } = invoice;
+  const soldUnits = invoice.lines.reduce((sum, line) => sum + line.quantityBaseUnits, 0);
+  const returnedUnits = returns.flatMap((entry) => entry.lines).reduce((sum, line) => sum + line.quantityBaseUnits, 0);
+  const refunded = refunds.reduce((sum, refund) => sum.add(refund.amount), new Prisma.Decimal(0));
+  const net = invoice.status === 'CANCELLED' ? new Prisma.Decimal(0) : invoice.netTotal.sub(refunded);
+  const status = invoice.status === 'CANCELLED' ? 'CANCELLED'
+    : !returnedUnits ? 'FINALIZED' : returnedUnits >= soldUnits ? 'RETURNED' : 'PARTLY_RETURNED';
+  return { ...row, reportStatus: status, originalTotal: invoice.netTotal.toFixed(2), refundedTotal: refunded.toFixed(2), netAfterRefunds: net.toFixed(2) };
+}
+
 type DateScope = { locationIds: string[]; from: Date; to: Date };
 
 @Injectable()
@@ -23,12 +40,12 @@ export class ReportsService {
     }
     const scope = await this.resolveScope({ ...query, to: new Date(end.getTime() + 86400000).toISOString() }, actor);
     const rows = await this.prisma.$queryRaw<Array<{
-      id: string; location: string; operator: string; currency: string; cadence: string; period: string;
+      id: string; location: string; operator: string; currency: string; timezone: string; cadence: string; period: string;
       closedAt: Date; openingCash: string; expectedCash: string; countedCash: string;
       expectedCard: string; countedCard: string; cashDifference: string; cardDifference: string;
     }>>(Prisma.sql`
       SELECT drawer.id, location.name AS location, operator.email AS operator,
-        company.currency, company.cash_settlement_frequency AS cadence,
+        company.currency, company.timezone, company.cash_settlement_frequency AS cadence,
         date_trunc(CASE company.cash_settlement_frequency WHEN 'weekly' THEN 'week' WHEN 'monthly' THEN 'month' ELSE 'day' END,
           drawer.closed_at AT TIME ZONE 'UTC' AT TIME ZONE company.timezone)::date::text AS period,
         drawer.closed_at AS "closedAt", drawer.opening_cash::text AS "openingCash",
@@ -70,7 +87,7 @@ export class ReportsService {
           (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date::text AS "date",
           COUNT(*) FILTER (WHERE i."status" = 'FINALIZED')::integer AS "invoices",
           COUNT(*) FILTER (WHERE i."status" = 'CANCELLED')::integer AS "cancelled",
-          COALESCE(SUM(i."net_total" - COALESCE(refunded."amount", 0)), 0)::text AS "netSales"
+          COALESCE(SUM(i."net_total" - COALESCE(refunded."amount", 0)) FILTER (WHERE i."status" = 'FINALIZED'), 0)::text AS "netSales"
         FROM "invoices" i
         JOIN "locations" l ON l."id" = i."location_id"
         JOIN "companies" c ON c."id" = l."company_id"
@@ -82,7 +99,7 @@ export class ReportsService {
         ORDER BY (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date ASC
       `),
     ]);
-    const locations = await this.prisma.location.findMany({ where: { id: { in: scope.locationIds } }, select: { id: true, name: true, company: { select: { timezone: true } } } });
+    const locations = await this.prisma.location.findMany({ where: { id: { in: scope.locationIds } }, select: { id: true, name: true, company: { select: { timezone: true, currency: true } } } });
     const nameById = new Map(locations.map((location) => [location.id, location.name]));
     const byLocation = new Map<string, { invoices: number; netSales: Prisma.Decimal; cancelled: number }>();
     const days = new Map<string, { date: string; invoices: number; netSales: Prisma.Decimal; cancelled: number }>();
@@ -104,6 +121,7 @@ export class ReportsService {
     const cancelledInvoices = [...byLocation.values()].reduce((sum, item) => sum + item.cancelled, 0);
     return {
       period: { from: scope.from.toISOString(), to: scope.to.toISOString() },
+      company: locations[0]?.company ?? null,
       totals: { netSales: total.toFixed(2), completedInvoices, cancelledInvoices },
       locations: [...byLocation.entries()].map(([locationId, value]) => ({ locationId, locationName: nameById.get(locationId) ?? 'Location', invoices: value.invoices, cancelled: value.cancelled, netSales: value.netSales.toFixed(2) })).sort((a, b) => Number(b.netSales) - Number(a.netSales)),
       daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)).map((item) => ({ ...item, netSales: item.netSales.toFixed(2) })),
@@ -123,10 +141,12 @@ export class ReportsService {
           location: { select: { id: true, name: true } },
           lines: { include: { variant: { select: { sku: true, name: true, product: { select: { name: true } } } } } },
           payment: true,
+          refunds: { select: { amount: true } },
+          returns: { select: { lines: { select: { quantityBaseUnits: true } } } },
         },
       }),
     ]);
-    return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), rows };
+    return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), rows: rows.map(invoiceAmounts) };
   }
 
   async exportInvoices(query: ReportQuery, actor: RequestUser) {
@@ -136,10 +156,14 @@ export class ReportsService {
       where: { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
-      select: { invoiceNumber: true, status: true, netTotal: true, createdAt: true, location: { select: { name: true } } },
+      select: {
+        invoiceNumber: true, status: true, netTotal: true, createdAt: true, location: { select: { name: true } },
+        refunds: { select: { amount: true } }, lines: { select: { quantityBaseUnits: true } },
+        returns: { select: { lines: { select: { quantityBaseUnits: true } } } },
+      },
     });
     if (rows.length > limit) throw new BadRequestException('This export matches over 10,000 invoices. Narrow the date range or select a store.');
-    return rows;
+    return rows.map(invoiceAmounts).map(({ lines: _lines, ...row }) => row);
   }
 
   async productPerformance(query: ReportQuery, actor: RequestUser) {
