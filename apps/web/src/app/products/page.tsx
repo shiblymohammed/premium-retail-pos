@@ -58,6 +58,8 @@ interface ProductItem {
   location: string;
   price: number;
   purchasePrice?: number;
+  acquisitionCost?: { unitCost: string; currency: string; orderNumber: string };
+  reorderLevel?: number | null;
   availableStock: { cartons: number; loose: number };
   totalUnits: number;
   unitsPerCarton: number;
@@ -157,6 +159,7 @@ export default function ProductsPage() {
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
 
+  const [reorderInput, setReorderInput] = useState('');
   const [addProductModalOpen, setAddProductModalOpen] = useState(false);
   const [newProdName, setNewProdName] = useState('');
   const [newProdImageUrl, setNewProdImageUrl] = useState('');
@@ -256,7 +259,7 @@ export default function ProductsPage() {
           ...(() => {
             const stock = totals.get(variant.id) || { available: 0, transit: 0, reserved: 0, quarantined: 0 };
             const packSize = Number(product.unitsPerCarton || 1);
-            const status = stock.available < 0 ? 'Negative' as const : stock.available <= Number(product.reorderLevel || 0) ? 'Low Stock' as const : 'Healthy' as const;
+            const status = stock.available < 0 ? 'Negative' as const : (product.reorderLevel != null ? stock.available <= product.reorderLevel : stock.available === 0) ? 'Low Stock' as const : 'Healthy' as const;
             return { availableStock: { cartons: packSize > 1 ? Math.trunc(stock.available / packSize) : 0, loose: packSize > 1 ? stock.available % packSize : stock.available }, totalUnits: stock.available, inTransit: stock.transit, reserved: stock.reserved, quarantined: stock.quarantined, status };
           })(),
           id: productIndex * 1000 + variantIndex + 1,
@@ -272,6 +275,8 @@ export default function ProductsPage() {
           location: selectedLocations.length === 1 ? selectedLocations[0].name : '',
           price: Number(product.sellingPrice || 0),
           purchasePrice: product.purchasePrice == null ? undefined : Number(product.purchasePrice),
+          acquisitionCost: variant.acquisitionCost ?? undefined,
+          reorderLevel: product.reorderLevel,
           unitsPerCarton: Number(product.unitsPerCarton || 1),
           baseUnit: product.baseUnit || 'unit',
         })),
@@ -456,6 +461,7 @@ export default function ProductsPage() {
     setNewProdVariant('');
     setNewProdBarcode('');
     setNewProdPrice('');
+    setReorderInput(product?.reorderLevel == null ? '' : String(product.reorderLevel));
     setNewProdBaseUnit(product?.baseUnit ?? 'packet');
     setNewProdHasCartons((product?.unitsPerCarton ?? 0) > 1);
     setNewProdSellByCarton(product?.sellByCarton ?? false);
@@ -494,12 +500,14 @@ export default function ProductsPage() {
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(priceTarget ? { sellingPrice: Number(priceInput), reason: priceReason } : editingPackaging ? {
           unitsPerCarton: newProdHasCartons ? cartonSize : null,
+          reorderLevel: reorderInput === '' ? null : Number(reorderInput),
           sellByCarton: newProdHasCartons && newProdSellByCarton,
         } : {
           name: newProdName.trim(),
           imageUrl: newProdImageUrl.trim() || undefined,
           baseUnit: productUnit,
           unitsPerCarton: newProdHasCartons ? cartonSize : undefined,
+          reorderLevel: reorderInput === '' ? undefined : Number(reorderInput),
           sellByCarton: newProdHasCartons && newProdSellByCarton,
           hasVariants: true,
           variants: [{
@@ -525,7 +533,7 @@ export default function ProductsPage() {
       setNewProdPrice('');
       setNewProdHasCartons(false);
       setNewProdCartonRatio('10');
-      showToast(priceTarget ? 'Selling price updated.' : editingPackaging ? 'Product packaging updated.' : 'Product saved to the catalogue. Add opening stock separately to set quantities.', 'success');
+      showToast(priceTarget ? 'Selling price updated.' : editingPackaging ? 'Packaging and reorder level updated.' : 'Product saved to the catalogue. Add opening stock separately to set quantities.', 'success');
     } catch (error) {
       setProductSaveError(error instanceof Error ? error.message : 'Product could not be saved.');
     } finally {
@@ -670,7 +678,7 @@ export default function ProductsPage() {
           <article className={`${styles.summaryCard} ${styles.summaryTeal}`}>
             <i className={styles.summaryIcon}><Icon name="dollarSign" size={18} /></i>
             <div className={styles.summaryMain}>
-              <span className={styles.summaryLabel}>Stock valuation</span>
+              <span className={styles.summaryLabel}>Retail stock value</span>
               <strong className={styles.summaryValue}>{formatPrice(kpiStats.totalValuation)}</strong>
             </div>
             <div className={styles.summaryDetail}>
@@ -786,7 +794,7 @@ export default function ProductsPage() {
                     </div>
 
                     <div className={styles.priceCell}>
-                      <b>{formatPrice(product.price)}</b>{canSeeCost && product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}
+                      <b>{formatPrice(product.price)}</b>{canSeeCost && product.purchasePrice !== undefined && <small>{product.acquisitionCost ? `Acquisition cost ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: product.acquisitionCost.currency }).format(Number(product.acquisitionCost.unitCost))} · PO ${product.acquisitionCost.orderNumber}` : product.purchasePrice ? `Catalog cost ${formatPrice(product.purchasePrice)}` : 'Catalog cost unset'}</small>}
                       <small>per {product.baseUnit}</small>
                     </div>
 
@@ -799,7 +807,7 @@ export default function ProductsPage() {
                         <button type="button" className={styles.iconAction} onClick={() => setMenuFor(menuFor === product.id ? null : product.id)} aria-haspopup="menu" aria-expanded={menuFor === product.id} aria-label="More actions"><Icon name="more" size={15} /></button>
                         {menuFor === product.id && (
                           <div className={styles.rowMenu} role="menu">
-                            {['SUPER_ADMIN', 'ADMIN'].includes(operator.role) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openProductDialog(product); }}><Icon name="package" size={14} /> Edit packaging</button>}
+                            {['SUPER_ADMIN', 'ADMIN'].includes(operator.role) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openProductDialog(product); }}><Icon name="package" size={14} /> Edit packaging and reorder level</button>}
                             {canEditPrices && <button type="button" role="menuitem" onClick={() => {
                               setEditingPackaging(null); setPriceTarget(product); setPriceInput(String(product.price)); setPriceReason('');
                               setProductSaveError(''); setMenuFor(null); setAddProductModalOpen(true);
@@ -835,7 +843,7 @@ export default function ProductsPage() {
                     <div className={styles.gridFigures}>
                       <div><small>On hand</small><b className={isNegative ? styles.negative : ''}>{unitCount(product.totalUnits, product.baseUnit)}</b></div>
                       <div><small>In transit</small><b className={product.inTransit ? styles.transitText : ''}>+{product.inTransit}</b></div>
-                      <div><small>Price</small><b>{formatPrice(product.price)}</b>{canSeeCost && product.purchasePrice !== undefined && <small>Cost {formatPrice(product.purchasePrice)}</small>}</div>
+                      <div><small>Price</small><b>{formatPrice(product.price)}</b>{canSeeCost && product.purchasePrice !== undefined && <small>{product.acquisitionCost ? `Acquisition cost ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: product.acquisitionCost.currency }).format(Number(product.acquisitionCost.unitCost))} · PO ${product.acquisitionCost.orderNumber}` : product.purchasePrice ? `Catalog cost ${formatPrice(product.purchasePrice)}` : 'Catalog cost unset'}</small>}</div>
                     </div>
                     <div className={styles.gridHealth}><Gauge product={product} />{product.availableStock.cartons > 0 && <span>Equivalent to {cartonEquivalent(product)}</span>}</div>
                     <div className={styles.gridFoot}>
@@ -882,7 +890,7 @@ export default function ProductsPage() {
             <div className={styles.modalHeader}>
               <div className={styles.modalTitleGroup}>
                 <div className={styles.modalIconWrap}><Icon name="package" size={20} /></div>
-                <h2 id="add-product-title">{priceTarget ? `Edit selling price · ${priceTarget.name}` : editingPackaging ? `Edit packaging · ${editingPackaging.name}` : 'Add product'}</h2>
+                <h2 id="add-product-title">{priceTarget ? `Edit selling price · ${priceTarget.name}` : editingPackaging ? `Edit packaging and reorder level · ${editingPackaging.name}` : 'Add product'}</h2>
               </div>
               <button type="button" onClick={closeProductDialog} className={styles.modalCloseBtn} disabled={savingProduct} aria-label="Close add product">
                 <Icon name="x" size={18} />
@@ -962,6 +970,12 @@ export default function ProductsPage() {
                       <span>{formatPrice(Math.round(Number(newProdPrice) * 100) * cartonSize / 100)} per carton</span>}
                   </div>}
                 </div>}
+                <div className={styles.formGroup}>
+                  <label htmlFor="product-reorder-level">Reorder level ({productUnit}s)</label>
+                  <input id="product-reorder-level" type="number" inputMode="numeric" min="0" max="2147483647" step="1"
+                    className={styles.modalInput} value={reorderInput} onChange={(event) => setReorderInput(event.target.value)} />
+                  <small className={styles.fieldHint}>Leave blank to exclude this product from generated replenishment.</small>
+                </div>
                 <small className={styles.fieldHint}>Stock is counted in {productUnit === 'packet' ? 'packets' : 'individual units'}.
                   {newProdHasCartons && ' Carton quantities are converted automatically.'}</small>
               </fieldset>

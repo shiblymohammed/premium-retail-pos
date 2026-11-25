@@ -20,3 +20,11 @@
   .payslip { position: fixed; inset: 0; width: 100%; color: #111; background: #fff; border: none; }
   .payslip .printButton { display: none; }
 }
+
+.fields > label, .top > div, .panel { min-width: 0; }
+.fields :is(select, input) { width: 100%; min-width: 0; }
+.scroll td, .facts dd { overflow-wrap: anywhere; }
+.schedule { flex-basis: 100%; min-width: 0; margin: 0; border: 1px solid var(--retail-edge); border-radius: 8px; }
+.schedule > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.fields .schedule label { display: flex; align-items: center; gap: 5px; }
+.fields .schedule input { width: auto; }

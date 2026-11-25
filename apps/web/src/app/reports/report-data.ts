@@ -48,7 +48,7 @@ export function toReportTable(report: keyof typeof EXTRA_REPORTS, raw: unknown):
           at(item, 'variant', 'product', 'name'), at(item, 'variant', 'sku'),
           `${cell(item.quantityBaseUnits)} ${at(item, 'variant', 'product', 'baseUnit')}`,
           cell(item.stockState), item.transferRoute ? route(item.transferRoute) : '—',
-          `${cell(item.referenceType)} · ${cell(item.referenceId)}`, at(item, 'actor', 'email'),
+          `${cell(item.referenceType)} · ${cell(item.documentNumber ?? item.referenceId)}`, at(item, 'actor', 'email'),
         ]));
     case 'lowStock': {
       const lowStock = records(object(raw).lowStock);

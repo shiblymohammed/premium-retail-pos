@@ -34,6 +34,19 @@ export class PosService {
     };
   }
 
+  async findCustomers(actor: Operator, requestedLocationId?: string, search?: string) {
+    const location = await this.getCheckoutLocation(actor, requestedLocationId);
+    const query = search?.trim();
+    if (!query || query.length < 2) return [];
+    if (query.length > 100) throw new BadRequestException('Search for up to 100 characters');
+    return this.prisma.customerCreditAccount.findMany({
+      where: { locationId: location.id, OR: [
+        { name: { contains: query, mode: 'insensitive' } }, { code: { contains: query, mode: 'insensitive' } },
+      ] },
+      select: { name: true, code: true }, orderBy: [{ name: 'asc' }, { code: 'asc' }], take: 20,
+    });
+  }
+
   async getOfflineCatalog(actor: Operator, requestedLocationId?: string) {
     await this.getCheckoutLocation(actor, requestedLocationId);
     return this.prisma.product.findMany({
@@ -98,7 +111,7 @@ export class PosService {
         id: true, invoiceNumber: true, createdAt: true, grossTotal: true, discountTotal: true, netTotal: true,
         payment: { select: { method: true, amount: true, cashTenderedAmount: true, changeGivenAmount: true } },
         lines: { select: {
-          id: true, quantityBaseUnits: true, unitPriceAtSale: true, lineTotal: true,
+          id: true, quantityBaseUnits: true, enteredUnit: true, conversionRatioUsed: true, unitPriceAtSale: true, lineTotal: true,
           variant: { select: { sku: true, name: true, product: { select: { name: true, baseUnit: true } } } },
         } },
       },

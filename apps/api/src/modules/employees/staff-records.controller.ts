@@ -2,7 +2,7 @@ import { Permission } from '../../common/decorators/permission.decorator';
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
-import { IsString, Matches, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -21,6 +21,18 @@ export class PayrollDto {
   @Matches(MONEY) bonus: string;
   @Matches(MONEY) deductions: string;
   @Matches(MONEY) advanceRecovery: string;
+  @IsOptional() @Matches(MONEY) overtimeHourlyRate?: string;
+  @IsOptional() @Matches(MONEY) lateDayDeduction?: string;
+  @IsOptional() @Matches(MONEY) absentDayDeduction?: string;
+  @IsOptional() @IsArray() @ArrayUnique() @ArrayMaxSize(31)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { each: true }) scheduledDates?: string[];
+}
+
+export class PayrollLoanDto {
+  @IsIn(['LOAN', 'ADVANCE']) kind: 'LOAN' | 'ADVANCE';
+  @Matches(MONEY) amount: string;
+  @Matches(MONEY) monthlyInstallment: string;
+  @IsString() @MaxLength(500) terms: string;
 }
 
 class PayrollPaymentDto {
@@ -58,6 +70,21 @@ export class StaffRecordsController {
   @Get('me/payroll')
   async ownPayroll(@CurrentUser() actor: RequestUser) {
     return { data: await this.staff.ownPayroll(actor) };
+  }
+
+  @Get('comparison')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.STORE_MANAGER)
+  @Permission('staff.view')
+  async comparison(@Query('month') month: string, @CurrentUser() actor: RequestUser) {
+    if (!/^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException('Choose a valid month');
+    return { data: await this.staff.comparison(month, actor) };
+  }
+
+  @Post(':id/loans')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Permission('payroll.manage')
+  async loan(@Param('id') id: string, @Body() dto: PayrollLoanDto, @CurrentUser() actor: RequestUser) {
+    return { data: await this.staff.recordLoan(id, dto, actor) };
   }
 
   @Get(':id')

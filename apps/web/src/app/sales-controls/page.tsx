@@ -42,7 +42,9 @@ type InvoiceLine = {
   id: string;
   quantityBaseUnits: number;
   returnedQuantityBaseUnits: number;
-  unitPrice: number;
+  unitPriceAtSale: string;
+  lineTotal: string;
+  refundedAmount?: string;
   variant: {
     sku: string;
     name: string;
@@ -287,6 +289,10 @@ export default function SalesControlsPage() {
       if (!res.ok) throw new Error(res.status === 404 ? `No bill called "${query}" was found.` : 'The server could not load this bill.');
       const found = (await res.json()).data as Invoice;
       setInvoice(found);
+      const tender = found.payment?.method;
+      const refundMethod = tender === 'CARD' || tender === 'ONLINE' ? tender : 'CASH';
+      setReturnRefundMethod(refundMethod);
+      setCancelRefundMethod(refundMethod);
       setInvoiceNumber('');
       setNotice(`Opened ${found.invoiceNumber} from the server.`);
     } catch (cause) {
@@ -299,11 +305,19 @@ export default function SalesControlsPage() {
 
   const calculatedReturnRefund = useMemo(() => {
     if (!invoice) return 0;
-    const discountRatio = Number(invoice.discountTotal) / Number(invoice.grossTotal) || 0;
-    return invoice.lines.reduce((sum, line) => {
-      const sel = returnLines[line.id];
-      return sel && sel.selected && sel.quantity > 0 ? sum + line.unitPrice * (1 - discountRatio) * sel.quantity : sum;
-    }, 0);
+    let cents = BigInt(0);
+    for (const line of invoice.lines) {
+      const selection = returnLines[line.id];
+      if (!selection?.selected || !Number.isSafeInteger(selection.quantity) || selection.quantity <= 0) continue;
+      const total = BigInt(Math.round(Number(line.lineTotal) * 100));
+      const remaining = total - BigInt(Math.round(Number(line.refundedAmount ?? 0) * 100));
+      const remainingUnits = line.quantityBaseUnits - line.returnedQuantityBaseUnits;
+      const quantity = BigInt(Math.min(selection.quantity, remainingUnits));
+      const sold = BigInt(line.quantityBaseUnits);
+      const prorated = (BigInt(2) * total * quantity + sold) / (BigInt(2) * sold);
+      cents += selection.quantity >= remainingUnits || prorated > remaining ? remaining : prorated;
+    }
+    return Number(cents) / 100;
   }, [invoice, returnLines]);
 
   const selectedCount = Object.values(returnLines).filter((s) => s.selected && s.quantity > 0).reduce((s, l) => s + l.quantity, 0);
@@ -541,7 +555,7 @@ export default function SalesControlsPage() {
                     <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{line.variant.product.name}</strong><small>{line.variant.name} · {line.variant.sku}</small></span></span>
                     <span className={styles.num}>{line.quantityBaseUnits}</span>
                     <span className={`${styles.num} ${line.returnedQuantityBaseUnits ? styles.amberText : styles.mutedText}`}>{line.returnedQuantityBaseUnits}</span>
-                    <span className={styles.num}>{currency(line.unitPrice)}</span>
+                    <span className={styles.num}>{currency(line.unitPriceAtSale)}</span>
                   </div>
                 ))}
               </div>
@@ -608,7 +622,7 @@ export default function SalesControlsPage() {
                             <button type="button" className={styles.returnPick} onClick={() => eligible && updateLine(line.id, { selected: !sel.selected })} disabled={!eligible} aria-pressed={sel.selected}>
                               <span className={styles.check}>{sel.selected && <Icon name="check" size={12} />}</span>
                               <span className={styles.returnName}><strong>{line.variant.product.name}</strong><small>{eligible ? `${remaining} of ${line.quantityBaseUnits} can be returned` : 'Already fully returned'}</small></span>
-                              <span className={styles.returnPrice}>{currency(line.unitPrice)}</span>
+                              <span className={styles.returnPrice}>{currency(line.unitPriceAtSale)}</span>
                             </button>
                             {sel.selected && (
                               <div className={styles.returnDetail}>

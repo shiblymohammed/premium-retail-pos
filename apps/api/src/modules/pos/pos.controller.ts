@@ -26,6 +26,13 @@ export class PosController {
     return { data: await this.posService.getOfflineCatalog(actor, locationId) };
   }
 
+  @Get('customers')
+  @Roles(...CHECKOUT_ROLES)
+  @Permission('sales.checkout')
+  async customers(@CurrentUser() actor: RequestUser, @Query('locationId') locationId?: string, @Query('search') search?: string) {
+    return { data: await this.posService.findCustomers(actor, locationId, search) };
+  }
+
   @Get('receipts')
   @Roles(...CHECKOUT_ROLES)
   @Permission('sales.receipts')

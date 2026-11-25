@@ -7,7 +7,7 @@ import { shiftMetrics } from '../attendance/attendance.service';
 import type { CreateUserWithEmployeeDto } from '../users/dto/create-user-with-employee.dto';
 import { UsersService } from '../users/users.service';
 import type { UpdateEmployeeDto } from './dto';
-import type { PayrollDto } from './staff-records.controller';
+import type { PayrollDto, PayrollLoanDto } from './staff-records.controller';
 
 const employeeFields = {
   id: true, userId: true, locationId: true, firstName: true, lastName: true, employeeCode: true,
@@ -19,8 +19,19 @@ const employeeFields = {
 
 const payrollFields = {
   id: true, period: true, currency: true, base: true, allowances: true, bonus: true, deductions: true,
-  advanceRecovery: true, net: true, paidAt: true, paymentReference: true,
+  advanceRecovery: true, overtimePay: true, attendanceDeduction: true, attendanceBasis: true, net: true, paidAt: true, paymentReference: true,
 } satisfies Prisma.PayrollRecordSelect;
+
+const loanFields = {
+  id: true, amount: true, status: true, monthlyInstallment: true, kind: true, issueDate: true, terms: true,
+  repayments: { select: { amount: true, status: true } },
+} satisfies Prisma.LoanSelect;
+
+function localDay(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(date);
+  return ['year', 'month', 'day'].map((part) => parts.find((field) => field.type === part)?.value).join('-');
+}
 
 const OUTLET_STAFF_ROLES: Role[] = [Role.STAFF, Role.CASHIER, Role.INVENTORY];
 
@@ -55,7 +66,7 @@ export class StaffRecordsService {
     const from = Prisma.sql`((${month + '-01'}::date)::timestamp AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
     const to = Prisma.sql`((${month + '-01'}::date + INTERVAL '1 month') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
     const previousFrom = Prisma.sql`((${month + '-01'}::date - INTERVAL '1 month') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
-    const [attendance, sales, drawers, payroll, baseSalary] = await Promise.all([
+    const [attendance, sales, drawers, payroll, baseSalary, loans] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string; at: Date; action: string; late: boolean; scheduledEndAt: Date | null }>>(Prisma.sql`
         SELECT id, punch_timestamp AS at, punch_type AS action, is_late AS late, scheduled_end_at AS "scheduledEndAt" FROM attendances
         WHERE employee_id = ${id} AND location_id = ${staff.locationId} AND punch_timestamp >= ${from} AND punch_timestamp < ${to}
@@ -82,6 +93,7 @@ export class StaffRecordsService {
       `),
       canSeePayroll ? this.prisma.payrollRecord.findMany({ where: { employeeId: id }, select: payrollFields, orderBy: { period: 'desc' } }) : undefined,
       canSeePayroll ? this.prisma.employee.findUnique({ where: { id }, select: { monthlyBaseSalary: true } }) : undefined,
+      canSeePayroll ? this.prisma.loan.findMany({ where: { employeeId: id }, select: loanFields, orderBy: { issueDate: 'desc' } }) : undefined,
     ]);
     const breaks = await this.prisma.attendanceBreak.findMany({
       where: { clockInId: { in: attendance.filter((punch) => punch.action === 'IN').map((punch) => punch.id) } },
@@ -110,8 +122,40 @@ export class StaffRecordsService {
     }
     return { staff, attendance, canManagePayroll: canSeePayroll && canManagePayroll, ...totals, sales: actor.permissionOverrides?.['sales.reports'] === false ? undefined : sales[0],
       drawers: actor.permissionOverrides?.['cash.reports'] === false ? undefined : drawers, payroll,
-      baseSalary: baseSalary?.monthlyBaseSalary };
+      baseSalary: baseSalary?.monthlyBaseSalary,
+      loans: loans?.map(({ repayments, ...loan }) => ({
+        ...loan, outstanding: loan.amount.sub(repayments.filter((item) => item.status === 'CONFIRMED')
+          .reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
+      })) };
 
+  }
+
+  async comparison(month: string, actor: RequestUser) {
+    const includeSales = can(actor, 'sales.reports', (actor.role === Role.ADMIN || actor.role === Role.STORE_MANAGER));
+    const includeCash = can(actor, 'cash.reports', (actor.role === Role.ADMIN || actor.role === Role.STORE_MANAGER));
+    const scope = actor.role === Role.SUPER_ADMIN ? Prisma.empty : actor.locationIds.length
+      ? Prisma.sql`AND e."location_id" IN (${Prisma.join(actor.locationIds)})` : Prisma.sql`AND FALSE`;
+    const rows = await this.prisma.$queryRaw<Array<{
+      id: string; firstName: string; lastName: string; location: string; currency: string;
+      late: number; sales: string | null; shortages: string | null;
+    }>>(Prisma.sql`
+      SELECT e.id, e."first_name" AS "firstName", e."last_name" AS "lastName", l.name AS location, c.currency,
+        (SELECT COUNT(*)::int FROM attendances a WHERE a.employee_id = e.id AND a.location_id = l.id
+          AND a.punch_type = 'IN' AND a.is_late AND a.punch_timestamp >= bounds.start_at AND a.punch_timestamp < bounds.end_at) AS late,
+        ${includeSales ? Prisma.sql`(SELECT COALESCE(SUM(i.net_total), 0)::text FROM invoices i
+          WHERE i.cashier_user_id = e.user_id AND i.location_id = l.id AND i.status = 'FINALIZED'
+            AND i.created_at >= bounds.start_at AND i.created_at < bounds.end_at)` : Prisma.sql`NULL::text`} AS sales,
+        ${includeCash ? Prisma.sql`(SELECT COALESCE(SUM(GREATEST(d.expected_cash - d.counted_cash, 0)), 0)::text FROM cash_drawer_sessions d
+          WHERE d.operator_id = e.user_id AND d.location_id = l.id AND d.closed_at >= bounds.start_at AND d.closed_at < bounds.end_at)` : Prisma.sql`NULL::text`} AS shortages
+      FROM employees e JOIN locations l ON l.id = e.location_id JOIN companies c ON c.id = l.company_id
+      CROSS JOIN LATERAL (
+        SELECT ((${month + '-01'}::date)::timestamp AT TIME ZONE c.timezone) AT TIME ZONE 'UTC' AS start_at,
+          ((${month + '-01'}::date + INTERVAL '1 month') AT TIME ZONE c.timezone) AT TIME ZONE 'UTC' AS end_at
+      ) bounds
+      WHERE TRUE ${scope}
+      ORDER BY e.first_name, e.last_name
+    `);
+    return { rows, includeSales, includeCash };
   }
 
   async createOutletStaff(dto: CreateUserWithEmployeeDto, actor: RequestUser) {
@@ -163,17 +207,91 @@ export class StaffRecordsService {
     return staff;
   }
 
-  async recordPayroll(id: string, dto: PayrollDto, actor: RequestUser) {
-    if (!can(actor, 'payroll.view', actor.role === Role.ADMIN || actor.permissionOverrides?.['payroll.manage'] === true)) {
-      throw new ForbiddenException('Payroll visibility is required to modify payroll');
+  private checkPayrollAccess(actor: RequestUser) {
+    if (!can(actor, 'payroll.manage', actor.role === Role.ADMIN) ||
+        !can(actor, 'payroll.view', actor.role === Role.ADMIN || actor.permissionOverrides?.['payroll.manage'] === true)) {
+      throw new ForbiddenException('Payroll management and visibility are required');
     }
-    const staff = await this.employee(id, actor);
-    const net = new Prisma.Decimal(dto.base).add(dto.allowances).add(dto.bonus).sub(dto.deductions).sub(dto.advanceRecovery);
-    if (net.isNegative()) throw new BadRequestException('Deductions cannot exceed gross pay');
+  }
+
+  async recordLoan(id: string, dto: PayrollLoanDto, actor: RequestUser) {
+    this.checkPayrollAccess(actor);
+    await this.employee(id, actor);
+    const amount = new Prisma.Decimal(dto.amount);
+    const monthlyInstallment = new Prisma.Decimal(dto.monthlyInstallment);
+    if (!amount.gt(0) || !monthlyInstallment.gt(0) || monthlyInstallment.gt(amount) || !dto.terms.trim()) {
+      throw new BadRequestException('Enter an issued amount, monthly recovery up to the issued amount, and a reference or terms');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
+      const loan = await tx.loan.create({
+        data: { employeeId: id, amount, monthlyInstallment, kind: dto.kind, terms: dto.terms.trim(),
+          issueDate: new Date(), approvedByUserId: actor.userId },
+      });
+      await tx.auditEvent.create({ data: {
+        actorId: actor.userId, action: 'STAFF_RECOVERY_SCHEDULED', targetEntity: 'Loan', targetId: loan.id,
+        afterValue: JSON.stringify({ kind: loan.kind, amount, monthlyInstallment }),
+      } });
+      return loan;
+    });
+  }
+
+  async recordPayroll(id: string, dto: PayrollDto, actor: RequestUser) {
+    this.checkPayrollAccess(actor);
+    const profile = await this.profile(id, dto.period, actor);
+    const { staff } = profile;
+    const timezone = staff.location.company.timezone;
+    const today = localDay(new Date(), timezone);
+    const scheduledDates = [...new Set(dto.scheduledDates ?? [])].sort();
+    if (scheduledDates.some((date) => {
+      if (date.slice(0, 7) !== dto.period || date >= today || date < staff.hireDate.toISOString().slice(0, 10)) return true;
+      const parsed = new Date(date + 'T00:00:00Z');
+      return !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date;
+    })) throw new BadRequestException('Choose completed work dates in the payroll month on or after the joining date');
+    const present = new Set(profile.attendance.filter((punch) => punch.action === 'IN').map((punch) => localDay(punch.at, timezone)));
+    const lateDays = new Set(profile.attendance.filter((punch) => punch.action === 'IN' && punch.late).map((punch) => localDay(punch.at, timezone))).size;
+    const absences = scheduledDates.filter((date) => !present.has(date));
+    const overtimePay = new Prisma.Decimal(dto.overtimeHourlyRate ?? 0).mul(profile.overtimeMinutes).div(60).toDecimalPlaces(2);
+    const attendanceDeduction = new Prisma.Decimal(dto.lateDayDeduction ?? 0).mul(lateDays)
+      .add(new Prisma.Decimal(dto.absentDayDeduction ?? 0).mul(absences.length));
+    const { period, base, allowances, bonus, deductions } = dto;
+    const max = new Prisma.Decimal('9999999999.99');
+    if (overtimePay.gt(max) || attendanceDeduction.gt(max)) throw new BadRequestException('Payroll adjustment exceeds the supported amount');
     try {
-      return await this.prisma.payrollRecord.create({
-        data: { ...dto, net, employeeId: id, currency: staff.location.company.currency, createdById: actor.userId },
-        select: payrollFields,
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
+        const loans = await tx.loan.findMany({
+          where: { employeeId: id, status: 'ACTIVE', monthlyInstallment: { not: null } },
+          select: loanFields, orderBy: [{ issueDate: 'asc' }, { id: 'asc' }],
+        });
+        const manualRecovery = new Prisma.Decimal(dto.advanceRecovery);
+        let remainingPay = new Prisma.Decimal(base).add(allowances).add(bonus).add(overtimePay)
+          .sub(deductions).sub(attendanceDeduction).sub(manualRecovery);
+        if (remainingPay.isNegative()) throw new BadRequestException('Deductions cannot exceed gross pay');
+        const allocations: Array<{ loanId: string; amount: Prisma.Decimal }> = [];
+        for (const loan of loans) {
+          if (localDay(loan.issueDate, timezone).slice(0, 7) > period) continue;
+          const allocated = loan.repayments.reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0));
+          const amount = Prisma.Decimal.min(loan.monthlyInstallment!, loan.amount.sub(allocated), remainingPay);
+          if (amount.gt(0)) {
+            allocations.push({ loanId: loan.id, amount });
+            remainingPay = remainingPay.sub(amount);
+          }
+        }
+        const advanceRecovery = allocations.reduce((sum, item) => sum.add(item.amount), manualRecovery);
+        if (advanceRecovery.gt(max)) throw new BadRequestException('Payroll recovery exceeds the supported amount');
+        return tx.payrollRecord.create({
+          data: { period, base, allowances, bonus, deductions, advanceRecovery, overtimePay, attendanceDeduction,
+            attendanceBasis: { overtimeMinutes: profile.overtimeMinutes, lateDays, scheduledDates, absences,
+              overtimeHourlyRate: dto.overtimeHourlyRate ?? '0', lateDayDeduction: dto.lateDayDeduction ?? '0',
+              absentDayDeduction: dto.absentDayDeduction ?? '0', manualRecovery: manualRecovery.toFixed(2) },
+            net: remainingPay, employeeId: id, currency: staff.location.company.currency, createdById: actor.userId,
+            repayments: { create: allocations.map((allocation) => ({
+              ...allocation, isPayrollDeduction: true, paymentDate: new Date(),
+            })) },
+          },
+          select: payrollFields,
+        });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -184,19 +302,34 @@ export class StaffRecordsService {
   }
 
   async markPaid(id: string, payrollId: string, reference: string, actor: RequestUser) {
-    if (!can(actor, 'payroll.view', actor.role === Role.ADMIN || actor.permissionOverrides?.['payroll.manage'] === true)) {
-      throw new ForbiddenException('Payroll visibility is required to modify payroll');
-    }
+    this.checkPayrollAccess(actor);
     await this.employee(id, actor);
     const paymentReference = reference.trim();
     if (!paymentReference) throw new BadRequestException('Enter the payment reference');
-    const changed = await this.prisma.payrollRecord.updateMany({
-      where: { id: payrollId, employeeId: id, paidAt: null },
-      data: { paidAt: new Date(), paidById: actor.userId, paymentReference },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
+      const now = new Date();
+      const changed = await tx.payrollRecord.updateMany({
+        where: { id: payrollId, employeeId: id, paidAt: null },
+        data: { paidAt: now, paidById: actor.userId, paymentReference },
+      });
+      const saved = await tx.payrollRecord.findFirst({ where: { id: payrollId, employeeId: id }, select: payrollFields });
+      if (!saved) throw new NotFoundException('Payroll record not found');
+      if (!changed.count) {
+        if (saved.paymentReference !== paymentReference) throw new ConflictException('This payroll record is already marked paid');
+        return saved;
+      }
+      const repayments = await tx.repayment.findMany({ where: { payrollId, status: 'PENDING' }, select: { loanId: true } });
+      await tx.repayment.updateMany({ where: { payrollId, status: 'PENDING' }, data: {
+        status: 'CONFIRMED', confirmedByUserId: actor.userId, paymentDate: now,
+      } });
+      for (const { loanId } of repayments) {
+        const loan = await tx.loan.findUniqueOrThrow({ where: { id: loanId }, select: loanFields });
+        const paid = loan.repayments.filter((payment) => payment.status === 'CONFIRMED')
+          .reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0));
+        if (paid.gte(loan.amount)) await tx.loan.update({ where: { id: loanId }, data: { status: 'FULLY_REPAID' } });
+      }
+      return saved;
     });
-    const saved = await this.prisma.payrollRecord.findFirst({ where: { id: payrollId, employeeId: id }, select: payrollFields });
-    if (!saved) throw new NotFoundException('Payroll record not found');
-    if (!changed.count && saved.paymentReference !== paymentReference) throw new ConflictException('This payroll record is already marked paid');
-    return saved;
   }
 }

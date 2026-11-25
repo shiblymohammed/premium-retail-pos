@@ -53,6 +53,15 @@ export class ProductsController {
       categoryId,
       isActive: activeQuery === undefined ? undefined : activeQuery === 'true',
     });
+    if (actor && can(actor, 'products.cost', actor.role === Role.ADMIN || actor.role === Role.INVENTORY)) {
+      const costs = await this.productsService.latestAcquisitionCosts(
+        products.flatMap((product) => product.variants.map((variant) => variant.id)),
+        actor.role === Role.SUPER_ADMIN ? undefined : actor.locationIds,
+      );
+      return { data: products.map((product) => ({ ...product, variants: product.variants.map((variant) => ({
+        ...variant, acquisitionCost: costs.get(variant.id) ?? null,
+      })) })) };
+    }
     return { data: products.map((product) => this.hidePurchasePrice(product, actor)) };
   }
 

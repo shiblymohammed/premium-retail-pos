@@ -1,7 +1,8 @@
-import { PrismaClient, Role, MovementType, StockState } from '@prisma/client';
+import { PrismaClient, Role, MovementType, StockState, RefundMethod, ReturnDisposition } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { InventoryService } from '../inventory/inventory.service';
 import { SalesService } from './sales.service';
+import { SaleUnit } from './dto/create-sale.dto';
 
 const databaseUrl = process.env.PHASE11_STRESS_DATABASE_URL;
 const isolatedTestDatabase = (() => {
@@ -83,4 +84,39 @@ const isolatedTestDatabase = (() => {
     expect(saleMovements._sum.quantityBaseUnits).toBe(-5);
     expect(stockBalance._sum.quantityBaseUnits).toBe(0);
   });
+  it('shares stock across carton and loose lines and reconciles discounted refunds', async () => {
+    const product = await prisma.product.create({
+      data: { name: 'Split-unit oats', baseUnit: 'packet', unitsPerCarton: 10, sellByCarton: true, sellingPrice: 5, purchasePrice: 0 },
+    });
+    const variant = await prisma.variant.create({ data: { productId: product.id, sku: `BOX-${suffix}`, name: 'Default', isDefault: true } });
+    await prisma.inventoryMovement.create({
+      data: { locationId, variantId: variant.id, actorId: cashierId, quantityBaseUnits: 24,
+        type: MovementType.OPENING_STOCK, stockState: StockState.AVAILABLE },
+    });
+    const supervisor = await prisma.user.create({
+      data: { email: `supervisor-${suffix.toLowerCase()}@example.test`, passwordHash: 'integration-only', role: Role.SUPER_ADMIN },
+    });
+    const actor = { userId: supervisor.id, role: Role.SUPER_ADMIN, locationIds: [locationId] };
+    const lines = [
+      { variantId: variant.id, quantity: 2, enteredUnit: SaleUnit.CARTON },
+      { variantId: variant.id, quantity: 3, enteredUnit: SaleUnit.BASE_UNIT, discountPercent: 10 },
+    ];
+    const quote = await sales.quoteSale({ locationId, lines }, actor);
+    expect(quote.netTotal.toFixed(2)).toBe('113.50');
+    await expect(sales.createSale({
+      locationId, lines: [lines[0], { ...lines[1], quantity: 5 }], paymentMethod: 'CARD' as any, paymentAmount: 122.5,
+    }, actor, `overstock-${suffix}`)).rejects.toThrow(/Insufficient stock/);
+    const invoice = await sales.createSale({
+      locationId, lines, paymentMethod: 'CARD' as any, paymentAmount: 113.5,
+    }, actor, `split-units-${suffix}`);
+    expect(invoice.lines.map((line) => [line.enteredUnit, line.quantityBaseUnits]).sort()).toEqual([['carton', 20], ['packet', 3]]);
+    const loose = invoice.lines.find((line) => line.enteredUnit === 'packet');
+    await sales.createSaleReturn(invoice.id, {
+      reason: 'Synthetic discounted return', refundMethod: RefundMethod.CARD,
+      lines: [{ saleLineId: loose.id, quantityBaseUnits: 1, disposition: ReturnDisposition.RESTOCKED, inspectionNotes: 'Seal intact' }],
+    }, actor, `refund-split-${suffix}`);
+    const detail = await sales.findInvoiceForSaleControl(invoice.invoiceNumber, actor);
+    expect(detail.lines.find((line) => line.id === loose.id)).toMatchObject({ returnedQuantityBaseUnits: 1, refundedAmount: '4.50' });
+  });
+
 });

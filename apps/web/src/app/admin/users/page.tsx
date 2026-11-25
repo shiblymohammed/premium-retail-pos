@@ -368,7 +368,7 @@ export default function UserManagementPage() {
         joinedDate: saved.createdAt ? new Date(saved.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '',
       };
       setUsers((current) => editingUser ? current.map((user) => user.id === saved.id ? { ...user, ...mapped } : user) : [mapped, ...current]);
-      if (!editingUser && currentUserRole === 'SUPER_ADMIN' && formRole !== 'SUPER_ADMIN') setPermissionReview(saved.email);
+      if (!editingUser && currentUserRole === 'SUPER_ADMIN' && formRole !== 'SUPER_ADMIN') setPermissionReview(saved.id);
       setNotice(editingUser ? `Account updated for ${saved.email}.` : `Account created for ${saved.email}.`);
       setIsModalOpen(false);
     } catch (error) {
@@ -506,8 +506,8 @@ export default function UserManagementPage() {
       )}
 
       {notice && <Feedback toast tone={notice.type} onDismiss={() => { setNotice(null); setPermissionReview(''); }}
-        action={permissionReview ? <Link href={`/admin/sales-permissions?q=${encodeURIComponent(permissionReview)}`}>Review permissions</Link> : undefined}>
-        {notice.message}{permissionReview && ' Would you like to review their permissions?'}
+        action={permissionReview ? <Link href={`/admin/sales-permissions/access?user=${encodeURIComponent(permissionReview)}`}>Review full permissions</Link> : undefined}>
+        {notice.message}{permissionReview && ' Review the new account’s full permissions.'}
       </Feedback>}
       <header className="admin-page-header">
         <div><h1>User Directory</h1><p>Manage accounts and their assigned locations.</p></div>

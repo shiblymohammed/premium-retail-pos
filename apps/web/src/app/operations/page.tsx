@@ -67,6 +67,7 @@ interface StockTransfer {
   sourceLocationId: string;
   destLocationId: string;
   requestedByUserId: string;
+  requestedByName?: string;
   transferCode: string;
   sourceLocation: string;
   destLocation: string;
@@ -141,8 +142,11 @@ const unitsOf = (t: StockTransfer) => t.items.reduce((s, i) => s + i.totalUnits,
 const cartonsOf = (t: StockTransfer) => t.items.reduce((s, i) => s + i.cartons, 0);
 const hasIssues = (t: StockTransfer) => !!t.receipt && t.receipt.damaged + t.receipt.missing > 0;
 const isWarehouse = (loc: string) => /warehouse/i.test(loc);
-const isPending = (status: TransferStatus) => ['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(status);
-const isInTransit = (status: TransferStatus) => ['PARTIALLY_DISPATCHED', 'DISPATCHED', 'PARTIALLY_RECEIVED'].includes(status);
+const activeTransfer = (t: StockTransfer) => !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status);
+const unitsInTransit = (t: StockTransfer) => activeTransfer(t) ? t.items.reduce((sum, item) => sum + outstandingQuantity(item), 0) : 0;
+const pendingItemQuantity = (t: StockTransfer, item: TransferItem) => !activeTransfer(t) ? 0 :
+  ['DRAFT', 'PENDING_APPROVAL'].includes(t.status) ? item.requestedQtyBase : Math.max(0, item.approvedQtyBase - item.dispatchedQtyBase);
+const pendingUnits = (t: StockTransfer) => t.items.reduce((sum, item) => sum + pendingItemQuantity(t, item), 0);
 
 const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
   search: Search,
@@ -264,6 +268,7 @@ export default function OperationsPage() {
       sourceLocationId: row.sourceLocationId,
       destLocationId: row.destLocationId,
       requestedByUserId: row.requestedByUserId,
+      requestedByName: row.requestedBy?.employee ? `${row.requestedBy.employee.firstName} ${row.requestedBy.employee.lastName}` : row.requestedBy?.email,
       transferCode: row.transferNumber,
       sourceLocation: row.sourceLocation?.name || row.sourceLocationId,
       destLocation: row.destLocation?.name || row.destLocationId,
@@ -418,7 +423,7 @@ export default function OperationsPage() {
   const filteredTransfers = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = scoped.filter((t) => {
-      const matchStatus = filterStatus === 'ALL' || (filterStatus === 'PENDING' ? isPending(t.status) : filterStatus === 'TRANSIT' ? isInTransit(t.status) : t.status === 'RECEIVED');
+      const matchStatus = filterStatus === 'ALL' || (filterStatus === 'PENDING' ? (pendingUnits(t) > 0) : filterStatus === 'TRANSIT' ? (unitsInTransit(t) > 0) : t.status === 'RECEIVED');
       if ((fromFilter !== 'ALL' && t.sourceLocationId !== fromFilter) || (toFilter !== 'ALL' && t.destLocationId !== toFilter)) return false;
       const matchSearch = !q
         || t.transferCode.toLowerCase().includes(q)
@@ -433,21 +438,22 @@ export default function OperationsPage() {
   }, [scoped, filterStatus, fromFilter, toFilter, sortKey, search]);
 
   const kpis = useMemo(() => {
-    const inTransit = scoped.filter((t) => isInTransit(t.status));
-    const pending = scoped.filter((t) => isPending(t.status));
+    const inTransit = scoped.filter((t) => (unitsInTransit(t) > 0));
+    const pending = scoped.filter((t) => (pendingUnits(t) > 0));
     const received = scoped.filter((t) => t.status === 'RECEIVED');
     return {
       inTransit: inTransit.length,
-      inTransitUnits: inTransit.reduce((s, t) => s + unitsOf(t), 0),
+      inTransitUnits: inTransit.reduce((s, t) => s + unitsInTransit(t), 0),
       pending: pending.length,
-      pendingUnits: pending.reduce((s, t) => s + unitsOf(t), 0),
+      pendingUnits: pending.reduce((s, t) => s + pendingUnits(t), 0),
       received: received.length,
       withIssues: received.filter(hasIssues).length,
-      openUnits: scoped.filter((t) => !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status)).reduce((s, t) => s + unitsOf(t), 0),
+      openTransfers: new Set([...pending, ...inTransit]).size,
+      openUnits: scoped.reduce((s, t) => s + unitsInTransit(t) + pendingUnits(t), 0),
     };
   }, [scoped]);
 
-  const count = (s: StatusFilter) => s === 'ALL' ? scoped.length : s === 'PENDING' ? scoped.filter((t) => isPending(t.status)).length : s === 'TRANSIT' ? scoped.filter((t) => isInTransit(t.status)).length : scoped.filter((t) => t.status === 'RECEIVED').length;
+  const count = (s: StatusFilter) => s === 'ALL' ? scoped.length : s === 'PENDING' ? scoped.filter((t) => (pendingUnits(t) > 0)).length : s === 'TRANSIT' ? scoped.filter((t) => (unitsInTransit(t) > 0)).length : scoped.filter((t) => t.status === 'RECEIVED').length;
 
   async function mutate(path: string, method: 'POST' | 'PATCH', body?: unknown) {
     if (!apiToken) throw new Error('Sign in before changing a transfer.');
@@ -663,8 +669,8 @@ export default function OperationsPage() {
 
   function exportCsv(list: StockTransfer[]) {
     setMenuFor(null);
-    const header = ['Transfer', 'Status', 'From', 'To', 'Carrier', 'Tracking', 'Created', 'Dispatched', 'Received', 'SKU', 'Product', 'Cartons', 'Units/carton', 'Loose', 'Total units'];
-    const rows = list.flatMap((t) => t.items.map((i) => [t.transferCode, STATUS_META[t.status].label, t.sourceLocation, t.destLocation, t.carrier, t.trackingNumber, t.createdAt, t.dispatchedAt ?? '', t.receivedAt ?? '', i.sku, i.name, i.cartons, i.unitsPerCarton, i.looseUnits, i.totalUnits]));
+    const header = ['Transfer', 'Status', 'From', 'To', 'Carrier', 'Tracking', 'Created', 'Dispatched', 'Received', 'SKU', 'Product', 'Cartons', 'Units/carton', 'Requested loose', 'Requested units', 'Approved units', 'Packed units', 'In transit', 'Awaiting packing / approval', 'Received good', 'Damaged', 'Missing'];
+    const rows = list.flatMap((t) => t.items.map((i) => [t.transferCode, STATUS_META[t.status].label, t.sourceLocation, t.destLocation, t.carrier, t.trackingNumber, t.createdAt, t.dispatchedAt ?? '', t.receivedAt ?? '', i.sku, i.name, i.cartons, i.unitsPerCarton, i.looseUnits, i.requestedQtyBase, i.approvedQtyBase, i.dispatchedQtyBase, activeTransfer(t) ? outstandingQuantity(i) : 0, pendingItemQuantity(t, i), i.receivedQtyBase - i.damagedQtyBase, i.damagedQtyBase, i.shortQtyBase]));
     const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
@@ -759,7 +765,7 @@ export default function OperationsPage() {
           </div>
           <div className={styles.summaryDetail}>
             <span className={styles.summaryDetailLabel}>Transfers</span>
-            <b className={`${styles.chip} ${styles.chipGreen}`}>{kpis.pending + kpis.inTransit}</b>
+            <b className={`${styles.chip} ${styles.chipGreen}`}>{kpis.openTransfers}</b>
           </div>
         </div>
       </section>
@@ -840,7 +846,7 @@ export default function OperationsPage() {
               <Fragment key={t.id}>
                 <li className={`${styles.row} ${isOpen ? styles.rowOpen : ''}`}>
                   <button type="button" className={styles.rowMain} onClick={() => setExpanded(isOpen ? null : t.id)} aria-expanded={isOpen}>
-                    <span className={`${styles.rowIcon} ${styles[`icon_${issues ? 'issue' : meta.tone}`]}`}><Icon name={t.status === 'RECEIVED' ? 'inbox' : isInTransit(t.status) ? 'truck' : 'clock'} size={17} /></span>
+                    <span className={`${styles.rowIcon} ${styles[`icon_${issues ? 'issue' : meta.tone}`]}`}><Icon name={t.status === 'RECEIVED' ? 'inbox' : (unitsInTransit(t) > 0) ? 'truck' : 'clock'} size={17} /></span>
                     <span className={styles.rowTitle}>
                       <strong>{t.transferCode}</strong>
                       <small>{created.day} · {created.time}</small>
@@ -854,11 +860,12 @@ export default function OperationsPage() {
                   </span>
 
                   <span className={`${styles.items} ${styles.right}`}>
-                    <strong>{unitsOf(t)} units</strong>
+                    <strong>{t.status === 'RECEIVED' ? `${t.receipt?.good ?? 0} received good` : `${unitsInTransit(t)} in transit`}</strong>
+                    {pendingUnits(t) > 0 && <small>{pendingUnits(t)} {awaitingPacking ? 'to pack' : 'to approve'}</small>}
                     <small>{t.items.length} product{t.items.length === 1 ? '' : 's'} · {cartonsOf(t)} cartons</small>
                   </span>
 
-                  <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? 'Received · issues' : meta.label}</span>{nextSteps.map((step) => <small className={styles.nextStep} key={step}>{step}</small>)}</span>
+                  <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? `${meta.label} · issues` : meta.label}</span>{nextSteps.map((step) => <small className={styles.nextStep} key={step}>{step}</small>)}</span>
 
                   <span className={styles.rowActions}>
                     {canRequestTransfers && t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
@@ -890,16 +897,22 @@ export default function OperationsPage() {
                 {isOpen && (
                   <li className={styles.detail}>
                     <div className={styles.detailItems}>
-                      <div className={styles.detailHead}><span>Product</span><span>Cartons</span><span>Loose</span><span className={styles.right}>Units</span></div>
-                      {t.items.map((i) => (
-                        <div key={i.sku} className={styles.detailLine}>
-                          <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{i.name}</strong><small>{i.sku} · {i.unitsPerCarton > 1 ? `${i.unitsPerCarton} per carton` : 'Ships loose'}</small></span></span>
-                          <span>{i.cartons}</span>
-                          <span>{i.looseUnits}</span>
-                          <b className={styles.right}>{i.totalUnits}</b>
-                        </div>
-                      ))}
-                      <div className={styles.detailTotal}><span>Total</span><span>{cartonsOf(t)}</span><span>{t.items.reduce((s, i) => s + i.looseUnits, 0)}</span><b className={styles.right}>{unitsOf(t)}</b></div>
+                      <div className={styles.progressLines}>
+                        {t.items.map((item) => (
+                          <div key={item.variantId} className={styles.progressLine}>
+                            <strong>{item.name}</strong>
+                            <small>{item.sku} · {item.unitsPerCarton > 1 ? `${item.unitsPerCarton} per carton` : 'Ships loose'}</small>
+                            <dl>
+                              {Object.entries({
+                                Requested: item.requestedQtyBase, Approved: item.approvedQtyBase,
+                                Packed: item.dispatchedQtyBase, 'In transit': activeTransfer(t) ? outstandingQuantity(item) : 0,
+                                'Received good': item.receivedQtyBase - item.damagedQtyBase,
+                                Damaged: item.damagedQtyBase, Missing: item.shortQtyBase,
+                              }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+                            </dl>
+                          </div>
+                        ))}
+                      </div>
                     </div>
 
                     <div className={styles.detailSide}>
@@ -908,7 +921,7 @@ export default function OperationsPage() {
                         <li className={t.dispatchedAt ? styles.done : styles.next}><i /><span><strong>Dispatched</strong><small>{t.dispatchedAt ?? 'Waiting to be sent'}</small></span></li>
                         <li className={t.receivedAt ? (issues ? styles.warn : styles.done) : t.dispatchedAt ? styles.next : ''}><i /><span><strong>Received</strong><small>{t.receivedAt ?? (t.dispatchedAt ? 'On the way' : '—')}</small></span></li>
                       </ol>
-                      <div className={styles.facts}><span><small>Transfer status</small><b>{meta.label}</b></span><span><small>Requested by</small><b>See audit record</b></span></div>
+                      <div className={styles.facts}><span><small>Transfer status</small><b>{meta.label}</b></span><span><small>Requested by</small><b>{t.requestedByName || 'See audit record'}</b></span></div>
                       {t.receipt && (
                         <div className={styles.receipt}>
                           <span><small>Good</small><b>{t.receipt.good}</b></span>
@@ -942,7 +955,7 @@ export default function OperationsPage() {
 
       {!receiveOnly && <section className={styles.tableCard} aria-labelledby="replenishment-heading">
         <div className={styles.tableTop}><div><div className="heading-with-info"><h2 id="replenishment-heading">Replenishment requests</h2><InfoHint label="About replenishment requests">Review suggested transfers to restock low inventory. A different manager must approve the request.</InfoHint></div><p>Server generated suggestions require approval by a different manager.</p></div></div>
-        {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p></div> : (
+        {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p><a href="/products">Open products and reorder levels</a></div> : (
           <ul className={styles.rows}>{replenishments.map((request) => <li className={styles.row} key={request.id}>
             <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
             <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + line.systemSuggestedQtyBase, 0)} suggested units</small></span>

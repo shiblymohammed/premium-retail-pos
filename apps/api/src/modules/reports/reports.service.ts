@@ -221,10 +221,34 @@ export class ReportsService {
       },
       orderBy: { createdAt: 'desc' }, take: query.limit,
     });
-    const transferIds = [...new Set(movements.filter((movement) => movement.referenceType?.startsWith('transfer') && movement.referenceId).map((movement) => movement.referenceId!))];
-    const transfers = transferIds.length ? await this.prisma.transfer.findMany({ where: { id: { in: transferIds }, OR: [{ sourceLocationId: { in: scope.locationIds } }, { destLocationId: { in: scope.locationIds } }] }, select: { id: true, transferNumber: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true } } } }) : [];
-    const transferById = new Map(transfers.map((transfer) => [transfer.id, transfer]));
-    return movements.map((movement) => ({ ...movement, transferRoute: movement.referenceId ? transferById.get(movement.referenceId) ?? null : null }));
+    const ids = (matches: (type: string) => boolean) => [...new Set(movements
+      .filter((movement) => movement.referenceId && matches(movement.referenceType ?? ''))
+      .map((movement) => movement.referenceId!))];
+    const transferIds = ids((type) => type.startsWith('transfer'));
+    const invoiceIds = ids((type) => type === 'sale_invoice' || type === 'sale_cancellation');
+    const returnIds = ids((type) => type === 'sale_return');
+    const [transfers, invoices, returns] = await Promise.all([
+      transferIds.length ? this.prisma.transfer.findMany({
+        where: { id: { in: transferIds }, OR: [{ sourceLocationId: { in: scope.locationIds } }, { destLocationId: { in: scope.locationIds } }] },
+        select: { id: true, transferNumber: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true } } },
+      }) : [],
+      invoiceIds.length ? this.prisma.invoice.findMany({
+        where: { id: { in: invoiceIds }, locationId: { in: scope.locationIds } }, select: { id: true, invoiceNumber: true },
+      }) : [],
+      returnIds.length ? this.prisma.saleReturn.findMany({
+        where: { id: { in: returnIds }, invoice: { locationId: { in: scope.locationIds } } }, select: { id: true, returnNumber: true },
+      }) : [],
+    ]);
+    const transferById = new Map(transfers.map((transfer) => [transfer.id, transfer] as const));
+    const documentById = new Map([
+      ...transfers.map((row) => [row.id, row.transferNumber] as const),
+      ...invoices.map((row) => [row.id, row.invoiceNumber] as const),
+      ...returns.map((row) => [row.id, row.returnNumber] as const),
+    ]);
+    return movements.map((movement) => ({
+      ...movement, transferRoute: transferById.get(movement.referenceId ?? '') ?? null,
+      documentNumber: documentById.get(movement.referenceId ?? '') ?? null,
+    }));
   }
 
   async lowStock(query: ReportQuery, actor: RequestUser) {

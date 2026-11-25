@@ -1160,7 +1160,7 @@ export default function CompanySettingsPage() {
                   }}
                 />
                 <small style={{ color: 'var(--retail-muted)', fontSize: '11.5px', marginTop: '3px', display: 'block' }}>
-                  Generates invoices as <code>{invoicePrefix}-2026-XXXXX</code>.
+                  Generates invoices as <code>{invoicePrefix || 'INV'}-00000001</code>.
                 </small>
               </div>
 

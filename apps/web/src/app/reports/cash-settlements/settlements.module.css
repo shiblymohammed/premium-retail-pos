@@ -14,3 +14,14 @@
 .period th:first-child { text-align: left; }
 .period small { display: block; margin-top: 4px; font-weight: 400; }
 .shortage { color: light-dark(#ab251b, #ffaaa1); font-weight: 700; }
+
+.filters label, .filters :is(input, select) { min-width: 0; max-width: 100%; }
+@media (max-width: 760px) {
+  .tableScroll table, .tableScroll tbody { display: block; }
+  .tableScroll thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .tableScroll tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tableScroll th[scope='row'] { grid-column: 1 / -1; background: var(--retail-raised); }
+  .period :is(th, td) { white-space: normal; overflow-wrap: anywhere; padding: 8px 11px; }
+  .period td { text-align: start; }
+  .period td::before { content: attr(data-label); display: block; margin-bottom: 3px; font-weight: 600; color: var(--retail-muted); }
+}

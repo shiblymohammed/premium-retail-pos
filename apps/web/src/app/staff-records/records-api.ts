@@ -17,6 +17,8 @@ export async function staffRequest<T>(path: string, signal?: AbortSignal, body?:
 
 export type PayrollRow = {
   id: string; period: string; currency: string; base: string; allowances: string; bonus: string;
+  overtimePay: string; attendanceDeduction: string;
+  attendanceBasis?: { overtimeMinutes: number; lateDays: number; absences: string[] } | null;
   deductions: string; advanceRecovery: string; net: string; paidAt: string | null; paymentReference: string | null;
 };
 
@@ -24,6 +26,8 @@ export const payFields = {
   base: 'Basic pay',
   allowances: 'Allowances',
   bonus: 'Bonus',
+  overtimePay: 'Overtime pay',
+  attendanceDeduction: 'Attendance deduction',
   deductions: 'Deductions',
   advanceRecovery: 'Advance or loan recovery',
 } as const;

@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { Feedback } from '@/components/ui/feedback';
+import { downloadCsv, downloadPdf } from '@/lib/report-download';
 import { getStoredSession } from '@/lib/auth';
 import styles from './settlements.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+
+const drawerColumns = ['Opening float', 'Expected cash', 'Counted cash', 'Cash difference', 'Expected card', 'Counted card', 'Card difference', 'Cash to remove'];
 
 type Settlement = {
   id: string;
@@ -98,6 +101,18 @@ export default function CashSettlementsPage() {
     return () => controller.abort();
   }, [token, from, to, locationId, canConsolidate]);
 
+  const cashToRemove = (row: Settlement) => Math.max(0, Number(row.countedCash) - Number(row.openingCash));
+  const exportSettlement = (format: 'csv' | 'pdf') => {
+    const headers = ['Store', 'Operator', 'Closed at', 'Currency', 'Reporting period', 'Opening float', 'Expected cash',
+      'Counted cash', 'Cash variance', 'Cash to remove', 'Expected card', 'Counted card', 'Card variance'];
+    const records = rows.map((row) => [row.location, row.operator, row.closedAt, row.currency, row.period,
+      row.openingCash, row.expectedCash, row.countedCash, row.cashDifference, cashToRemove(row).toFixed(2),
+      row.expectedCard, row.countedCard, row.cardDifference]);
+    const filename = `cash-settlements-${from}-to-${to}.csv`;
+    if (format === 'pdf') downloadPdf('Cash settlements', `${records.length} closed drawers`, headers, records, filename);
+    else downloadCsv(headers, records, filename);
+  };
+
   const money = (amount: string, currency: string) => new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(Number(amount));
   const groups = rows.reduce((result, row) => {
     const key = `${row.cadence} · ${row.period}`;
@@ -121,17 +136,21 @@ export default function CashSettlementsPage() {
         {locations.map((location) => <option value={location.id} key={location.id}>{location.name}</option>)}
       </select></label>
     </div>
+    <div className={styles.filters}>
+      <button type="button" className="admin-secondary" disabled={loading || !rows.length || !!error} onClick={() => exportSettlement('csv')}>Download CSV</button>
+      <button type="button" className="admin-secondary" disabled={loading || !rows.length || !!error} onClick={() => exportSettlement('pdf')}>Download PDF</button>
+    </div>
     {(error || locationError) && <Feedback tone="error">{error || locationError}</Feedback>}
     {loading && <p role="status">Loading settlements…</p>}
     {!loading && !error && !locationError && rows.length === 0 && <p>No closed drawers in this period.</p>}
     {[...groups.entries()].map(([group, entries]) => <section key={group} className={styles.period}>
       <h2>{group}</h2>
-      <div className={styles.tableScroll}>
+      <div className={styles.tableScroll} role="region" aria-label={`Cash settlements for ${group}`} tabIndex={0}>
         <table>
-          <thead><tr><th scope="col">Drawer</th><th scope="col">Opening float</th><th scope="col">Expected cash</th><th scope="col">Counted cash</th><th scope="col">Cash difference</th><th scope="col">Expected card</th><th scope="col">Counted card</th><th scope="col">Card difference</th></tr></thead>
+          <thead><tr><th scope="col">Drawer</th>{drawerColumns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead>
           <tbody>{entries.map((row) => <tr key={row.id}>
             <th scope="row">{row.location}<small>{row.operator} · {new Date(row.closedAt).toLocaleString()}</small></th>
-            {[row.openingCash, row.expectedCash, row.countedCash, row.cashDifference, row.expectedCard, row.countedCard, row.cardDifference].map((amount, index) => <td key={index} className={(index === 3 || index === 6) && Number(amount) < 0 ? styles.shortage : ''}>{money(amount, row.currency)}</td>)}
+            {[row.openingCash, row.expectedCash, row.countedCash, row.cashDifference, row.expectedCard, row.countedCard, row.cardDifference, cashToRemove(row).toFixed(2)].map((amount, index) => <td key={index} data-label={drawerColumns[index]} className={(index === 3 || index === 6) && Number(amount) < 0 ? styles.shortage : ''}>{money(amount, row.currency)}</td>)}
           </tr>)}</tbody>
         </table>
       </div>

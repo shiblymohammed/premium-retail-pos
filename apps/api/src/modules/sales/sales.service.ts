@@ -60,8 +60,7 @@ export class SalesService {
           throw new ConflictException('Open your cash drawer before completing a sale');
         }
 
-        const lineVariantIds = dto.lines.map((line) => line.variantId);
-        if (new Set(lineVariantIds).size !== lineVariantIds.length) throw new BadRequestException('A variant can appear only once per sale');
+        const lineVariantIds = this.validateSaleLines(dto.lines);
         if (dto.billDiscountPercent && dto.lines.some((line) => (line.discountPercent ?? 0) > 0)) {
           throw new BadRequestException('Line discounts and bill discounts cannot be combined');
         }
@@ -285,8 +284,7 @@ export class SalesService {
     if (dto.lines.some((line) => line.enteredUnit !== SaleUnit.BASE_UNIT && line.enteredUnit !== SaleUnit.CARTON)) {
       throw new BadRequestException('enteredUnit must be BASE_UNIT or CARTON');
     }
-    const variantIds = dto.lines.map((line) => line.variantId);
-    if (new Set(variantIds).size !== variantIds.length) throw new BadRequestException('A variant can appear only once per sale');
+    const variantIds = this.validateSaleLines(dto.lines);
     if (dto.billDiscountPercent && dto.lines.some((line) => (line.discountPercent ?? 0) > 0)) {
       throw new BadRequestException('Line discounts and bill discounts cannot be combined');
     }
@@ -374,9 +372,11 @@ export class SalesService {
       if (!scopes.some((scope) => scope.locationId === invoice.locationId)) throw new ForbiddenException('You are not authorized for this invoice location');
     }
     const returnedQuantities = new Map<string, number>();
+    const returnedRefunds = new Map<string, Prisma.Decimal>();
     for (const saleReturn of invoice.returns) {
       for (const line of saleReturn.lines) {
         returnedQuantities.set(line.saleLineId, (returnedQuantities.get(line.saleLineId) || 0) + line.quantityBaseUnits);
+        returnedRefunds.set(line.saleLineId, (returnedRefunds.get(line.saleLineId) ?? new Prisma.Decimal(0)).add(line.refundAmount));
       }
     }
     return {
@@ -392,7 +392,7 @@ export class SalesService {
       discountTotal: invoice.discountTotal,
       netTotal: invoice.netTotal,
       payment: invoice.payment,
-      lines: invoice.lines.map((line) => ({ ...line, returnedQuantityBaseUnits: returnedQuantities.get(line.id) || 0 })),
+      lines: invoice.lines.map((line) => ({ ...line, returnedQuantityBaseUnits: returnedQuantities.get(line.id) || 0, refundedAmount: (returnedRefunds.get(line.id) ?? new Prisma.Decimal(0)).toFixed(2) })),
       returns: invoice.returns,
       refunds: invoice.refunds,
       permissions: {
@@ -448,7 +448,7 @@ export class SalesService {
         const isFinalQuantity = quantityAlreadyReturned + input.quantityBaseUnits === saleLine.quantityBaseUnits;
         const refundAmount = isFinalQuantity
           ? remainingLineRefund
-          : saleLine.lineTotal.mul(input.quantityBaseUnits).div(saleLine.quantityBaseUnits).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+          : Prisma.Decimal.min(remainingLineRefund, saleLine.lineTotal.mul(input.quantityBaseUnits).div(saleLine.quantityBaseUnits).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP));
         if (refundAmount.lt(0) || refundAmount.gt(remainingLineRefund)) throw new ConflictException('Calculated refund exceeds the remaining refundable value');
         returnValues.push({
           saleLineId: saleLine.id,
@@ -533,6 +533,20 @@ export class SalesService {
       }
     }
     return locationId;
+  }
+
+  private validateSaleLines(lines: CreateSaleDto['lines']): string[] {
+    const unitsByVariant = new Map<string, Set<SaleUnit>>();
+    for (const line of lines) {
+      const units = unitsByVariant.get(line.variantId) ?? new Set<SaleUnit>();
+      const occupiedUnits = line.cartonQuantity ? [SaleUnit.BASE_UNIT, SaleUnit.CARTON] : [line.enteredUnit];
+      if (occupiedUnits.some((unit) => units.has(unit))) {
+        throw new BadRequestException('A variant can appear only once per selling unit');
+      }
+      occupiedUnits.forEach((unit) => units.add(unit));
+      unitsByVariant.set(line.variantId, units);
+    }
+    return [...unitsByVariant.keys()];
   }
 
   private saleQuantity(input: { quantity: number; enteredUnit: SaleUnit; cartonQuantity?: number }, ratio: number | null, name: string): number {

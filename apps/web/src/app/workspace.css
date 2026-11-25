@@ -370,3 +370,15 @@ body { font-family: var(--retail-font); background: var(--retail-canvas); color:
 
 .pos-content.pos-utility-only { display: flex; flex-direction: column; gap: 12px; }
 .pos-utility-only .pos-history-actions { justify-content: flex-start; }
+
+.pos-shell .checkout-modal .payment-select { display: grid; }
+.pos-shell .checkout-modal :is(select, input) { min-width: 0; max-width: 100%; }
+.customer-results { list-style: none; padding: 0; overflow-wrap: anywhere; }
+.customer-results li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--retail-edge); }
+.pos-shell .receipt-card { max-width: 100%; overflow-wrap: anywhere; }
+.pos-shell .receipt-line > span { min-width: 0; }
+.pos-shell .receipt-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 760px) {
+  .pos-shell .basket-footer { position: sticky; bottom: 0; z-index: 1; }
+  .pos-shell #pos-basket { scroll-margin-top: 12px; }
+}

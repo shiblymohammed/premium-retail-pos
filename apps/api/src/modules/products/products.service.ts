@@ -113,6 +113,22 @@ export class ProductsService {
     });
   }
 
+  async latestAcquisitionCosts(variantIds: string[], locationIds?: string[]) {
+    if (!variantIds.length || locationIds?.length === 0) return new Map();
+    const scope = locationIds ? Prisma.sql`AND r."location_id" IN (${Prisma.join(locationIds)})` : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<Array<{ variantId: string; unitCost: Prisma.Decimal; currency: string; orderNumber: string }>>(Prisma.sql`
+      SELECT DISTINCT ON (l."variant_id") l."variant_id" AS "variantId", pl."unit_cost" AS "unitCost",
+        po."currency", po."number" AS "orderNumber"
+      FROM "supplier_receipt_lines" l
+      JOIN "supplier_receipts" r ON r."id" = l."receipt_id"
+      JOIN "purchase_orders" po ON po."id" = r."purchase_order_id"
+      JOIN "purchase_order_lines" pl ON pl."order_id" = po."id" AND pl."variant_id" = l."variant_id"
+      WHERE l."variant_id" IN (${Prisma.join(variantIds)}) ${scope}
+      ORDER BY l."variant_id", r."confirmed_at" DESC, r."id" DESC
+    `);
+    return new Map(rows.map(({ variantId, ...cost }) => [variantId, cost]));
+  }
+
   async findById(id: string) {
     const product = await this.prisma.product.findUnique({ where: { id }, include: productInclude });
     if (!product) throw new NotFoundException('Product not found');

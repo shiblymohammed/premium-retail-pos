@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { downloadPdf } from '@/lib/report-download';
 import { Feedback } from '@/components/ui/feedback';
 import { money, payFields, staffRequest, type PayrollRow } from '../staff-records/records-api';
 import styles from '../staff-records/records.module.css';
@@ -30,10 +31,15 @@ export default function MyPayslipsPage() {
       </select></label></div>
       <article className={`${styles.panel} ${styles.payslip}`}>
         <header className={styles.top}><div><h2>Payslip · {record.period}</h2><p>{history.firstName} {history.lastName} · {history.employeeCode} · {history.location.name}</p></div>
-          <button className={`admin-secondary ${styles.printButton}`} onClick={() => window.print()}>Print or save PDF</button>
+          <button className={`admin-secondary ${styles.printButton}`} onClick={() => downloadPdf(
+            `Payslip ${record.period}`, `${history.firstName} ${history.lastName} · ${history.employeeCode} · ${history.location.name}`,
+            [...Object.values(payFields), 'Net pay', 'Payment reference'],
+            [[...Object.keys(payFields).map((key) => money(record[key as keyof typeof payFields] ?? 0, record.currency)), money(record.net, record.currency), record.paymentReference]],
+            `payslip-${record.period}.pdf`,
+          )}>Download PDF</button>
         </header>
         <dl className={styles.facts}>
-          {Object.entries(payFields).map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{money(record[key as keyof typeof payFields], record.currency)}</dd></div>)}
+          {Object.entries(payFields).map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{money(record[key as keyof typeof payFields] ?? 0, record.currency)}</dd></div>)}
           <div><dt>Net pay</dt><dd>{money(record.net, record.currency)}</dd></div>
           <div><dt>Payment reference</dt><dd>{record.paymentReference}</dd></div>
         </dl>
