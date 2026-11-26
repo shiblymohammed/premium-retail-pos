@@ -67,6 +67,8 @@ export default function StaffRecordsPage() {
   const [month, setMonth] = useState('');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [inputs, setInputs] = useState({ base: '', ...payrollInputs });
+  const [editingPayroll, setEditingPayroll] = useState(false);
+  const [correctionReason, setCorrectionReason] = useState('');
   const [schedule, setSchedule] = useState<string[]>([]);
   const [loan, setLoan] = useState(emptyLoan);
   const [addingLoan, setAddingLoan] = useState(false);
@@ -102,6 +104,8 @@ export default function StaffRecordsPage() {
     const controller = new AbortController();
     setProfile(null);
     setReference('');
+    setEditingPayroll(false);
+    setCorrectionReason('');
     setSchedule([]);
     setAddingLoan(false);
     setCollection(null);
@@ -129,14 +133,48 @@ export default function StaffRecordsPage() {
   }, [comparisonOpen, month]);
 
   const payroll = profile?.payroll?.find((row) => row.period === month);
-  async function save(event: FormEvent, record?: PayrollRow) {
+  const draftRecoveries = payroll && !payroll.paidAt ? (profile?.loans ?? []).flatMap((loan) =>
+    loan.repayments.filter((payment) => payment.payrollId === payroll.id && payment.status === 'PENDING')
+      .map((payment) => ({ loan, payment }))) : [];
+
+  function editPayroll(record: PayrollRow) {
+    const basis = record.attendanceBasis;
+    setInputs({
+      base: record.base, allowances: record.allowances, bonus: record.bonus, deductions: record.deductions,
+      overtimeHourlyRate: basis?.overtimeHourlyRate ?? '0', lateDayDeduction: basis?.lateDayDeduction ?? '0',
+      absentDayDeduction: basis?.absentDayDeduction ?? '0',
+    });
+    setSchedule(basis?.scheduledDates ?? []);
+    setCorrectionReason('');
+    setError('');
+    setNotice('');
+    setEditingPayroll(true);
+  }
+
+  async function savePayroll(event: FormEvent, action: 'save' | 'pay') {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setError('');
+    setNotice('');
+    const path = `/${selected}/payroll`;
+    const draft = editingPayroll ? payroll : undefined;
     try {
-      await staffRequest(record ? `/${selected}/payroll/${record.id}/pay` : `/${selected}/payroll`, undefined,
-        record ? { reference } : { period: month, scheduledDates: schedule, ...inputs });
+      if (action === 'pay' && payroll) {
+        await staffRequest(`${path}/${payroll.id}/pay`, undefined, { reference, expectedRevision: payroll.attendanceBasis?.revision ?? null });
+        setNotice('Payroll payment recorded.');
+      } else {
+        const details = { period: month, scheduledDates: schedule, ...inputs };
+        if (draft) {
+          await staffRequest(`${path}/${draft.id}`, undefined, {
+            ...details, reason: correctionReason, expectedRevision: draft.attendanceBasis?.revision ?? null,
+          }, 'PATCH');
+          setNotice('Payroll draft updated. Review the new amounts before recording payment.');
+        } else {
+          await staffRequest(path, undefined, details);
+          setNotice('Payroll draft created.');
+        }
+      }
       setReload((previous) => previous + 1);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not save payroll.');
@@ -313,19 +351,33 @@ export default function StaffRecordsPage() {
           </section>}
         </div>}
         {activeView === 'payroll' && profile.payroll && <section className={styles.panel}>
-          <h2>Payroll</h2>
-          {payroll ? <>
+          <h2>{editingPayroll ? 'Edit payroll draft' : 'Payroll'}</h2>
+          {payroll && !editingPayroll ? <>
             <dl className={styles.facts}>{[
               ...payrollBreakdown(payroll),
               ['Net pay', money(payroll.net, payroll.currency)],
-              ['Status', payroll.paidAt ? `Paid · ${payroll.paymentReference}` : 'Pending payment'],
+              ['Status', payroll.paidAt ? `Paid · ${payroll.paymentReference}` : 'Draft'],
             ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
             {payroll.attendanceBasis && <p className={styles.muted}>{payroll.attendanceBasis.overtimeMinutes} overtime minutes · {payroll.attendanceBasis.lateDays} late days · {payroll.attendanceBasis.absences.length} absent scheduled days</p>}
-            {profile.canManagePayroll && !payroll.paidAt && <form className={styles.fields} onSubmit={(e) => void save(e, payroll)}>
+            {!!draftRecoveries.length && <section className={styles.recoveries}>
+              <h3>Deductions when paid</h3>
+              <div className={styles.scroll}>
+                <table>
+                  <thead><tr><th>Loan or advance</th><th>Payroll deduction</th><th>Balance after payment</th></tr></thead>
+                  <tbody>{draftRecoveries.map(({ loan, payment }) => <tr key={payment.id}>
+                    <td>{loan.kind === 'ADVANCE' ? 'Advance' : 'Loan'}{loan.terms && <small>{loan.terms}</small>}</td>
+                    <td>{money(payment.amount, payroll.currency)}</td>
+                    <td>{money(Number(loan.outstanding) - Number(payment.amount), payroll.currency)}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+            </section>}
+            {profile.canManagePayroll && !payroll.paidAt && <form className={styles.fields} onSubmit={(e) => void savePayroll(e, 'pay')}>
               <label>Payment reference<input required maxLength={120} value={reference} onChange={(e) => setReference(e.target.value)} /></label>
+              <button type="button" className="admin-secondary" disabled={busy} onClick={() => editPayroll(payroll)}>Edit draft</button>
               <button className="admin-primary" disabled={busy}>Record payment</button>
             </form>}
-          </> : profile.canManagePayroll ? <form className={styles.fields} onSubmit={(e) => void save(e)}>
+          </> : profile.canManagePayroll ? <form className={styles.fields} onSubmit={(e) => void savePayroll(e, 'save')}>
             {Object.entries(entryFields).map(([key, label]) => {
               const field = key as keyof typeof entryFields;
               return <label key={field}>{label}<input required type="number" min="0" max="9999999999.99" step="0.01"
@@ -338,8 +390,13 @@ export default function StaffRecordsPage() {
                 <label key={date}><input type="checkbox" checked={schedule.includes(date)} aria-label={date}
                   onChange={(event) => setSchedule((previous) => event.target.checked ? [...previous, date] : previous.filter((day) => day !== date))} />{date.slice(-2)}</label>)}</div>
             </fieldset>
-            <p className={styles.muted}>Payroll uses recorded overtime and late arrivals with the rates entered here. To recover an advance or loan, queue a collection in Loans &amp; advances or set a monthly recovery on the loan.</p>
-            <button className="admin-primary" disabled={busy}>Create payroll record</button>
+            {editingPayroll ? <>
+              <p className={styles.payrollHelp}>Saving recalculates attendance adjustments and reserved loan deductions.</p>
+              <label className={styles.correctionReason}>Reason for correction<input required maxLength={500}
+                value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} /></label>
+              <button type="button" className="admin-secondary" disabled={busy} onClick={() => { setEditingPayroll(false); setError(''); }}>Cancel edit</button>
+            </> : <p className={styles.payrollHelp}>Payroll uses recorded overtime and late arrivals with the rates entered here. To recover an advance or loan, queue a collection in Loans &amp; advances or set a monthly recovery on the loan.</p>}
+            <button className="admin-primary" disabled={busy}>{editingPayroll ? 'Save draft' : 'Create payroll record'}</button>
           </form> : <p>No payroll record for this month.</p>}
         </section>}
         {activeView === 'loans' && profile.loans && <section className={styles.panel}>

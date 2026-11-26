@@ -33,12 +33,12 @@ describe('ReportsService authorization', () => {
 describe('ReportsService financial summaries', () => {
   it('exports the original charge, refunds and remaining net with the return status', async () => {
     const total = new Prisma.Decimal('57.20');
-    const base = { netTotal: total, lines: [{ quantityBaseUnits: 23 }] };
+    const base = { netTotal: total, cancelledAt: null, lines: [{ quantityBaseUnits: 23 }] };
     const prisma = { invoice: { findMany: jest.fn().mockResolvedValue([
-      { ...base, status: 'FINALIZED', refunds: [{ amount: new Prisma.Decimal('2.40') }], returns: [{ lines: [{ quantityBaseUnits: 1 }] }] },
-      { ...base, status: 'FINALIZED', refunds: [{ amount: total }], returns: [{ lines: [{ quantityBaseUnits: 22 }] }] },
-      { ...base, status: 'FINALIZED', refunds: [{ amount: total }], returns: [{ lines: [{ quantityBaseUnits: 23 }] }] },
-      { ...base, status: 'CANCELLED', refunds: [{ amount: total }], returns: [] },
+      { ...base, status: 'FINALIZED', refunds: [{ type: 'SALE_RETURN', amount: new Prisma.Decimal('2.40') }], returns: [{ lines: [{ quantityBaseUnits: 1 }] }] },
+      { ...base, status: 'FINALIZED', refunds: [{ type: 'SALE_RETURN', amount: total }], returns: [{ lines: [{ quantityBaseUnits: 22 }] }] },
+      { ...base, status: 'FINALIZED', refunds: [{ type: 'SALE_RETURN', amount: total }], returns: [{ lines: [{ quantityBaseUnits: 23 }] }] },
+      { ...base, status: 'CANCELLED', refunds: [{ type: 'SALE_CANCELLATION', amount: total }], returns: [] },
     ]) } };
     const service = new ReportsService(prisma as any, {} as any);
     const rows = await service.exportInvoices({ locationId: 'store-a' }, {

@@ -6,24 +6,38 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { ReportQuery } from './reports.controller';
 
+function invoiceStatusAt(invoice: { status: string; cancelledAt: Date | null }, cutoff: Date) {
+  return invoice.status === 'CANCELLED' && (!invoice.cancelledAt || invoice.cancelledAt < cutoff)
+    ? 'CANCELLED' : 'FINALIZED';
+}
+
 function invoiceAmounts<T extends {
   status: string;
+  cancelledAt: Date | null;
   netTotal: Prisma.Decimal;
-  refunds: { amount: Prisma.Decimal }[];
+  refunds: { amount: Prisma.Decimal; type: string }[];
   lines: { quantityBaseUnits: number }[];
   returns: { lines: { quantityBaseUnits: number }[] }[];
-}>(invoice: T) {
+}>(invoice: T, cutoff: Date) {
   const { refunds, returns, ...row } = invoice;
+  const status = invoiceStatusAt(invoice, cutoff);
   const soldUnits = invoice.lines.reduce((sum, line) => sum + line.quantityBaseUnits, 0);
   const returnedUnits = returns.flatMap((entry) => entry.lines).reduce((sum, line) => sum + line.quantityBaseUnits, 0);
-  const refunded = refunds.reduce((sum, refund) => sum.add(refund.amount), new Prisma.Decimal(0));
-  const net = invoice.status === 'CANCELLED' ? new Prisma.Decimal(0) : invoice.netTotal.sub(refunded);
-  const status = invoice.status === 'CANCELLED' ? 'CANCELLED'
+  const refunded = refunds.filter((refund) => status === 'CANCELLED' || refund.type === 'SALE_RETURN')
+    .reduce((sum, refund) => sum.add(refund.amount), new Prisma.Decimal(0));
+  const net = status === 'CANCELLED' ? new Prisma.Decimal(0) : invoice.netTotal.sub(refunded);
+  const reportStatus = status === 'CANCELLED' ? 'CANCELLED'
     : !returnedUnits ? 'FINALIZED' : returnedUnits >= soldUnits ? 'RETURNED' : 'PARTLY_RETURNED';
-  return { ...row, reportStatus: status, originalTotal: invoice.netTotal.toFixed(2), refundedTotal: refunded.toFixed(2), netAfterRefunds: net.toFixed(2) };
+  return { ...row, status, reportStatus, cancelledAt: status === 'CANCELLED' ? invoice.cancelledAt : null,
+    originalTotal: invoice.netTotal.toFixed(2), refundedTotal: refunded.toFixed(2), netAfterRefunds: net.toFixed(2) };
 }
 
 type DateScope = { locationIds: string[]; from: Date; to: Date };
+
+function utcTimestamp(date: Date) {
+  // Report columns store UTC in timestamp-without-time-zone fields.
+  return Prisma.sql`(${date.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+}
 
 @Injectable()
 export class ReportsService {
@@ -68,6 +82,8 @@ export class ReportsService {
 
   async salesSummary(query: ReportQuery, actor: RequestUser) {
     const scope = await this.resolveScope(query, actor);
+    const from = utcTimestamp(scope.from);
+    const cutoff = utcTimestamp(scope.to);
     const where = { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } };
     const [invoiceCount, invoiceRows, dailyRows] = await Promise.all([
       this.prisma.invoice.count({ where }),
@@ -78,23 +94,26 @@ export class ReportsService {
         take: 500,
       }),
       this.prisma.$queryRaw<Array<{ locationId: string; date: string; invoices: number; cancelled: number; netSales: string }>>(Prisma.sql`
-        WITH refunded AS (
-          SELECT r."invoice_id" AS "invoiceId", SUM(r."amount") AS "amount"
-          FROM "invoice_refunds" r
-          GROUP BY r."invoice_id"
+        WITH period_invoices AS (
+          SELECT i."id", i."location_id", i."net_total", i."created_at",
+            (i."status" = 'CANCELLED' AND (i."cancelled_at" IS NULL OR i."cancelled_at" < ${cutoff})) AS cancelled
+          FROM "invoices" i
+          WHERE i."location_id" IN (${Prisma.join(scope.locationIds)})
+            AND i."created_at" >= ${from} AND i."created_at" < ${cutoff}
         )
         SELECT i."location_id" AS "locationId",
           (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date::text AS "date",
-          COUNT(*) FILTER (WHERE i."status" = 'FINALIZED')::integer AS "invoices",
-          COUNT(*) FILTER (WHERE i."status" = 'CANCELLED')::integer AS "cancelled",
-          COALESCE(SUM(i."net_total" - COALESCE(refunded."amount", 0)) FILTER (WHERE i."status" = 'FINALIZED'), 0)::text AS "netSales"
-        FROM "invoices" i
+          COUNT(*) FILTER (WHERE NOT i.cancelled)::integer AS "invoices",
+          COUNT(*) FILTER (WHERE i.cancelled)::integer AS "cancelled",
+          COALESCE(SUM(i."net_total" - COALESCE(refunded."amount", 0)) FILTER (WHERE NOT i.cancelled), 0)::text AS "netSales"
+        FROM period_invoices i
         JOIN "locations" l ON l."id" = i."location_id"
         JOIN "companies" c ON c."id" = l."company_id"
-        LEFT JOIN refunded ON refunded."invoiceId" = i."id"
-        WHERE i."location_id" IN (${Prisma.join(scope.locationIds)})
-          AND i."created_at" >= ${scope.from}
-          AND i."created_at" < ${scope.to}
+        LEFT JOIN LATERAL (
+          SELECT SUM(r."amount") AS "amount"
+          FROM "invoice_refunds" r
+          WHERE r."invoice_id" = i."id" AND r."type" = 'SALE_RETURN' AND r."recorded_at" < ${cutoff}
+        ) refunded ON NOT i.cancelled
         GROUP BY i."location_id", (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date
         ORDER BY (i."created_at" AT TIME ZONE 'UTC' AT TIME ZONE c."timezone")::date ASC
       `),
@@ -125,7 +144,11 @@ export class ReportsService {
       totals: { netSales: total.toFixed(2), completedInvoices, cancelledInvoices },
       locations: [...byLocation.entries()].map(([locationId, value]) => ({ locationId, locationName: nameById.get(locationId) ?? 'Location', invoices: value.invoices, cancelled: value.cancelled, netSales: value.netSales.toFixed(2) })).sort((a, b) => Number(b.netSales) - Number(a.netSales)),
       daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)).map((item) => ({ ...item, netSales: item.netSales.toFixed(2) })),
-      invoices: invoiceRows.map((invoice) => ({ ...invoice, locationName: nameById.get(invoice.locationId) ?? 'Location', netTotal: invoice.netTotal.toFixed(2) })),
+      invoices: invoiceRows.map((invoice) => {
+        const status = invoiceStatusAt(invoice, scope.to);
+        return { ...invoice, status, cancelledAt: status === 'CANCELLED' ? invoice.cancelledAt : null,
+          locationName: nameById.get(invoice.locationId) ?? 'Location', netTotal: invoice.netTotal.toFixed(2) };
+      }),
       truncated: invoiceCount > invoiceRows.length,
     };
   }
@@ -141,12 +164,12 @@ export class ReportsService {
           location: { select: { id: true, name: true } },
           lines: { include: { variant: { select: { sku: true, name: true, product: { select: { name: true } } } } } },
           payment: true,
-          refunds: { select: { amount: true } },
-          returns: { select: { lines: { select: { quantityBaseUnits: true } } } },
+          refunds: { where: { recordedAt: { lt: scope.to } }, select: { amount: true, type: true } },
+          returns: { where: { processedAt: { lt: scope.to } }, select: { lines: { select: { quantityBaseUnits: true } } } },
         },
       }),
     ]);
-    return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), rows: rows.map(invoiceAmounts) };
+    return { page, pageSize, total, totalPages: Math.ceil(total / pageSize), rows: rows.map((row) => invoiceAmounts(row, scope.to)) };
   }
 
   async exportInvoices(query: ReportQuery, actor: RequestUser) {
@@ -157,17 +180,23 @@ export class ReportsService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
       select: {
-        invoiceNumber: true, status: true, netTotal: true, createdAt: true, location: { select: { name: true } },
-        refunds: { select: { amount: true } }, lines: { select: { quantityBaseUnits: true } },
-        returns: { select: { lines: { select: { quantityBaseUnits: true } } } },
+        invoiceNumber: true, status: true, netTotal: true, createdAt: true, cancelledAt: true, location: { select: { name: true } },
+        refunds: { where: { recordedAt: { lt: scope.to } }, select: { amount: true, type: true } },
+        lines: { select: { quantityBaseUnits: true } },
+        returns: { where: { processedAt: { lt: scope.to } }, select: { lines: { select: { quantityBaseUnits: true } } } },
       },
     });
     if (rows.length > limit) throw new BadRequestException('This export matches over 10,000 invoices. Narrow the date range or select a store.');
-    return rows.map(invoiceAmounts).map(({ lines: _lines, ...row }) => row);
+    return rows.map((invoice) => {
+      const { lines: _lines, ...row } = invoiceAmounts(invoice, scope.to);
+      return row;
+    });
   }
 
   async productPerformance(query: ReportQuery, actor: RequestUser) {
     const { locationIds, from, to } = await this.resolveScope(query, actor);
+    const start = utcTimestamp(from);
+    const cutoff = utcTimestamp(to);
     return this.prisma.$queryRaw<Array<{
       product: string; variant: string; sku: string; baseUnit: string; sold: string; netSales: string; available: string;
     }>>(Prisma.sql`
@@ -176,14 +205,18 @@ export class ReportsService {
         FROM "sale_lines" sl
         JOIN "invoices" i ON i."id" = sl."invoice_id"
         WHERE i."location_id" IN (${Prisma.join(locationIds)})
-          AND i."status" = 'FINALIZED' AND i."created_at" >= ${from} AND i."created_at" < ${to}
+          AND (i."status" = 'FINALIZED' OR i."cancelled_at" >= ${cutoff})
+          AND i."created_at" >= ${start} AND i."created_at" < ${cutoff}
       ),
       returns AS (
-        SELECT r."sale_line_id", SUM(r."quantity_base_units") AS "units", SUM(r."refund_amount") AS "amount"
+        SELECT r."sale_line_id",
+          SUM(r."quantity_base_units") FILTER (WHERE sr."processed_at" < ${cutoff}) AS "units",
+          SUM(r."refund_amount") FILTER (WHERE refund."recorded_at" < ${cutoff}) AS "amount"
         FROM "sale_return_lines" r
         JOIN sales s ON s."id" = r."sale_line_id"
         JOIN "sale_returns" sr ON sr."id" = r."sale_return_id"
-        WHERE sr."processed_at" < ${to}
+        LEFT JOIN "invoice_refunds" refund ON refund."sale_return_id" = sr."id"
+        WHERE sr."processed_at" < ${cutoff} OR refund."recorded_at" < ${cutoff}
         GROUP BY r."sale_line_id"
       ),
       sold AS (

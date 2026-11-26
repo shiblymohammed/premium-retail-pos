@@ -1,6 +1,7 @@
 import { PERMISSIONS, can } from '../../common/decorators/permission.decorator';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import type { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { attendanceByShiftDate, attendanceDay } from '../attendance/attendance.service';
@@ -38,6 +39,21 @@ function localDay(date: Date, timezone: string) {
 
 const OUTLET_STAFF_ROLES: Role[] = [Role.STAFF, Role.CASHIER, Role.INVENTORY];
 
+function staffReportAccess(actor: RequestUser) {
+  const defaultAccess = actor.role === Role.ADMIN || actor.role === Role.STORE_MANAGER;
+  return {
+    includeSales: can(actor, 'sales.reports', defaultAccess),
+    includeCash: can(actor, 'cash.reports', defaultAccess),
+  };
+}
+
+function checkPayrollRevision(basis: Prisma.JsonValue, expected: string | null | undefined) {
+  const revision = basis && typeof basis === 'object' && !Array.isArray(basis) ? basis.revision ?? null : null;
+  if ((expected ?? null) !== revision) {
+    throw new ConflictException('This payroll draft changed. Reload staff records and review the latest amounts.');
+  }
+}
+
 @Injectable()
 export class StaffRecordsService {
   constructor(private readonly prisma: PrismaService, private readonly users: UsersService) {}
@@ -64,6 +80,7 @@ export class StaffRecordsService {
   async profile(id: string, month: string, actor: RequestUser) {
     const staff = await this.employee(id, actor);
     const { timezone } = staff.location.company;
+    const { includeSales, includeCash } = staffReportAccess(actor);
     const canManagePayroll = can(actor, 'payroll.manage', actor.role === Role.ADMIN);
     const canSeePayroll = can(actor, 'payroll.view', actor.role === Role.ADMIN || canManagePayroll);
     const from = Prisma.sql`((${month + '-01'}::date)::timestamp AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
@@ -76,7 +93,7 @@ export class StaffRecordsService {
         WHERE employee_id = ${id} AND location_id = ${staff.locationId} AND punch_timestamp >= ${from} AND punch_timestamp < ${throughFollowingDay}
         ORDER BY punch_timestamp
       `),
-      this.prisma.$queryRaw<Array<{ bills: number; sales: string; previousSales: string; discounts: string; returns: number }>>(Prisma.sql`
+      includeSales ? this.prisma.$queryRaw<Array<{ bills: number; sales: string; previousSales: string; discounts: string; returns: number }>>(Prisma.sql`
         SELECT COUNT(*) FILTER (WHERE invoice.status = 'FINALIZED' AND invoice.created_at >= ${from})::int AS bills,
           COALESCE(SUM(invoice.net_total) FILTER (WHERE invoice.status = 'FINALIZED' AND invoice.created_at >= ${from}), 0)::text AS sales,
           COALESCE(SUM(invoice.net_total) FILTER (WHERE invoice.status = 'FINALIZED' AND invoice.created_at < ${from}), 0)::text AS "previousSales",
@@ -88,13 +105,13 @@ export class StaffRecordsService {
         FROM invoices invoice
         WHERE invoice.cashier_user_id = ${staff.userId} AND invoice.location_id = ${staff.locationId}
           AND invoice.created_at >= ${previousFrom} AND invoice.created_at < ${to}
-      `),
-      this.prisma.$queryRaw<Array<{ closedAt: Date; expectedCash: string; countedCash: string; difference: string }>>(Prisma.sql`
+      `) : undefined,
+      includeCash ? this.prisma.$queryRaw<Array<{ closedAt: Date; expectedCash: string; countedCash: string; difference: string }>>(Prisma.sql`
         SELECT closed_at AS "closedAt", expected_cash::text AS "expectedCash", counted_cash::text AS "countedCash",
           (counted_cash - expected_cash)::text AS difference
         FROM cash_drawer_sessions WHERE operator_id = ${staff.userId} AND location_id = ${staff.locationId}
           AND closed_at >= ${from} AND closed_at < ${to} ORDER BY closed_at DESC
-      `),
+      `) : undefined,
       canSeePayroll ? this.prisma.payrollRecord.findMany({ where: { employeeId: id }, select: payrollFields, orderBy: { period: 'desc' } }) : undefined,
       canSeePayroll ? this.prisma.employee.findUnique({ where: { id }, select: { monthlyBaseSalary: true } }) : undefined,
       canSeePayroll ? this.prisma.loan.findMany({ where: { employeeId: id }, select: loanFields, orderBy: { issueDate: 'desc' } }) : undefined,
@@ -137,8 +154,8 @@ export class StaffRecordsService {
       totals.overtimeMinutes += metrics.overtimeMinutes;
       if (metrics.earlyMinutes > 0) totals.earlyCheckouts += 1;
     }
-    return { staff, permissionDefinitions: PERMISSIONS, permissionDefaults: roleDefaults(staff.user.role), attendance, canManagePayroll: canSeePayroll && canManagePayroll, ...totals, sales: actor.permissionOverrides?.['sales.reports'] === false ? undefined : sales[0],
-      drawers: actor.permissionOverrides?.['cash.reports'] === false ? undefined : drawers, payroll,
+    return { staff, permissionDefinitions: PERMISSIONS, permissionDefaults: roleDefaults(staff.user.role), attendance,
+      canManagePayroll: canSeePayroll && canManagePayroll, ...totals, sales: sales?.[0], drawers, payroll,
       baseSalary: baseSalary?.monthlyBaseSalary,
       loans: loans?.map(({ repayments, ...loan }) => ({
         ...loan, repayments: repayments.map(({ payroll: collectionPayroll, ...payment }) => ({
@@ -154,8 +171,7 @@ export class StaffRecordsService {
   }
 
   async comparison(month: string, actor: RequestUser) {
-    const includeSales = can(actor, 'sales.reports', (actor.role === Role.ADMIN || actor.role === Role.STORE_MANAGER));
-    const includeCash = can(actor, 'cash.reports', (actor.role === Role.ADMIN || actor.role === Role.STORE_MANAGER));
+    const { includeSales, includeCash } = staffReportAccess(actor);
     const scope = actor.role === Role.SUPER_ADMIN ? Prisma.empty : actor.locationIds.length
       ? Prisma.sql`AND e."location_id" IN (${Prisma.join(actor.locationIds)})` : Prisma.sql`AND FALSE`;
     const employees = await this.prisma.$queryRaw<Array<{
@@ -358,8 +374,10 @@ export class StaffRecordsService {
     });
   }
 
-  async recordPayroll(id: string, dto: PayrollDto, actor: RequestUser) {
+  async recordPayroll(id: string, dto: PayrollDto, actor: RequestUser,
+    correction?: { payrollId: string; reason: string; expectedRevision: string | null | undefined }) {
     this.checkPayrollAccess(actor);
+    if (correction && !correction.reason.trim()) throw new BadRequestException('Enter a reason for correcting this draft');
     if (!new Prisma.Decimal(dto.advanceRecovery ?? 0).isZero()) {
       throw new BadRequestException('To deduct a loan or advance from payroll, queue a collection for that loan in Staff records');
     }
@@ -384,7 +402,11 @@ export class StaffRecordsService {
     if (overtimePay.gt(max) || attendanceDeduction.gt(max)) throw new BadRequestException('Payroll adjustment exceeds the supported amount');
     try {
       return await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
+        const workplace = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM employees WHERE id = ${id} AND location_id = ${staff.locationId} FOR UPDATE
+        `;
+        if (!workplace.length) throw new ConflictException('The employee workplace changed. Reload staff records.');
+        const draft = correction ? await this.releaseDraftRecoveries(tx, id, period, correction.payrollId, correction.expectedRevision) : null;
         const loans = await tx.loan.findMany({
           where: { employeeId: id, status: 'ACTIVE', OR: [
             { monthlyInstallment: { gt: 0 } },
@@ -399,7 +421,9 @@ export class StaffRecordsService {
         const scheduled: Array<{ id: string; amount: Prisma.Decimal }> = [];
         for (const loan of loans) {
           if (localDay(loan.issueDate, timezone).slice(0, 7) > period) continue;
-          const queued = loan.repayments.find((payment) => payment.status === 'PENDING' && payment.isPayrollDeduction && !payment.payrollId);
+          // Repayments are loaded newest first. Honor the oldest queued collection when editing releases a previous reservation.
+          const queued = [...loan.repayments].reverse()
+            .find((payment) => payment.status === 'PENDING' && payment.isPayrollDeduction && !payment.payrollId);
           if (queued) {
             if (period >= localDay(queued.paymentDate, timezone).slice(0, 7) && remainingPay.gte(queued.amount)) {
               scheduled.push(queued);
@@ -417,21 +441,33 @@ export class StaffRecordsService {
         }
         const advanceRecovery = [...allocations, ...scheduled].reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0));
         if (advanceRecovery.gt(max)) throw new BadRequestException('Payroll recovery exceeds the supported amount');
-        const record = await tx.payrollRecord.create({
-          data: { period, base, allowances, bonus, deductions, advanceRecovery, overtimePay, attendanceDeduction,
-            attendanceBasis: { overtimeMinutes: profile.overtimeMinutes, lateDays, scheduledDates, absences,
-              overtimeHourlyRate: dto.overtimeHourlyRate ?? '0', lateDayDeduction: dto.lateDayDeduction ?? '0',
-              absentDayDeduction: dto.absentDayDeduction ?? '0' },
-            net: remainingPay, employeeId: id, currency: staff.location.company.currency, createdById: actor.userId,
-            repayments: { create: allocations.map((allocation) => ({
-              ...allocation, isPayrollDeduction: true, paymentDate: new Date(),
-            })) },
-          },
-          select: payrollFields,
-        });
+        const data = {
+          base, allowances, bonus, deductions, advanceRecovery, overtimePay, attendanceDeduction,
+          attendanceBasis: { overtimeMinutes: profile.overtimeMinutes, lateDays, scheduledDates, absences,
+            overtimeHourlyRate: dto.overtimeHourlyRate ?? '0', lateDayDeduction: dto.lateDayDeduction ?? '0',
+            absentDayDeduction: dto.absentDayDeduction ?? '0', ...(draft && { revision: randomUUID() }) },
+          net: remainingPay,
+          repayments: { create: allocations.map((allocation) => ({
+            ...allocation, isPayrollDeduction: true, paymentDate: new Date(),
+          })) },
+        };
+        const record = draft
+          ? await tx.payrollRecord.update({ where: { id: draft.id }, data, select: payrollFields })
+          : await tx.payrollRecord.create({
+            data: { ...data, period, employeeId: id, currency: staff.location.company.currency, createdById: actor.userId },
+            select: payrollFields,
+          });
         if (scheduled.length) await tx.repayment.updateMany({
           where: { id: { in: scheduled.map((item) => item.id) } }, data: { payrollId: record.id },
         });
+        if (draft && correction) await tx.auditEvent.create({ data: {
+          actorId: actor.userId, action: 'PAYROLL_DRAFT_CORRECTED', targetEntity: 'PayrollRecord',
+          targetId: record.id, reason: correction.reason.trim(),
+          beforeValue: JSON.stringify(draft),
+          afterValue: JSON.stringify({ ...record, repayments: await tx.repayment.findMany({
+            where: { payrollId: record.id }, select: { id: true, loanId: true, amount: true, status: true },
+          }) }),
+        } });
         return record;
       });
     } catch (error) {
@@ -442,24 +478,52 @@ export class StaffRecordsService {
     }
   }
 
-  async markPaid(id: string, payrollId: string, reference: string, actor: RequestUser) {
+  private async releaseDraftRecoveries(tx: Prisma.TransactionClient, employeeId: string, period: string, payrollId: string,
+    expectedRevision: string | null | undefined) {
+    const draft = await tx.payrollRecord.findFirst({
+      where: { id: payrollId, employeeId, period },
+      select: { ...payrollFields, repayments: { select: { id: true, loanId: true, amount: true, status: true } } },
+    });
+    if (!draft) throw new NotFoundException('Payroll record not found for this employee and month');
+    if (draft.paidAt || draft.repayments.some((payment) => payment.status === 'CONFIRMED')) {
+      throw new ConflictException('Paid payroll and confirmed recoveries are locked');
+    }
+    checkPayrollRevision(draft.attendanceBasis, expectedRevision);
+    const queued = draft.repayments.length ? await tx.auditEvent.findMany({
+      where: { action: 'STAFF_PAYROLL_COLLECTION_QUEUED', targetEntity: 'Repayment', targetId: { in: draft.repayments.map((payment) => payment.id) } },
+      select: { targetId: true },
+    }) : [];
+    const queuedIds = [...new Set(queued.map((event) => event.targetId))];
+    if (queuedIds.length) await tx.repayment.updateMany({
+      where: { payrollId, status: 'PENDING', id: { in: queuedIds } }, data: { payrollId: null },
+    });
+    if (draft.repayments.length > queuedIds.length) await tx.repayment.deleteMany({
+      where: { payrollId, status: 'PENDING' },
+    });
+    return draft;
+  }
+
+  async markPaid(id: string, payrollId: string, reference: string, actor: RequestUser, expectedRevision?: string | null) {
     this.checkPayrollAccess(actor);
-    await this.employee(id, actor);
+    const staff = await this.employee(id, actor);
     const paymentReference = reference.trim();
     if (!paymentReference) throw new BadRequestException('Enter the payment reference');
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
-      const now = new Date();
-      const changed = await tx.payrollRecord.updateMany({
-        where: { id: payrollId, employeeId: id, paidAt: null },
-        data: { paidAt: now, paidById: actor.userId, paymentReference },
-      });
-      const saved = await tx.payrollRecord.findFirst({ where: { id: payrollId, employeeId: id }, select: payrollFields });
-      if (!saved) throw new NotFoundException('Payroll record not found');
-      if (!changed.count) {
-        if (saved.paymentReference !== paymentReference) throw new ConflictException('This payroll record is already marked paid');
-        return saved;
+      const workplace = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM employees WHERE id = ${id} AND location_id = ${staff.locationId} FOR UPDATE
+      `;
+      if (!workplace.length) throw new ConflictException('The employee workplace changed. Reload staff records.');
+      const current = await tx.payrollRecord.findFirst({ where: { id: payrollId, employeeId: id }, select: payrollFields });
+      if (!current) throw new NotFoundException('Payroll record not found');
+      checkPayrollRevision(current.attendanceBasis, expectedRevision);
+      if (current.paidAt) {
+        if (current.paymentReference !== paymentReference) throw new ConflictException('This payroll record is already marked paid');
+        return current;
       }
+      const now = new Date();
+      const saved = await tx.payrollRecord.update({
+        where: { id: payrollId }, data: { paidAt: now, paidById: actor.userId, paymentReference }, select: payrollFields,
+      });
       const repayments = await tx.repayment.findMany({ where: { payrollId, status: 'PENDING' }, select: { loanId: true } });
       await tx.repayment.updateMany({ where: { payrollId, status: 'PENDING' }, data: {
         status: 'CONFIRMED', confirmedByUserId: actor.userId, paymentDate: now,

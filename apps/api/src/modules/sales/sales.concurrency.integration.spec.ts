@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { InventoryService } from '../inventory/inventory.service';
 import { SalesService } from './sales.service';
 import { SaleUnit } from './dto/create-sale.dto';
+import { ReportsService } from '../reports/reports.service';
 
 const databaseUrl = process.env.PHASE11_STRESS_DATABASE_URL;
 const isolatedTestDatabase = (() => {
@@ -117,6 +118,55 @@ const isolatedTestDatabase = (() => {
     }, actor, `refund-split-${suffix}`);
     const detail = await sales.findInvoiceForSaleControl(invoice.invoiceNumber, actor);
     expect(detail.lines.find((line) => line.id === loose.id)).toMatchObject({ returnedQuantityBaseUnits: 1, refundedAmount: '4.50' });
+  });
+
+  it('uses a common exclusive cutoff for sales, invoice exports, product returns and cancellations', async () => {
+    const afternoon = new Date('2026-01-01T12:00:00Z');
+    const cutoff = new Date('2026-01-01T18:30:00Z');
+    const refundTime = new Date('2026-01-01T19:00:00Z');
+    const location = await prisma.location.findUniqueOrThrow({ where: { id: locationId } });
+    await prisma.company.update({ where: { id: location.companyId }, data: { timezone: 'Asia/Kolkata' } });
+    const seedInvoice = (label: string, cancelledAt: Date | null) => prisma.invoice.create({
+      data: {
+        invoiceNumber: `${label}-${suffix}`, idempotencyKey: `${label}-${suffix}`, locationId, cashierUserId: cashierId,
+        status: cancelledAt ? 'CANCELLED' : 'FINALIZED', cancelledAt, createdAt: afternoon, grossTotal: 20, netTotal: 20,
+        lines: { create: { variantId, quantityBaseUnits: 2, enteredUnit: 'piece', unitPriceAtSale: 10, lineTotal: 20 } },
+      }, include: { lines: true },
+    });
+    const returnedInvoice = await seedInvoice('REPORT-RETURN', null);
+    const voidedInvoice = await seedInvoice('REPORT-VOID', cutoff);
+    await prisma.saleReturn.create({
+      data: {
+        returnNumber: `REPORT-REFUND-${suffix}`, idempotencyKey: `report-return-${suffix}`, invoiceId: returnedInvoice.id,
+        processedByUserId: cashierId, reason: 'Test next-day return', processedAt: refundTime,
+        lines: { create: { saleLineId: returnedInvoice.lines[0].id, quantityBaseUnits: 1, grossAmount: 10,
+          discountAmount: 0, refundAmount: 10, disposition: 'RESTOCKED', inspectionNotes: 'Synthetic return' } },
+        refund: { create: { invoiceId: returnedInvoice.id, type: 'SALE_RETURN', method: 'CARD', recordedAt: refundTime,
+          recordedByUserId: cashierId, amount: 10, reason: 'Test next-day refund' } },
+      },
+    });
+    await prisma.invoiceRefund.create({
+      data: { invoiceId: voidedInvoice.id, type: 'SALE_CANCELLATION', method: 'CARD', recordedAt: cutoff,
+        recordedByUserId: cashierId, amount: 20, reason: 'Test cancellation at cutoff' },
+    });
+    const reports = new ReportsService(prisma as any, inventory);
+    const owner = { userId: cashierId, email: 'report-fixture@example.test', role: Role.SUPER_ADMIN, locationIds: [] };
+    const query = { locationId, from: '2025-12-31T18:30:00Z', to: cutoff.toISOString() };
+    const later = { ...query, to: '2026-01-02T18:30:00Z' };
+    for (const [range, net, units, cancelled] of [[query, '40.00', '4', 0], [later, '10.00', '1', 1]] as const) {
+      const summary = await reports.salesSummary(range, owner);
+      const details = await reports.salesDetails(range, owner, 1, 10);
+      const exported = await reports.exportInvoices(range, owner);
+      const products = await reports.productPerformance(range, owner);
+      expect(summary.daily).toEqual([{ date: '2026-01-01', netSales: net, invoices: 2 - cancelled, cancelled }]);
+      expect(details.rows.map(({ reportStatus, netAfterRefunds }) => [reportStatus, netAfterRefunds]))
+        .toEqual(exported.map(({ reportStatus, netAfterRefunds }) => [reportStatus, netAfterRefunds]));
+      expect(exported.find(({ invoiceNumber }) => invoiceNumber === returnedInvoice.invoiceNumber))
+        .toMatchObject({ reportStatus: cancelled ? 'PARTLY_RETURNED' : 'FINALIZED', netAfterRefunds: cancelled ? '10.00' : '20.00' });
+      expect(exported.find(({ invoiceNumber }) => invoiceNumber === voidedInvoice.invoiceNumber))
+        .toMatchObject({ reportStatus: cancelled ? 'CANCELLED' : 'FINALIZED', netAfterRefunds: cancelled ? '0.00' : '20.00' });
+      expect(products.find(({ sku }) => sku === `P11-${suffix}`)).toMatchObject({ sold: units, netSales: net });
+    }
   });
 
 });

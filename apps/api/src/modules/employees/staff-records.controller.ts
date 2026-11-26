@@ -2,7 +2,7 @@ import { Permission } from '../../common/decorators/permission.decorator';
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, IsUUID } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, IsUUID, ValidateIf } from 'class-validator';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -28,6 +28,11 @@ export class PayrollDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { each: true }) scheduledDates?: string[];
 }
 
+class PayrollCorrectionDto extends PayrollDto {
+  @IsString() @MaxLength(500) reason: string;
+  @ValidateIf((_dto, value) => value !== null) @IsUUID() expectedRevision: string | null;
+}
+
 export class PayrollLoanDto {
   @IsIn(['LOAN', 'ADVANCE']) kind: 'LOAN' | 'ADVANCE';
   @Matches(MONEY) amount: string;
@@ -46,6 +51,8 @@ class PayrollPaymentDto {
   @IsString()
   @MaxLength(120)
   reference: string;
+
+  @IsOptional() @IsUUID() expectedRevision?: string | null;
 }
 
 @Controller('staff-records')
@@ -123,10 +130,20 @@ export class StaffRecordsController {
     return { data: await this.staff.recordPayroll(id, dto, actor) };
   }
 
+  @Patch(':id/payroll/:payrollId')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Permission('payroll.manage')
+  async correctPayroll(@Param('id') id: string, @Param('payrollId') payrollId: string,
+    @Body() dto: PayrollCorrectionDto, @CurrentUser() actor: RequestUser) {
+    return { data: await this.staff.recordPayroll(id, dto, actor, {
+      payrollId, reason: dto.reason, expectedRevision: dto.expectedRevision,
+    }) };
+  }
+
   @Post(':id/payroll/:payrollId/pay')
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Permission('payroll.manage')
   async pay(@Param('id') id: string, @Param('payrollId') payrollId: string, @Body() dto: PayrollPaymentDto, @CurrentUser() actor: RequestUser) {
-    return { data: await this.staff.markPaid(id, payrollId, dto.reference, actor) };
+    return { data: await this.staff.markPaid(id, payrollId, dto.reference, actor, dto.expectedRevision) };
   }
 }

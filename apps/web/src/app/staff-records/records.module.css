@@ -38,3 +38,8 @@
 .collection > p { flex: 1 1 100%; }
 .collectionActions ul { padding: 0 0 0 16px; margin: 6px 0; }
 .collectionActions summary { cursor: pointer; }
+.recoveries h3 { margin: 0 0 6px; }
+.recoveries td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.recoveries td small { display: block; }
+.payrollHelp { flex-basis: 100%; color: var(--retail-muted); }
+.correctionReason { flex: 1 1 240px; }

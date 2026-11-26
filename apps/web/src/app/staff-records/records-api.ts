@@ -30,7 +30,11 @@ export async function staffRequest<T>(path: string, signal?: AbortSignal, body?:
 export type PayrollRow = {
   id: string; period: string; currency: string; base: string; allowances: string; bonus: string;
   overtimePay: string; attendanceDeduction: string;
-  attendanceBasis?: { overtimeMinutes: number; lateDays: number; absences: string[]; manualRecovery?: string } | null;
+  attendanceBasis?: {
+    overtimeMinutes: number; lateDays: number; absences: string[]; manualRecovery?: string;
+    scheduledDates?: string[]; overtimeHourlyRate?: string; lateDayDeduction?: string; absentDayDeduction?: string;
+    revision?: string;
+  } | null;
   deductions: string; advanceRecovery: string; net: string; paidAt: string | null; paymentReference: string | null;
 };
 

@@ -16,6 +16,7 @@ import { Icon, formatMoney, formatCompactMoney, formatDay, type SalesSummary, ty
 import { SalesView, InvoicesView, StockView, Card, Table } from './report-views';
 
 const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+const SALES_CUTOFF_LABEL = 'Refunds and cancellations through period end';
 
 type Location = { id: string; name: string; type: string; isActive: boolean; company: { currency: string; timezone?: string } };
 
@@ -108,6 +109,7 @@ export default function ReportsPage() {
   const [to, setTo] = useState('');
   const [rangePreset, setRangePreset] = useState<RangePreset>('last30');
   const [report, setReport] = useState<ReportKind>('overview');
+  const usesSalesCutoff = ['overview', 'sales', 'salesDetails', 'productPerformance'].includes(report);
 
   const [sales, setSales] = useState<SalesSummary | null>(null);
   const [salesDetails, setSalesDetails] = useState<SalesDetails | null>(null);
@@ -409,7 +411,7 @@ export default function ReportsPage() {
       const filename = `Premium-Retail-Report-${report}-${from}-to-${to}.csv`;
       if (format === 'PDF') {
         const title = report === 'overview' ? 'Store performance overview' : reportLabel;
-        downloadPdf(title, `${rows.length} records · ${scopeName}`, headers, rows, filename);
+        downloadPdf(title, usesSalesCutoff ? `${scopeName} · ${SALES_CUTOFF_LABEL}` : `${rows.length} records · ${scopeName}`, headers, rows, filename);
       } else {
         const csv = [headers, ...rows].map((line) => line.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
         const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -609,6 +611,10 @@ export default function ReportsPage() {
       {scopeError && <Feedback tone="error">{scopeError}</Feedback>}
       {failure && <Feedback tone="error">{failure} <button type="button" className={styles.textButton} onClick={() => setReportRetry((value) => value + 1)}>Retry</button></Feedback>}
       {!loaded && !scopeError && !failure && locationState !== 'error' && <p role="status">Loading report…</p>}
+      {loaded && usesSalesCutoff && <p className={styles.mutedText}>
+        Sales are grouped by invoice date. Refunds and cancellations are included through the selected end date.
+        Extend the end date to include later changes to those invoices.
+      </p>}
 
       {/* ---------- OVERVIEW ---------- */}
       {loaded && report === 'overview' && (
