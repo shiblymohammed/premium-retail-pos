@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 type ReceiptDiscrepancy = {
   transferId: string;
   transferNumber: string;
+  receiptId: string | null;
   variantId: string;
   sku: string;
   sourceName: string;
@@ -16,11 +17,12 @@ type ReceiptDiscrepancy = {
 };
 
 export function receiptDiscrepancies(db: Prisma.TransactionClient, filter: Prisma.Sql, limit?: number) {
-  // Receipt movements are append-only. PostgreSQL assigns the same transaction timestamp
-  // to the movements written by one receipt, including records made before this report.
+  // Old ledger rows lack a receipt ID. Keep their original timestamp grouping
+  // so separate legacy receipts cannot be merged based on timing or note text.
   return db.$queryRaw<ReceiptDiscrepancy[]>(Prisma.sql`
-    SELECT t.id AS "transferId", t.transfer_number AS "transferNumber", v.id AS "variantId", v.sku,
-      source.name AS "sourceName", dest.name AS "destinationName", m.created_at AS "receivedAt", c.timezone,
+    SELECT t.id AS "transferId", t.transfer_number AS "transferNumber", m.receipt_id AS "receiptId",
+      v.id AS "variantId", v.sku, source.name AS "sourceName", dest.name AS "destinationName",
+      MIN(m.created_at) AS "receivedAt", c.timezone,
       SUM(CASE WHEN m.reference_type = 'transfer_shortage' THEN -(m.quantity_base_units::bigint) ELSE 0 END)::float8 AS short,
       SUM(CASE WHEN m.reference_type = 'transfer' THEN m.quantity_base_units ELSE 0 END)::float8 AS damaged,
       SUM(CASE WHEN m.reference_type = 'transfer_excess' THEN m.quantity_base_units ELSE 0 END)::float8 AS excess,
@@ -37,8 +39,9 @@ export function receiptDiscrepancies(db: Prisma.TransactionClient, filter: Prism
         OR (m.reference_type IN ('transfer', 'transfer_excess') AND m.location_id = t.dest_location_id
             AND m.stock_state = 'QUARANTINED' AND m.quantity_base_units > 0))
       AND (${filter})
-    GROUP BY t.id, v.id, source.name, dest.name, c.timezone, m.created_at, m.actor_id
-    ORDER BY m.created_at DESC, t.id, v.id, m.actor_id
+    GROUP BY t.id, v.id, source.name, dest.name, c.timezone, m.receipt_id, m.actor_id,
+      CASE WHEN m.receipt_id IS NULL THEN m.created_at END
+    ORDER BY "receivedAt" DESC, t.id, v.id, m.actor_id, m.receipt_id
     ${limit === undefined ? Prisma.empty : Prisma.sql`LIMIT ${limit}`}
   `);
 }

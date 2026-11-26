@@ -211,6 +211,7 @@ export class InventoryService {
       referenceType?: string;
       referenceId?: string;
       notes?: string;
+      receipt?: { id: string; recordedAt: Date };
       allowAuditLocked?: boolean;
     },
   ) {
@@ -261,6 +262,7 @@ export class InventoryService {
         referenceType: input.referenceType,
         referenceId: input.referenceId,
         notes: input.notes,
+        ...(input.receipt && { receiptId: input.receipt.id, createdAt: input.receipt.recordedAt }),
       },
     });
     const negativeAvailable = input.stockState === StockState.AVAILABLE && resultingBalance < 0;

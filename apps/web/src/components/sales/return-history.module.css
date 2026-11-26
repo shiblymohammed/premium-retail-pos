@@ -1,0 +1,48 @@
+.history,
+.lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history {
+  display: grid;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+
+.entry {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--retail-edge);
+  border-radius: 12px;
+  color: var(--retail-ink);
+  font-size: 13px;
+}
+
+.header,
+.lineHeading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.header time,
+.refund span,
+.details {
+  display: block;
+  color: var(--retail-muted);
+  font-size: 12px;
+}
+
+.reference,
+.notes {
+  margin: 6px 0 0;
+}
+
+.lines > li {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--retail-edge);
+}

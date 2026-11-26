@@ -636,6 +636,8 @@ export class TransfersService {
       if ([...receipts.keys()].some((variantId) => !transferLines.has(variantId))) {
         throw new BadRequestException('Receipt contains a variant that is not on this transfer');
       }
+      const recordedAt = new Date();
+      const receiptMovement = { type: MovementType.TRANSFER_RECEIPT, receipt: { id: randomUUID(), recordedAt } };
       for (const [variantId, receipt] of receipts) {
         const line = transferLines.get(variantId)!;
         const dispatched = line.dispatchedQtyBase ?? 0;
@@ -672,7 +674,7 @@ export class TransfersService {
             locationId: transfer.sourceLocationId,
             variantId,
             actorId: actor.userId,
-            type: MovementType.TRANSFER_RECEIPT,
+            ...receiptMovement,
             stockState: StockState.IN_TRANSIT,
             quantityBaseUnits: -receivedWithinDispatch,
             referenceType: 'transfer', referenceId: id,
@@ -684,7 +686,7 @@ export class TransfersService {
             locationId: transfer.destLocationId,
             variantId,
             actorId: actor.userId,
-            type: MovementType.TRANSFER_RECEIPT,
+            ...receiptMovement,
             stockState: StockState.AVAILABLE,
             quantityBaseUnits: availableQty,
             referenceType: 'transfer', referenceId: id,
@@ -695,7 +697,7 @@ export class TransfersService {
             locationId: transfer.destLocationId,
             variantId,
             actorId: actor.userId,
-            type: MovementType.TRANSFER_RECEIPT,
+            ...receiptMovement,
             stockState: StockState.QUARANTINED,
             quantityBaseUnits: damaged,
             referenceType: 'transfer', referenceId: id,
@@ -707,7 +709,7 @@ export class TransfersService {
             locationId: transfer.sourceLocationId,
             variantId,
             actorId: actor.userId,
-            type: MovementType.TRANSFER_RECEIPT,
+            ...receiptMovement,
             stockState: StockState.IN_TRANSIT,
             quantityBaseUnits: -short,
             referenceType: 'transfer_shortage', referenceId: id,
@@ -719,7 +721,7 @@ export class TransfersService {
             locationId: transfer.destLocationId,
             variantId,
             actorId: actor.userId,
-            type: MovementType.TRANSFER_RECEIPT,
+            ...receiptMovement,
             stockState: StockState.QUARANTINED,
             quantityBaseUnits: excess,
             referenceType: 'transfer_excess', referenceId: id,
@@ -743,7 +745,7 @@ export class TransfersService {
       const status = this.calculateStatus(transfer.status, updatedLines);
       return tx.transfer.update({
         where: { id },
-        data: { status, receivedByUserId: actor.userId, receivedAt: new Date() },
+        data: { status, receivedByUserId: actor.userId, receivedAt: recordedAt },
         include: transferInclude,
       });
     });

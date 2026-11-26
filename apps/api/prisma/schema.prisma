@@ -421,6 +421,7 @@ model InventoryMovement {
   quantityBaseUnits Int          @map("quantity_base_units") // positive=inflow, negative=outflow
   referenceType     String?      @map("reference_type") // "invoice", "transfer", "audit", etc.
   referenceId       String?      @map("reference_id") // FK to source document
+  receiptId         String?      @map("receipt_id") @db.Uuid
   actorId           String       @map("actor_id")
   notes             String?
   createdAt         DateTime     @default(now()) @map("created_at")

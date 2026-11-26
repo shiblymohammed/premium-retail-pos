@@ -91,6 +91,7 @@ export type TableData = {
   description: string;
   headers: string[];
   rows: string[][];
+  csvColumn?: { header: string; values: string[] };
 };
 
 export function formatMoney(currency: string, amount: number, fractionDigits = 2) {

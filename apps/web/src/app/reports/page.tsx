@@ -354,7 +354,7 @@ export default function ReportsPage() {
     setNotice(failed ? failed.message || 'Some alerts could not be marked as read.' : 'All operational notifications marked as read.');
   }
 
-  function getExportData(invoiceRows = salesDetails?.rows ?? []) {
+  function getExportData(invoiceRows = salesDetails?.rows ?? [], includeCsvColumn = false) {
     let headers: string[] = [];
     let rows: unknown[][] = [];
 
@@ -382,7 +382,13 @@ export default function ReportsPage() {
         .sort((first, second) => Number(first[4]) - Number(second[4]));
     }
     if (report === 'cancellations') headers = headers.map((header) => header === 'Net total' ? `Net total (${currency})` : header);
-    return { headers, rows: rows.filter((row) => matches(...row.map((value) => String(value ?? '')))) };
+    const csvColumn = includeCsvColumn && report === 'transferDiscrepancies' ? tableData?.csvColumn : undefined;
+    return {
+      headers: csvColumn ? [...headers, csvColumn.header] : headers,
+      rows: rows.flatMap((row, index) => matches(...row.map((value) => String(value ?? '')))
+        ? [csvColumn ? [...row, csvColumn.values[index]] : row]
+        : []),
+    };
   }
 
   async function exportReport(format: 'PDF' | 'CSV') {
@@ -394,7 +400,7 @@ export default function ReportsPage() {
       const invoiceRows = report === 'salesDetails'
         ? await requestData<SalesDetails['rows']>(`/reports/sales-details/export?${reportParams(from, to, locationId, timezone)}`, token, new AbortController().signal)
         : undefined;
-      const { headers, rows } = getExportData(invoiceRows);
+      const { headers, rows } = getExportData(invoiceRows, format === 'CSV');
       const filename = `Premium-Retail-Report-${report}-${from}-to-${to}.csv`;
       if (format === 'PDF') {
         const title = report === 'overview' ? 'Store performance overview' : reportLabel;

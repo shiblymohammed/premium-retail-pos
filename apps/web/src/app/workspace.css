@@ -198,7 +198,7 @@ body { font-family: var(--retail-font); background: var(--retail-canvas); color:
 .pos-shell .checkout-modal { border-radius: 22px; }
 .pos-shell .checkout-due { background: var(--retail-accent-soft); color: var(--retail-accent-strong); border-color: var(--retail-accent-line); }
 .pos-shell .receipt-overlay, .pos-shell .checkout-modal-backdrop, .pos-shell .offline-drawer-backdrop { z-index: 110; }
-.pos-basket-jump { display: none; }
+.pos-mobile-basket-bar { display: none; }
 @media (max-width: 930px) and (min-width: 761px) {
   .pos-content { grid-template-columns: minmax(0, 1fr) minmax(302px, .8fr); gap: 10px; }
 }
@@ -211,7 +211,15 @@ body { font-family: var(--retail-font); background: var(--retail-canvas); color:
   .product-tile { min-height: 136px; }
   .tile-add-button { width: 44px; min-height: 44px; height: 44px; }
   .product-tile-info { padding-right: 28px; }
-  .pos-basket-jump { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; min-height: 44px; padding: 8px 12px; border-radius: 999px; color: var(--retail-accent-strong); background: var(--retail-accent-soft); font-size: 13px; font-weight: 800; text-decoration: none; }
+  .pos-mobile-basket-bar { display: block; position: sticky; top: 0; z-index: 4; padding: 4px 0; background: var(--retail-canvas); }
+  .pos-basket-jump {
+    display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 12px;
+    border: 1px solid var(--retail-accent-line); border-radius: 12px; color: var(--retail-accent-strong);
+    background: var(--retail-accent-soft); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+  }
+  .pos-basket-jump svg { flex-shrink: 0; }
+  .pos-basket-jump strong { margin-inline-start: auto; font-variant-numeric: tabular-nums; }
+  #pos-basket-title { scroll-margin-top: 64px; }
   .basket-panel { scroll-margin-top: 12px; }
   .pos-shell .keyboard-cues { display: none; }
   .pos-shell .quantity-control { height: 36px; }
@@ -380,7 +388,6 @@ body { font-family: var(--retail-font); background: var(--retail-canvas); color:
 .pos-shell .receipt-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 760px) {
   .pos-shell .basket-footer { position: sticky; bottom: 0; z-index: 1; }
-  .pos-shell #pos-basket { scroll-margin-top: 12px; }
 }
 
 .pos-shell .product-tile {

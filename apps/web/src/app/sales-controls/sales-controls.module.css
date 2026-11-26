@@ -202,15 +202,6 @@
 .totalNet { padding-top: 8px; border-top: 1px dashed var(--retail-edge-strong); font-size: 15px; font-weight: 700; color: var(--ink); }
 .totalMeta { font-size: 11.5px; color: var(--muted); }
 
-.history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.history li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
-.history li > div { flex: 1; min-width: 0; }
-.history strong { display: block; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
-.history small { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); }
-.historyIcon { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; }
-.historyAmount { display: flex; flex-direction: column; align-items: flex-end; flex-shrink: 0; }
-.historyAmount b { font-size: 14px; }
-
 /* Action panel */
 .segmented { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: var(--retail-edge); }
 .segmented button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; border: none; border-radius: 11px; background: transparent; color: var(--retail-muted); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer; }
@@ -235,7 +226,7 @@
 .returnName { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .returnName strong { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .returnName small { font-size: 12px; color: var(--muted); }
-.returnPrice { font-size: 13px; font-weight: 600; }
+.returnPrice { max-width: 130px; color: var(--ink); font-size: 12px; font-weight: 600; text-align: right; }
 .returnDetail { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px 46px; }
 .returnRow { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .returnRow label, .condition { display: flex; flex-direction: column; gap: 4px; }

@@ -5,6 +5,7 @@ import { downloadPdf } from '@/lib/report-download';
 import { useAccess } from '@/lib/permissions';
 import { AdminModal } from '@/components/admin/admin-modal';
 import { CashDrawer } from './cash-drawer';
+import { ReturnHistory, soldUnitPrice, type SaleReturnRecord } from '@/components/sales/return-history';
 import { InfoHint } from '@/components/ui/info-hint';
 import {
   ArrowRight,
@@ -124,7 +125,7 @@ type SaleControlInvoice = {
     lineTotal: string;
     variant: { id: string; sku: string; name: string; product: { name: string; baseUnit: string } };
   }>;
-  returns: Array<{ returnNumber: string; reason: string; processedAt: string; refund?: { amount: string; method: string } | null }>;
+  returns: SaleReturnRecord[];
   permissions: { canCancelSales: boolean; canProcessReturns: boolean };
 };
 
@@ -339,6 +340,7 @@ export default function PosTerminal() {
   const customerButton = useRef<HTMLButtonElement>(null);
   const [clearBasketOpen, setClearBasketOpen] = useState(false);
   const clearBasketButton = useRef<HTMLButtonElement>(null);
+  const basketHeading = useRef<HTMLHeadingElement>(null);
   const [lastReceipt, setLastReceipt] = useState<SaleReceipt | null>(null);
   const [removingVariantId, setRemovingVariantId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1290,6 +1292,16 @@ export default function PosTerminal() {
             }}>Change store</button>}
         </div>
         {canCreateSale && <>
+        <div className="pos-mobile-basket-bar">
+          <button type="button" className="pos-basket-jump" onClick={() => {
+            basketHeading.current?.focus({ preventScroll: true });
+            basketHeading.current?.scrollIntoView({ block: 'start' });
+          }}>
+            <ShoppingCart size={16} aria-hidden="true" />
+            <span>Basket ({basketQuantity})</span>
+            <strong>{formatMoney(saleTotals.net)}</strong>
+          </button>
+        </div>
         <section className="catalog-panel">
           <div className="catalog-search-area">
             <div className="search-wrap">
@@ -1317,7 +1329,7 @@ export default function PosTerminal() {
           <section className="catalog-browser">
             <div className="catalog-heading">
               <div><div className="eyebrow">SALES FLOOR</div><h1>Products <span>({results.length})</span></h1></div>
-              <div className="catalog-controls"><a className="pos-basket-jump" href="#pos-basket"><ShoppingCart size={16} aria-hidden="true" /> Basket ({cart.reduce((sum, line) => sum + baseQuantity(line), 0)})</a><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
+              <div className="catalog-controls"><label className="sort-control"><span>Sort</span><select value={catalogSort} onChange={(event) => setCatalogSort(event.target.value as typeof catalogSort)} aria-label="Sort products"><option value="name">Product name</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
             </div>
             <div className="category-chips" aria-label="Product categories">
               <button className={selectedCategory === 'All categories' ? 'active' : ''} onClick={() => setSelectedCategory('All categories')}>All categories</button>
@@ -1353,9 +1365,9 @@ export default function PosTerminal() {
           </section>
         </section>
 
-        <aside className="basket-panel" id="pos-basket" aria-label="Current basket" tabIndex={-1}>
+        <aside className="basket-panel" aria-labelledby="pos-basket-title">
           <div className="basket-heading">
-            <div><h2>Current basket</h2><small>{terminal.location.name}</small></div>
+            <div><h2 id="pos-basket-title" ref={basketHeading} tabIndex={-1}>Current basket</h2><small>{terminal.location.name}</small></div>
             <div className="basket-heading-actions">
               <span className="item-count">{basketQuantity} {basketUnits.size === 1 ? [...basketUnits][0] + (basketQuantity === 1 ? '' : 's') : 'base units'}</span>
               <button ref={clearBasketButton} className="clear-basket-button" disabled={checkoutDisabledForClear} onClick={() => setClearBasketOpen(true)}>Clear basket</button>
@@ -1481,7 +1493,11 @@ export default function PosTerminal() {
               <div className="invoice-control-heading"><strong>{saleControl.invoiceNumber}</strong><span>{saleControl.status} · {saleControl.location.name}</span></div>
               {saleControl.cancellationReason && <p className="field-hint">Cancelled {saleControl.cancelledAt ? `on ${new Date(saleControl.cancelledAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })}` : ''}: {saleControl.cancellationReason}</p>}
               <div className="invoice-control-totals"><span>Total {formatMoney(saleControl.netTotal, saleControl.location.company?.currency)}</span><span>Paid by {saleControl.payment?.method || 'unknown'}</span></div>
-              {saleControl.returns.map((saleReturn) => <div className="prior-return" key={saleReturn.returnNumber}>{saleReturn.returnNumber} · {saleReturn.refund ? `Manual refund ${formatMoney(saleReturn.refund.amount, saleControl.location.company?.currency)} (${saleReturn.refund.method})` : 'No money refunded'}</div>)}
+              {saleControl.returns.length > 0 && <ReturnHistory
+                returns={saleControl.returns} saleLines={saleControl.lines}
+                money={(amount) => formatMoney(amount, saleControl.location.company?.currency)}
+                timezone={saleControl.location.company?.timezone}
+              />}
               {saleControl.status === 'FINALIZED' && <>
                 <label className="control-field">Reason<textarea value={controlReason} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setControlReason(event.target.value)} placeholder="Required: record why this action is being taken" /></label>
                 {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <label className="offline-confirm"><input type="checkbox" checked={confirmedGoodsReturned} disabled={saleControlRetryPending} onChange={(event) => setConfirmedGoodsReturned(event.target.checked)} /> I confirm all goods are physically back at this store.</label>}
@@ -1503,7 +1519,8 @@ export default function PosTerminal() {
                     : line.enteredUnit === 'mixed' ? 'cartons and loose items' : `${line.quantityBaseUnits} ${unit}${line.quantityBaseUnits === 1 ? '' : 's'}`;
                   const label = `line ${index + 1}, ${line.variant.product.name}, sold as ${soldAs}`;
                   return <div className="return-line-entry" key={line.id}>
-                    <span>{line.variant.product.name} · {line.variant.name}<small>Sold as {soldAs} · {remaining} {unit}{remaining === 1 ? '' : 's'} remaining · {line.variant.sku}</small></span>
+                    <span>{line.variant.product.name} · {line.variant.name}<small>Sold as {soldAs} · {remaining} {unit}{remaining === 1 ? '' : 's'} remaining · {line.variant.sku}</small>
+                      <small>{soldUnitPrice(line, (amount) => formatMoney(amount, saleControl.location.company?.currency))}</small></span>
                     <input aria-label={`Return quantity in ${unit}s for ${label}`} type="number" min="0" max={remaining} value={selection.quantity} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, quantity: event.target.value } }))} />
                     <select aria-label={`Disposition for ${label}`} value={selection.disposition} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, disposition: event.target.value as 'RESTOCKED' | 'QUARANTINED' } }))}><option value="QUARANTINED">Quarantine</option><option value="RESTOCKED">Inspected and restock</option></select>
                     <input aria-label={`Inspection notes for ${label}`} value={selection.inspectionNotes} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, inspectionNotes: event.target.value } }))} placeholder="Inspection notes (required)" />

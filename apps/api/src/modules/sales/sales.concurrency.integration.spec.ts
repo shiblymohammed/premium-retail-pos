@@ -203,4 +203,36 @@ const isolatedTestDatabase = (() => {
     await expect(reports.transferDiscrepancies({ locationId: source.id, from, to }, actor)).rejects.toThrow(/authorized/);
   });
 
+  it('groups movements from one receipt by ID and keeps a later receipt separate', async () => {
+    const destination = await prisma.location.findUniqueOrThrow({ where: { id: locationId } });
+    const source = await prisma.location.create({
+      data: { companyId: destination.companyId, name: `Batch warehouse ${suffix}`, type: 'MAIN_WAREHOUSE' },
+    });
+    const receivedAt = new Date('2026-02-03T04:05:06.100Z');
+    const transfer = await prisma.transfer.create({
+      data: { transferNumber: `BATCH-${suffix}`, requestedByUserId: cashierId,
+        sourceLocationId: source.id, destLocationId: destination.id, status: 'PARTIALLY_DISPATCHED' },
+    });
+    const firstReceiptId = randomUUID();
+    const laterReceiptId = randomUUID();
+    const movement = { variantId, locationId, actorId: cashierId, type: MovementType.TRANSFER_RECEIPT,
+      stockState: StockState.QUARANTINED, referenceId: transfer.id, notes: 'Damaged box' };
+    await prisma.inventoryMovement.createMany({ data: [
+      { ...movement, receiptId: firstReceiptId, referenceType: 'transfer', quantityBaseUnits: 1, createdAt: receivedAt },
+      { ...movement, receiptId: firstReceiptId, referenceType: 'transfer_excess', quantityBaseUnits: 2,
+        createdAt: new Date('2026-02-03T04:05:06.113Z') },
+      { ...movement, receiptId: laterReceiptId, referenceType: 'transfer', quantityBaseUnits: 3,
+        createdAt: new Date('2026-02-03T04:05:06.114Z') },
+    ] });
+    const reports = new ReportsService(prisma as any, inventory);
+    const actor = { userId: cashierId, role: Role.STORE_MANAGER, email: 'report-fixture@example.test', locationIds: [locationId] };
+    const events = await reports.transferDiscrepancies({
+      locationId, from: '2026-02-03T00:00:00Z', to: '2026-02-04T00:00:00Z',
+    }, actor);
+    expect(events).toMatchObject([
+      { transferId: transfer.id, receiptId: laterReceiptId, damaged: 3, short: 0, excess: 0, note: 'Damaged box' },
+      { transferId: transfer.id, receiptId: firstReceiptId, receivedAt, damaged: 1, short: 0, excess: 2, note: 'Damaged box' },
+    ]);
+  });
+
 });

@@ -67,7 +67,7 @@ interface ReceiptSummary {
 }
 
 type ReceiptDiscrepancy = {
-  variantId: string; receivedAt: string; short: number; damaged: number; excess: number; note: string | null;
+  receiptId?: string | null; variantId: string; receivedAt: string; short: number; damaged: number; excess: number; note: string | null;
 };
 
 type ReceiptQuantity = { received: number; damaged: number; closeShortage: boolean };
@@ -1045,7 +1045,7 @@ export default function OperationsPage() {
                               }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{shipmentQuantity(value, item.baseUnit, item.unitsPerCarton)}</dd></div>)}
                             </dl>
                             {(t.receiptDiscrepancies ?? []).filter((event) => event.variantId === item.variantId).map((event, index) =>
-                              <p className={styles.receiptNote} key={index}>
+                              <p className={styles.receiptNote} key={event.receiptId ?? index}>
                                 <strong>{transferTime(event.receivedAt, t.timezone)}</strong>
                                 {' · '}{event.damaged} damaged · {event.short} missing · {event.excess} excess
                                 {event.note && <span>{event.note}</span>}

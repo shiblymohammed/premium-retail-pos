@@ -1,5 +1,6 @@
 'use client';
 
+import { countInUnit, ReturnHistory, soldPackaging, soldUnitPrice, type SaleReturnRecord } from '@/components/sales/return-history';
 import { CashDrawer } from '../cash-drawer';
 import { Feedback } from '@/components/ui/feedback';
 import {
@@ -56,29 +57,6 @@ type InvoiceLine = {
       baseUnit: string;
     };
   };
-};
-
-function soldPackaging(line: InvoiceLine) {
-  const base = line.variant.product.baseUnit;
-  const ratio = line.conversionRatioUsed;
-  if (line.enteredUnit === 'carton' && ratio) {
-    const cartons = line.quantityBaseUnits / ratio;
-    return `${cartons} ${cartons === 1 ? 'carton' : 'cartons'} · ${ratio} ${base} per carton`;
-  }
-  return line.enteredUnit === 'mixed' && ratio
-    ? `Cartons and loose units · ${ratio} ${base} per carton`
-    : `${line.quantityBaseUnits} ${base}${line.quantityBaseUnits === 1 ? '' : 's'}`;
-}
-
-type SaleReturnRecord = {
-  returnNumber: string;
-  createdAt?: string;
-  itemsSummary?: string;
-  refund?: {
-    amount: string;
-    method: string;
-    reference?: string;
-  } | null;
 };
 
 type Invoice = {
@@ -607,9 +585,9 @@ export default function SalesControlsPage() {
                 {invoice.lines.map((line) => (
                   <div key={line.id} className={styles.lineRow}>
                     <span className={styles.lineName}><span className={styles.lineThumb}><Icon name="box" size={15} /></span><span><strong>{line.variant.product.name}</strong><small>{line.variant.name} · {line.variant.sku}</small><small>{soldPackaging(line)}</small></span></span>
-                    <span className={styles.num}>{line.quantityBaseUnits}</span>
-                    <span className={`${styles.num} ${line.returnedQuantityBaseUnits ? styles.amberText : styles.mutedText}`}>{line.returnedQuantityBaseUnits}</span>
-                    <span className={styles.num}>{currency(line.unitPriceAtSale)}</span>
+                    <span className={styles.num}>{countInUnit(line.quantityBaseUnits, line.variant.product.baseUnit)}</span>
+                    <span className={`${styles.num} ${line.returnedQuantityBaseUnits ? styles.amberText : styles.mutedText}`}>{countInUnit(line.returnedQuantityBaseUnits, line.variant.product.baseUnit)}</span>
+                    <span className={styles.num}>{soldUnitPrice(line, currency)}</span>
                   </div>
                 ))}
               </div>
@@ -624,20 +602,9 @@ export default function SalesControlsPage() {
 
             <article className={styles.card}>
               <div className={styles.cardHead}><div><h2>Return history</h2><p>{invoice.returns.length ? `${invoice.returns.length} return${invoice.returns.length === 1 ? '' : 's'} on this bill` : 'Nothing has been returned from this bill yet.'}</p></div></div>
-              {invoice.returns.length > 0 && (
-                <ul className={styles.history}>
-                  {invoice.returns.map((ret) => (
-                    <li key={ret.returnNumber}>
-                      <span className={`${styles.historyIcon} ${styles.toneBlue}`}><Icon name="return" size={14} /></span>
-                      <div>
-                        <strong>{ret.returnNumber}</strong>
-                        <small>{ret.itemsSummary || 'Returned items'}{ret.createdAt ? ` · ${when(ret.createdAt)}` : ''}</small>
-                      </div>
-                      <span className={styles.historyAmount}><b>{currency(ret.refund?.amount || '0')}</b><small>{ret.refund?.method}{ret.refund?.reference ? ` · ${ret.refund.reference}` : ''}</small></span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {invoice.returns.length > 0 && <ReturnHistory
+                returns={invoice.returns} saleLines={invoice.lines} money={currency} timezone={invoice.location.company.timezone}
+              />}
             </article>
           </div>
 
@@ -675,8 +642,8 @@ export default function SalesControlsPage() {
                           <div key={line.id} className={`${styles.returnItem} ${sel.selected ? styles.returnOn : ''} ${!eligible ? styles.returnOff : ''}`}>
                             <button type="button" className={styles.returnPick} onClick={() => eligible && updateLine(line.id, { selected: !sel.selected })} disabled={!eligible} aria-pressed={sel.selected}>
                               <span className={styles.check}>{sel.selected && <Icon name="check" size={12} />}</span>
-                              <span className={styles.returnName}><strong>{line.variant.product.name}</strong><small>{soldPackaging(line)}</small><small>{eligible ? `${remaining} of ${line.quantityBaseUnits} can be returned` : 'Already fully returned'}</small></span>
-                              <span className={styles.returnPrice}>{currency(line.unitPriceAtSale)}</span>
+                              <span className={styles.returnName}><strong>{line.variant.product.name}</strong><small>{soldPackaging(line)}</small><small>{eligible ? `${countInUnit(remaining, line.variant.product.baseUnit)} can be returned` : 'Already fully returned'}</small></span>
+                              <span className={styles.returnPrice}>{soldUnitPrice(line, currency)}</span>
                             </button>
                             {sel.selected && (
                               <div className={styles.returnDetail}>
