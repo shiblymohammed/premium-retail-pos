@@ -6,25 +6,26 @@ import { getStoredSession } from '@/lib/auth';
 import { OutletStaffEditor } from './outlet-staff-editor';
 import { AdminModal } from '@/components/admin/admin-modal';
 import { Feedback } from '@/components/ui/feedback';
-import { money, payFields, staffRequest, deactivateStaff, type PayrollRow } from './records-api';
+import { money, payrollBreakdown, staffRequest, deactivateStaff, type PayrollRow } from './records-api';
 import styles from './records.module.css';
 
 type DirectoryEntry = { id: string; firstName: string; lastName: string; employeeCode: string; location: { name: string } };
 type Loan = {
   id: string; kind: string; amount: string; monthlyInstallment: string | null; outstanding: string;
   terms: string | null; status: string; collectible: string; scheduled: string | null;
-  repayments: Array<{ id: string; amount: string; status: string; isPayrollDeduction: boolean; payrollId: string | null; paymentDate: string }>;
+  repayments: Array<{ id: string; amount: string; status: string; isPayrollDeduction: boolean; payrollId: string | null; payrollPeriod?: string | null; paymentReference?: string | null; paymentDate: string }>;
 };
 type Comparison = {
   includeSales: boolean; includeCash: boolean;
   rows: Array<{ id: string; firstName: string; lastName: string; location: string; currency: string;
-    late: number; sales: string | null; shortages: string | null }>;
+    role: string; daysPresent: number; late: number; overtimeMinutes: number; sales: string | null; shortages: string | null;
+    bills: number | null; averageBill: string | null; returns: number | null; discounts: string | null }>;
 };
 const emptyLoan = { kind: 'LOAN', amount: '', monthlyInstallment: '0', terms: '' };
-const payrollInputs = { allowances: '0', bonus: '0', deductions: '0', advanceRecovery: '0',
+const payrollInputs = { allowances: '0', bonus: '0', deductions: '0',
   overtimeHourlyRate: '0', lateDayDeduction: '0', absentDayDeduction: '0' };
 const entryFields = {
-  base: 'Basic pay', allowances: 'Allowances', bonus: 'Bonus', deductions: 'Other deductions', advanceRecovery: 'Manual recovery',
+  base: 'Basic pay', allowances: 'Allowances', bonus: 'Bonus', deductions: 'Other deductions',
   overtimeHourlyRate: 'Overtime hourly rate', lateDayDeduction: 'Deduction per late day', absentDayDeduction: 'Deduction per absent day',
 } as const;
 
@@ -245,12 +246,18 @@ export default function StaffRecordsPage() {
             </select></label>
           </div>
           <div className={styles.scroll} tabIndex={0} role="region" aria-label="Monthly staff comparison">
-            <table><thead><tr><th>Employee</th><th>Workplace</th><th>Late arrivals</th>
-              {comparison.includeSales && <th>Billed sales</th>}{comparison.includeCash && <th>Cash shortages</th>}
+            <table><thead><tr><th>Employee</th><th>Role and workplace</th><th>Days present</th><th>Late arrivals</th><th>Overtime</th>
+              {comparison.includeSales && <><th>Bills</th><th>Billed sales</th><th>Average bill</th><th>Returns</th><th>Discounts</th></>}
+              {comparison.includeCash && <th>Cash shortages</th>}
             </tr></thead><tbody>{[...comparison.rows].sort((a, b) => Number(b[order]) - Number(a[order])).map((row) =>
               <tr key={row.id}><th scope="row"><button type="button" className="admin-secondary" disabled={busy || !!editor}
-                onClick={() => setSelected(row.id)}>{row.firstName} {row.lastName}</button></th><td>{row.location}</td><td>{row.late}</td>
-                {comparison.includeSales && <td>{money(row.sales ?? 0, row.currency)}</td>}
+                onClick={() => setSelected(row.id)}>{row.firstName} {row.lastName}</button></th>
+                <td>{row.role?.replaceAll('_', ' ')}<br /><small>{row.location}</small></td>
+                <td>{row.daysPresent ?? '—'}</td><td>{row.late}</td>
+                <td>{row.overtimeMinutes == null ? '—' : `${Math.floor(row.overtimeMinutes / 60)}h ${row.overtimeMinutes % 60}m`}</td>
+                {comparison.includeSales && <><td>{row.bills ?? '—'}</td><td>{money(row.sales ?? 0, row.currency)}</td>
+                  <td>{row.averageBill == null ? '—' : money(row.averageBill, row.currency)}</td><td>{row.returns ?? '—'}</td>
+                  <td>{row.discounts == null ? '—' : money(row.discounts, row.currency)}</td></>}
                 {comparison.includeCash && <td>{money(row.shortages ?? 0, row.currency)}</td>}</tr>)}</tbody>
             </table>
           </div>
@@ -309,7 +316,7 @@ export default function StaffRecordsPage() {
           <h2>Payroll</h2>
           {payroll ? <>
             <dl className={styles.facts}>{[
-              ...Object.entries(payFields).map(([key, label]) => [label, money(payroll[key as keyof typeof payFields] ?? 0, payroll.currency)]),
+              ...payrollBreakdown(payroll),
               ['Net pay', money(payroll.net, payroll.currency)],
               ['Status', payroll.paidAt ? `Paid · ${payroll.paymentReference}` : 'Pending payment'],
             ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
@@ -331,7 +338,7 @@ export default function StaffRecordsPage() {
                 <label key={date}><input type="checkbox" checked={schedule.includes(date)} aria-label={date}
                   onChange={(event) => setSchedule((previous) => event.target.checked ? [...previous, date] : previous.filter((day) => day !== date))} />{date.slice(-2)}</label>)}</div>
             </fieldset>
-            <p className={styles.muted}>Payroll uses recorded overtime and late arrivals with the rates entered here. Scheduled loan and advance recovery is added automatically.</p>
+            <p className={styles.muted}>Payroll uses recorded overtime and late arrivals with the rates entered here. To recover an advance or loan, queue a collection in Loans &amp; advances or set a monthly recovery on the loan.</p>
             <button className="admin-primary" disabled={busy}>Create payroll record</button>
           </form> : <p>No payroll record for this month.</p>}
         </section>}
@@ -375,7 +382,7 @@ export default function StaffRecordsPage() {
                 <td>{money(record.outstanding, currency)}</td><td>{record.status.replaceAll('_', ' ')}</td><td>{record.terms || '—'}</td>
                 <td><div className={styles.collectionActions}>
                   {record.repayments.length > 0 && <details><summary>{record.repayments.length} collection{record.repayments.length === 1 ? '' : 's'}</summary>
-                    <ul>{record.repayments.map((payment) => <li key={payment.id}>{money(payment.amount, currency)} · {payment.isPayrollDeduction ? payment.payrollId ? 'Payroll' : 'Queued for payroll' : 'Manual'} · {payment.status === 'CONFIRMED' ? localTime(payment.paymentDate) : 'Pending'}</li>)}</ul>
+                    <ul>{record.repayments.map((payment) => <li key={payment.id}>{money(payment.amount, currency)} · {payment.isPayrollDeduction ? payment.payrollId ? ['Payroll', payment.payrollPeriod].filter(Boolean).join(' ') : 'Queued for payroll' : 'Manual'}{payment.paymentReference && ` · ${payment.paymentReference}`} · {payment.status === 'CONFIRMED' ? localTime(payment.paymentDate) : 'Pending'}</li>)}</ul>
                   </details>}
                   {profile.canManagePayroll && record.status === 'ACTIVE' && Number(record.collectible) > 0 &&
                     <button type="button" className="admin-secondary" disabled={busy} onClick={() => setCollection({ loan: record, id: crypto.randomUUID(), method: 'MANUAL', amount: record.collectible, reference: '' })}>Collect repayment</button>}

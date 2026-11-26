@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma, Role } from '@prisma/client';
 import type { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { attendanceDay } from '../attendance/attendance.service';
+import { attendanceByShiftDate, attendanceDay } from '../attendance/attendance.service';
 import type { CreateUserWithEmployeeDto } from '../users/dto/create-user-with-employee.dto';
 import { UsersService, roleDefaults } from '../users/users.service';
 import type { UpdateEmployeeDto } from './dto';
@@ -26,6 +26,7 @@ const loanFields = {
   id: true, amount: true, status: true, monthlyInstallment: true, kind: true, issueDate: true, terms: true,
   repayments: { orderBy: { paymentDate: 'desc' }, select: {
     id: true, amount: true, status: true, payrollId: true, isPayrollDeduction: true, paymentDate: true,
+    payroll: { select: { period: true } },
   } },
 } satisfies Prisma.LoanSelect;
 
@@ -68,10 +69,11 @@ export class StaffRecordsService {
     const from = Prisma.sql`((${month + '-01'}::date)::timestamp AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
     const to = Prisma.sql`((${month + '-01'}::date + INTERVAL '1 month') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
     const previousFrom = Prisma.sql`((${month + '-01'}::date - INTERVAL '1 month') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
-    const [attendance, sales, drawers, payroll, baseSalary, loans] = await Promise.all([
+    const throughFollowingDay = Prisma.sql`((${month + '-01'}::date + INTERVAL '1 month 1 day') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
+    const [nearbyAttendance, sales, drawers, payroll, baseSalary, loans] = await Promise.all([
       this.prisma.$queryRaw<Array<{ id: string; at: Date; action: string; late: boolean; scheduledEndAt: Date | null }>>(Prisma.sql`
         SELECT id, punch_timestamp AS at, punch_type AS action, is_late AS late, scheduled_end_at AS "scheduledEndAt" FROM attendances
-        WHERE employee_id = ${id} AND location_id = ${staff.locationId} AND punch_timestamp >= ${from} AND punch_timestamp < ${to}
+        WHERE employee_id = ${id} AND location_id = ${staff.locationId} AND punch_timestamp >= ${from} AND punch_timestamp < ${throughFollowingDay}
         ORDER BY punch_timestamp
       `),
       this.prisma.$queryRaw<Array<{ bills: number; sales: string; previousSales: string; discounts: string; returns: number }>>(Prisma.sql`
@@ -97,8 +99,22 @@ export class StaffRecordsService {
       canSeePayroll ? this.prisma.employee.findUnique({ where: { id }, select: { monthlyBaseSalary: true } }) : undefined,
       canSeePayroll ? this.prisma.loan.findMany({ where: { employeeId: id }, select: loanFields, orderBy: { issueDate: 'desc' } }) : undefined,
     ]);
+    const manualPaymentIds = loans?.flatMap((loan) => loan.repayments.filter((payment) => !payment.isPayrollDeduction).map((payment) => payment.id)) ?? [];
+    const collectionEvents = manualPaymentIds.length ? await this.prisma.auditEvent.findMany({
+      where: { targetEntity: 'Repayment', action: 'STAFF_REPAYMENT_COLLECTED', targetId: { in: manualPaymentIds } },
+      select: { targetId: true, afterValue: true },
+    }) : [];
+    const collectionReferences = new Map<string, string>();
+    for (const event of collectionEvents) {
+      try {
+        const payload = JSON.parse(event.afterValue ?? 'null') as { reference?: unknown } | null;
+        if (typeof payload?.reference === 'string') collectionReferences.set(event.targetId, payload.reference);
+      } catch {
+        // Older audit entries may contain plain text.
+      }
+    }
     const breaks = await this.prisma.attendanceBreak.findMany({
-      where: { clockInId: { in: attendance.filter((punch) => punch.action === 'IN').map((punch) => punch.id) } },
+      where: { clockInId: { in: nearbyAttendance.filter((punch) => punch.action === 'IN').map((punch) => punch.id) } },
       select: { clockInId: true, startedAt: true, endedAt: true },
     });
     const breaksByShift = new Map<string, typeof breaks>();
@@ -108,16 +124,13 @@ export class StaffRecordsService {
       breaksByShift.set(pause.clockInId, shiftBreaks);
     }
     const totals = { workMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, earlyCheckouts: 0 };
-    const shiftsByDay = new Map<string, Array<{
-      punchType: string; punchTimestamp: Date; scheduledEndAt: Date | null; breaks?: typeof breaks;
-    }>>();
-    for (const punch of attendance) {
-      const day = localDay(punch.at, timezone);
-      const shifts = shiftsByDay.get(day) ?? [];
-      shifts.push({ punchType: punch.action, punchTimestamp: punch.at, scheduledEndAt: punch.scheduledEndAt, breaks: breaksByShift.get(punch.id) });
-      shiftsByDay.set(day, shifts);
-    }
-    for (const shifts of shiftsByDay.values()) {
+    const shiftsByDay = attendanceByShiftDate(nearbyAttendance.map((punch) => ({
+      ...punch, punchType: punch.action, punchTimestamp: punch.at, breaks: breaksByShift.get(punch.id),
+    })), timezone);
+    const attendance = [];
+    for (const [day, shifts] of shiftsByDay) {
+      if (!day.startsWith(month)) continue;
+      attendance.push(...shifts.map(({ id: punchId, at, action, late }) => ({ id: punchId, at, action, late })));
       const metrics = attendanceDay(shifts);
       totals.workMinutes += metrics.workMinutes;
       totals.breakMinutes += metrics.breakMinutes;
@@ -128,7 +141,10 @@ export class StaffRecordsService {
       drawers: actor.permissionOverrides?.['cash.reports'] === false ? undefined : drawers, payroll,
       baseSalary: baseSalary?.monthlyBaseSalary,
       loans: loans?.map(({ repayments, ...loan }) => ({
-        ...loan, repayments,
+        ...loan, repayments: repayments.map(({ payroll: collectionPayroll, ...payment }) => ({
+          ...payment, payrollPeriod: collectionPayroll?.period ?? null,
+          paymentReference: collectionReferences.get(payment.id) ?? null,
+        })),
         outstanding: loan.amount.sub(repayments.filter((item) => item.status === 'CONFIRMED')
           .reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
         collectible: loan.amount.sub(repayments.reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
@@ -142,26 +158,68 @@ export class StaffRecordsService {
     const includeCash = can(actor, 'cash.reports', (actor.role === Role.ADMIN || actor.role === Role.STORE_MANAGER));
     const scope = actor.role === Role.SUPER_ADMIN ? Prisma.empty : actor.locationIds.length
       ? Prisma.sql`AND e."location_id" IN (${Prisma.join(actor.locationIds)})` : Prisma.sql`AND FALSE`;
-    const rows = await this.prisma.$queryRaw<Array<{
-      id: string; firstName: string; lastName: string; location: string; currency: string;
-      late: number; sales: string | null; shortages: string | null;
+    const employees = await this.prisma.$queryRaw<Array<{
+      id: string; locationId: string; firstName: string; lastName: string; location: string;
+      timezone: string; currency: string; role: Role; sales: string | null; shortages: string | null;
+      bills: number | null; averageBill: string | null; returns: number | null; discounts: string | null;
     }>>(Prisma.sql`
-      SELECT e.id, e."first_name" AS "firstName", e."last_name" AS "lastName", l.name AS location, c.currency,
-        (SELECT COUNT(*)::int FROM attendances a WHERE a.employee_id = e.id AND a.location_id = l.id
-          AND a.punch_type = 'IN' AND a.is_late AND a.punch_timestamp >= bounds.start_at AND a.punch_timestamp < bounds.end_at) AS late,
-        ${includeSales ? Prisma.sql`(SELECT COALESCE(SUM(i.net_total), 0)::text FROM invoices i
-          WHERE i.cashier_user_id = e.user_id AND i.location_id = l.id AND i.status = 'FINALIZED'
-            AND i.created_at >= bounds.start_at AND i.created_at < bounds.end_at)` : Prisma.sql`NULL::text`} AS sales,
+      SELECT e.id, e."location_id" AS "locationId", e."first_name" AS "firstName", e."last_name" AS "lastName",
+        l.name AS location, c.currency, c.timezone, u.role,
+        ${includeSales ? Prisma.sql`billed.sales, billed.bills, billed."averageBill", billed.discounts,
+          (SELECT COUNT(*)::int FROM sale_returns r JOIN invoices original ON original.id = r.invoice_id
+            WHERE r.processed_by_user_id = e.user_id AND original.location_id = l.id
+              AND r.processed_at >= bounds.start_at AND r.processed_at < bounds.end_at) AS returns`
+          : Prisma.sql`NULL::text AS sales, NULL::int AS bills, NULL::text AS "averageBill", NULL::text AS discounts, NULL::int AS returns`},
         ${includeCash ? Prisma.sql`(SELECT COALESCE(SUM(GREATEST(d.expected_cash - d.counted_cash, 0)), 0)::text FROM cash_drawer_sessions d
-          WHERE d.operator_id = e.user_id AND d.location_id = l.id AND d.closed_at >= bounds.start_at AND d.closed_at < bounds.end_at)` : Prisma.sql`NULL::text`} AS shortages
+          WHERE d.operator_id = e.user_id AND d.location_id = l.id AND d.closed_at >= bounds.start_at AND d.closed_at < bounds.end_at)`
+          : Prisma.sql`NULL::text`} AS shortages
       FROM employees e JOIN locations l ON l.id = e.location_id JOIN companies c ON c.id = l.company_id
+      JOIN users u ON u.id = e.user_id
       CROSS JOIN LATERAL (
         SELECT ((${month + '-01'}::date)::timestamp AT TIME ZONE c.timezone) AT TIME ZONE 'UTC' AS start_at,
           ((${month + '-01'}::date + INTERVAL '1 month') AT TIME ZONE c.timezone) AT TIME ZONE 'UTC' AS end_at
       ) bounds
+      ${includeSales ? Prisma.sql`CROSS JOIN LATERAL (
+        SELECT COALESCE(SUM(i.net_total), 0)::text AS sales, COUNT(*)::int AS bills,
+          COALESCE(ROUND(AVG(i.net_total), 2), 0)::text AS "averageBill",
+          COALESCE(SUM(i.discount_total), 0)::text AS discounts
+        FROM invoices i WHERE i.cashier_user_id = e.user_id AND i.location_id = l.id AND i.status = 'FINALIZED'
+          AND i.created_at >= bounds.start_at AND i.created_at < bounds.end_at
+      ) billed` : Prisma.empty}
       WHERE TRUE ${scope}
       ORDER BY e.first_name, e.last_name
     `);
+    if (!employees.length) return { rows: [], includeSales, includeCash };
+
+    const [year, monthNumber] = month.split('-').map(Number);
+    const punches = await this.prisma.attendance.findMany({
+      where: {
+        employeeId: { in: employees.map((employee) => employee.id) },
+        punchTimestamp: { gte: new Date(Date.UTC(year, monthNumber - 1, 0)), lt: new Date(Date.UTC(year, monthNumber, 3)) },
+      },
+      select: {
+        employeeId: true, locationId: true, punchType: true, punchTimestamp: true, scheduledEndAt: true, isLate: true,
+        breaks: { select: { startedAt: true, endedAt: true } },
+      },
+      orderBy: { punchTimestamp: 'asc' },
+    });
+    const workplaces = new Map(employees.map((employee) => [employee.id, employee.locationId]));
+    const byEmployee = new Map<string, typeof punches>();
+    for (const punch of punches) {
+      if (workplaces.get(punch.employeeId) !== punch.locationId) continue;
+      const employeePunches = byEmployee.get(punch.employeeId) ?? [];
+      employeePunches.push(punch);
+      byEmployee.set(punch.employeeId, employeePunches);
+    }
+    const rows = employees.map(({ timezone, locationId, ...employee }) => {
+      const days = [...attendanceByShiftDate(byEmployee.get(employee.id) ?? [], timezone)]
+        .filter(([day]) => day.startsWith(month));
+      return {
+        ...employee, daysPresent: days.length,
+        late: days.filter(([, shifts]) => shifts.some((punch) => punch.punchType === 'IN' && punch.isLate)).length,
+        overtimeMinutes: days.reduce((sum, [, shifts]) => sum + attendanceDay(shifts).overtimeMinutes, 0),
+      };
+    });
     return { rows, includeSales, includeCash };
   }
 
@@ -302,6 +360,9 @@ export class StaffRecordsService {
 
   async recordPayroll(id: string, dto: PayrollDto, actor: RequestUser) {
     this.checkPayrollAccess(actor);
+    if (!new Prisma.Decimal(dto.advanceRecovery ?? 0).isZero()) {
+      throw new BadRequestException('To deduct a loan or advance from payroll, queue a collection for that loan in Staff records');
+    }
     const profile = await this.profile(id, dto.period, actor);
     const { staff } = profile;
     const timezone = staff.location.company.timezone;
@@ -331,9 +392,8 @@ export class StaffRecordsService {
           ] },
           select: loanFields, orderBy: [{ issueDate: 'asc' }, { id: 'asc' }],
         });
-        const manualRecovery = new Prisma.Decimal(dto.advanceRecovery);
         let remainingPay = new Prisma.Decimal(base).add(allowances).add(bonus).add(overtimePay)
-          .sub(deductions).sub(attendanceDeduction).sub(manualRecovery);
+          .sub(deductions).sub(attendanceDeduction);
         if (remainingPay.isNegative()) throw new BadRequestException('Deductions cannot exceed gross pay');
         const allocations: Array<{ loanId: string; amount: Prisma.Decimal }> = [];
         const scheduled: Array<{ id: string; amount: Prisma.Decimal }> = [];
@@ -355,13 +415,13 @@ export class StaffRecordsService {
             remainingPay = remainingPay.sub(amount);
           }
         }
-        const advanceRecovery = [...allocations, ...scheduled].reduce((sum, item) => sum.add(item.amount), manualRecovery);
+        const advanceRecovery = [...allocations, ...scheduled].reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0));
         if (advanceRecovery.gt(max)) throw new BadRequestException('Payroll recovery exceeds the supported amount');
         const record = await tx.payrollRecord.create({
           data: { period, base, allowances, bonus, deductions, advanceRecovery, overtimePay, attendanceDeduction,
             attendanceBasis: { overtimeMinutes: profile.overtimeMinutes, lateDays, scheduledDates, absences,
               overtimeHourlyRate: dto.overtimeHourlyRate ?? '0', lateDayDeduction: dto.lateDayDeduction ?? '0',
-              absentDayDeduction: dto.absentDayDeduction ?? '0', manualRecovery: manualRecovery.toFixed(2) },
+              absentDayDeduction: dto.absentDayDeduction ?? '0' },
             net: remainingPay, employeeId: id, currency: staff.location.company.currency, createdById: actor.userId,
             repayments: { create: allocations.map((allocation) => ({
               ...allocation, isPayrollDeduction: true, paymentDate: new Date(),

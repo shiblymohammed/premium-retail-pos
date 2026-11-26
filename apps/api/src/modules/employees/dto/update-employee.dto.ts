@@ -19,7 +19,7 @@ export class UpdateEmployeeDto {
   lastName?: string;
 
   @IsOptional() @IsString() @Matches(/^\+?[0-9][0-9\s().-]{6,19}$/)
-  phone?: string;
+  phone?: string | null;
 
   @IsOptional() @IsString() @MinLength(1)
   locationId?: string;

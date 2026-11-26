@@ -541,7 +541,7 @@ export default function AttendanceManagerPage() {
         <section className={styles.settings}>
           <div className={styles.settingBlock}>
             <h3><Icon name="clock" size={15} /> Shift hours</h3>
-            <p>The end time is saved when each employee clocks in. Breaks are excluded from worked time and overtime.</p>
+            <p>If the end time is earlier than the start time, the shift ends the next day. Breaks are excluded from worked time and overtime.</p>
             <div className={styles.inline}>
               <label>Shift start <input type="time" value={targetStartTime} onChange={(e) => setTargetStartTime(e.target.value)} aria-label="Shift start time" /></label>
               <label>Shift end <input type="time" value={targetEndTime} onChange={(e) => setTargetEndTime(e.target.value)} aria-label="Shift end time" /></label>

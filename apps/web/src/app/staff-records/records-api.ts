@@ -30,11 +30,11 @@ export async function staffRequest<T>(path: string, signal?: AbortSignal, body?:
 export type PayrollRow = {
   id: string; period: string; currency: string; base: string; allowances: string; bonus: string;
   overtimePay: string; attendanceDeduction: string;
-  attendanceBasis?: { overtimeMinutes: number; lateDays: number; absences: string[] } | null;
+  attendanceBasis?: { overtimeMinutes: number; lateDays: number; absences: string[]; manualRecovery?: string } | null;
   deductions: string; advanceRecovery: string; net: string; paidAt: string | null; paymentReference: string | null;
 };
 
-export const payFields = {
+const payFields = {
   base: 'Basic pay',
   allowances: 'Allowances',
   bonus: 'Bonus',
@@ -43,6 +43,17 @@ export const payFields = {
   deductions: 'Deductions',
   advanceRecovery: 'Advance or loan recovery',
 } as const;
+
+export function payrollBreakdown(record: PayrollRow) {
+  const legacyRecovery = Number(record.attendanceBasis?.manualRecovery ?? 0);
+  const rows: Array<[string, string]> = Object.entries(payFields).map(([field, label]) => {
+    const key = field as keyof typeof payFields;
+    const value = key === 'advanceRecovery' ? Number(record.advanceRecovery) - legacyRecovery : record[key];
+    return [label, money(value ?? 0, record.currency)];
+  });
+  if (legacyRecovery > 0) rows.push(['Historical unallocated deduction', money(legacyRecovery, record.currency)]);
+  return rows;
+}
 
 export function money(value: string | number, currency: string) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(Number(value));

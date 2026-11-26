@@ -87,6 +87,7 @@ interface StockTransfer {
 interface ReplenishmentRequest {
   id: string;
   requestNumber: string;
+  transfer?: { id: string; transferNumber: string; status: TransferStatus } | null;
   status: string;
   generatedByUserId: string;
   depotAuthorizedAt?: string | null;
@@ -228,6 +229,7 @@ export default function OperationsPage() {
   const { can } = useAccess(apiToken);
   const defaultManager = !isReceiver(apiRole) && apiRole !== 'INVENTORY';
   const canRequestTransfers = can('transfers.request', defaultManager || apiRole === 'INVENTORY');
+  const canGenerateDepotRestock = can('transfers.request', defaultManager);
   const canApproveTransfers = can('transfers.approve', defaultManager);
   const canDispatchTransfers = can('transfers.dispatch', defaultManager);
   const canReceiveTransfers = can('transfers.receive', apiRole !== 'INVENTORY');
@@ -780,7 +782,7 @@ export default function OperationsPage() {
           <p>{receiveOnly ? 'Check and receive stock at your assigned store.' : 'Send stock between locations, follow it on the road and receive it into inventory.'}</p>
         </div>
         {!receiveOnly && <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={!canRequestTransfers || !apiToken || openingRestock || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE'}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
+          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={!canRequestTransfers || !apiToken || openingRestock || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE' || (restockDestination.type === 'SUB_WAREHOUSE' && !canGenerateDepotRestock)}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
           <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={!canRequestTransfers || !apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
         </div>}
       </header>
@@ -1035,13 +1037,24 @@ export default function OperationsPage() {
             const canRelease = canApproveTransfers && canActAt(request.sourceLocation.id) &&
               request.generatedByUserId !== apiUserId && request.depotAuthorizedByUserId !== apiUserId;
             const isDraft = request.status === 'DRAFT';
+            const transferDraft = request.transfer?.status === 'DRAFT';
+            const pendingTransferApproval = request.transfer?.status === 'PENDING_APPROVAL';
+            const requestStatus = isDraft
+              ? isDepot ? needsDepot ? 'Awaiting depot authorization' : 'Awaiting main warehouse release' : 'Awaiting approval'
+              : request.status === 'REJECTED' ? 'Rejected'
+              : transferDraft ? 'Transfer draft ready' : pendingTransferApproval ? 'Transfer awaiting approval' : 'Transfer created';
             return <li className={styles.restockRow} key={request.id} id={`replenishment-${request.id}`}>
               <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
               <details className={styles.restockItems}><summary>{request.lines.length} product{request.lines.length === 1 ? '' : 's'}</summary>
                 <ul>{request.lines.map((line) => <li key={line.variantId}><strong>{line.variant?.product?.name ?? line.variant?.sku ?? 'Product'}</strong>
                   <small>{shipmentQuantity(line.managerApprovedQtyBase ?? line.systemSuggestedQtyBase, line.baseUnitSnapshot ?? 'unit', line.unitsPerCarton ?? 0)}</small></li>)}</ul>
               </details>
-              <span className={`${styles.status} ${isDraft ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{isDraft && isDepot ? needsDepot ? 'Awaiting depot authorization' : 'Awaiting main warehouse release' : isDraft ? 'Awaiting approval' : request.status === 'TRANSFER_CREATED' ? 'Transfer created' : 'Rejected'}</span>
+              <div>
+                <span className={`${styles.status} ${isDraft || transferDraft || pendingTransferApproval ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{requestStatus}</span>
+                {request.transfer && <small className={styles.nextStep}>{request.transfer.transferNumber}
+                  {transferDraft && ' · Submit the transfer for approval'}
+                  {pendingTransferApproval && ' · Approve the transfer before packing'}</small>}
+              </div>
               {isDraft && <span className={styles.rowActions}>
                 <button type="button" className={styles.actionButton} onClick={() => openReplenishment(request)} disabled={needsDepot ? !canSignOff : !canRelease}>{needsDepot ? 'Review and authorize' : isDepot ? 'Review and release' : 'Review quantities'}</button>
                 {!needsDepot && <button type="button" className={styles.ghostButton} onClick={() => setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) })} disabled={!canRelease}>Reject</button>}

@@ -42,12 +42,14 @@ export class TransfersController {
   }
 
   @Get('replenishment/sources/:destination')
+  @Roles(...MANAGER_ROLES, Role.INVENTORY)
   @Permission('transfers.request')
   async restockSources(@Param('destination', ParseUUIDPipe) destination: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.restockSources(destination, actor) };
   }
 
   @Post('replenishment/request')
+  @Roles(...MANAGER_ROLES, Role.INVENTORY)
   @Permission('transfers.request')
   async requestRestock(
     @Body() dto: CreateTransferDto,

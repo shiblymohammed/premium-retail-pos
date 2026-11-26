@@ -41,7 +41,7 @@ export function OutletStaffEditor({ staff, outlet = true, onSaved, onCancel }: {
     setSaving(true);
     setError('');
     const { email, password, role, ...contact } = values;
-    const profile = { ...contact, phone: contact.phone.trim() || undefined };
+    const profile = { ...contact, phone: contact.phone.trim() || (staff ? null : undefined) };
     try {
       const saved = await staffRequest<{ id: string }>(staff ? `/${staff.id}/${outlet ? 'outlet-profile' : 'profile'}` : '/outlet-staff', undefined,
         staff ? profile : { ...profile, email, password, role, locationId }, staff ? 'PATCH' : 'POST');

@@ -66,6 +66,32 @@ describe('AttendanceService basic daily punches', () => {
     expect(tx.attendance.create).not.toHaveBeenCalled();
   });
 
+  it('continues a shift after workplace midnight and keeps its overtime on the start date', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-15T21:30:00Z')); // 03:00 local on Nov 16
+    const clockIn = {
+      id: 'overnight-in', punchType: 'IN', punchTimestamp: new Date('2026-11-15T16:30:00Z'),
+      scheduledEndAt: new Date('2026-11-15T20:30:00Z'),
+      breaks: [{ startedAt: new Date('2026-11-15T19:00:00Z'), endedAt: new Date('2026-11-15T19:30:00Z') }],
+    };
+    const { service, tx } = setup([clockIn]);
+    await expect(service.getToday(actor)).resolves.toMatchObject({ status: 'WORKING', nextAction: 'OUT' });
+    await expect(service.punch(actor, 'OUT')).resolves.toMatchObject({ workMinutes: 270, breakMinutes: 30, overtimeMinutes: 60 });
+    const clockOut = { id: 'overnight-out', punchType: 'OUT', punchTimestamp: new Date() };
+    tx.attendance.findMany.mockResolvedValue([clockIn, clockOut]);
+    const history = await service.getMyHistory(actor);
+    expect(history.days.find((day) => day.date === '2026-11-15')).toMatchObject({ clockOutAt: clockOut.punchTimestamp, workMinutes: 270, overtimeMinutes: 60 });
+    expect(history.days.find((day) => day.date === '2026-11-16')).toMatchObject({ status: 'off', workMinutes: 0 });
+  });
+
+  it('saves the scheduled end on the following date for an overnight schedule', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-15T16:30:00Z')); // 22:00 local
+    const scheduled = { ...employee, location: { ...employee.location, attendanceStartTime: '22:00', attendanceEndTime: '02:00' } };
+    const { service } = setup([], scheduled);
+    await expect(service.punch(actor, 'IN')).resolves.toMatchObject({
+      punch: { scheduledEndAt: new Date('2026-11-15T20:30:00Z'), isLate: false },
+    });
+  });
+
   it('clocks back in without recording a second late arrival', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-11-15T09:00:00Z'));
     const { service, tx } = setup([

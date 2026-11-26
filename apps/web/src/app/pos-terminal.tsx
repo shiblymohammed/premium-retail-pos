@@ -104,7 +104,8 @@ type SaleControlInvoice = {
   id: string;
   invoiceNumber: string;
   status: string;
-  location: { id: string; name: string };
+  location: { id: string; name: string; company?: { timezone?: string; currency?: string } };
+  refundDrawer?: { requiredForCash: boolean; open: boolean; canManage: boolean };
   createdAt: string;
   cancelledAt: string | null;
   cancelledByUserId: string | null;
@@ -117,6 +118,8 @@ type SaleControlInvoice = {
     id: string;
     quantityBaseUnits: number;
     returnedQuantityBaseUnits: number;
+    enteredUnit?: string;
+    conversionRatioUsed?: number | null;
     unitPriceAtSale: string;
     lineTotal: string;
     variant: { id: string; sku: string; name: string; product: { name: string; baseUnit: string } };
@@ -295,6 +298,7 @@ export default function PosTerminal() {
   const [checkoutLocation, setCheckoutLocation] = useState('');
   const { can } = useAccess();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [refundDrawerOpen, setRefundDrawerOpen] = useState(false);
   const [returnsOpen, setReturnsOpen] = useState(false);
   const [cashDrawerId, setCashDrawerId] = useState<string | null>(null);
   const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
@@ -416,9 +420,9 @@ export default function PosTerminal() {
   const checkoutDisabled = auditBlocksCheckout || busy || !!removingVariantId || drawerBlocksCheckout || cart.length === 0 || cart.some((line) => !baseQuantity(line))
     || stockBlocksCheckout || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001);
 
-  const formatMoney = (amount: number | string) => new Intl.NumberFormat('en-IN', {
+  const formatMoney = (amount: number | string, currency = terminal?.location.currency || 'INR') => new Intl.NumberFormat('en-IN', {
     style: 'currency',
-    currency: terminal?.location.currency || 'INR',
+    currency,
     currencyDisplay: 'symbol',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -1103,6 +1107,11 @@ export default function PosTerminal() {
     }
   }
 
+  const updateRefundDrawer = useCallback((id: string | null) => {
+    setSaleControl((current) => current?.refundDrawer ?
+      { ...current, refundDrawer: { ...current.refundDrawer, open: Boolean(id) } } : current);
+  }, []);
+
   async function loadSaleControl(invoiceNumber = invoiceSearch) {
     if (!token || !invoiceNumber.trim()) return;
     setControlBusy(true);
@@ -1151,7 +1160,12 @@ export default function PosTerminal() {
       });
       if (!response.ok) {
         retainKey = response.status >= 500;
-        throw new Error(await readError(response));
+        const message = await readError(response);
+        if (response.status === 409 && message.includes('Open your cash drawer at this store')) {
+          updateRefundDrawer(null);
+          if (saleControl?.location.id === terminal?.location.id) setCashDrawerId(null);
+        }
+        throw new Error(message);
       }
       const payload = await response.json();
       pendingControlRef.current = null;
@@ -1169,7 +1183,7 @@ export default function PosTerminal() {
   async function cancelSale(invoice: SaleControlInvoice) {
     if (!controlReason.trim()) { setControlError('A cancellation reason is required.'); return; }
     if (!confirmedGoodsReturned) { setControlError('Confirm all goods are physically back at this store before cancellation.'); return; }
-    if (!window.confirm(`Cancel invoice ${invoice.invoiceNumber} and record a manual refund of ${formatMoney(invoice.netTotal)}?`)) return;
+    if (!window.confirm(`Cancel invoice ${invoice.invoiceNumber} and record a manual refund of ${formatMoney(invoice.netTotal, invoice.location.company?.currency)}?`)) return;
     try {
       await submitControlMutation('PATCH', `/sales/${invoice.id}/cancel`, {
         reason: controlReason.trim(), refundMethod, goodsReturnedToStore: true,
@@ -1250,6 +1264,9 @@ export default function PosTerminal() {
 
   const canCreateSale = can('sales.checkout', terminal.access?.checkout ?? true);
   const canOpenDrawer = can('cash.drawer', terminal.access?.drawer ?? true);
+  const refundAtTerminal = saleControl?.location.id === terminal.location.id && canOpenDrawer;
+  const refundNeedsDrawer = refundMethod === 'CASH' && saleControl?.refundDrawer?.requiredForCash &&
+    !(refundAtTerminal ? cashDrawerId : saleControl.refundDrawer.open) && !saleControlRetryPending;
 
   return (
     <main className="pos-shell">
@@ -1257,7 +1274,8 @@ export default function PosTerminal() {
         {!canCreateSale && <header><h1>Register tools</h1><p>{terminal.location.name}</p></header>}
         <div className="pos-history-actions">
           {canOpenDrawer && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id} timezone={terminal.location.timezone}
-            onDrawer={setCashDrawerId} formatMoney={formatMoney} isOpen={drawerOpen} onOpenChange={setDrawerOpen}
+            onDrawer={setCashDrawerId} formatMoney={formatMoney} isOpen={drawerOpen || (refundDrawerOpen && refundAtTerminal)}
+            onOpenChange={refundDrawerOpen && refundAtTerminal ? setRefundDrawerOpen : setDrawerOpen}
             canClose={!cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length} />}
         {canCreateSale && <button type="button" ref={customerButton} className="admin-secondary" onClick={() => setCustomerLookupOpen(true)}>Customers</button>}
           {can('sales.receipts', terminal.access?.receipts ?? true) && <button className="admin-secondary" type="button" onClick={() => { setReceiptHistory(null); setReceiptHistoryOpen(true); }}><ReceiptText size={16} /> Receipt history</button>}
@@ -1446,7 +1464,12 @@ export default function PosTerminal() {
         </aside>
         </>}
       </div>
-      {returnsOpen && <AdminModal isOpen title="Returns & cancellations" badgeIcon={<Undo2 size={22} />}
+      {refundDrawerOpen && saleControl && !refundAtTerminal && <CashDrawer
+        key={saleControl.location.id} api={API_BASE} token={token} locationId={saleControl.location.id}
+        timezone={saleControl.location.company?.timezone} onDrawer={updateRefundDrawer} formatMoney={(amount) => formatMoney(amount, saleControl.location.company?.currency)}
+        isOpen={refundDrawerOpen} onOpenChange={setRefundDrawerOpen} hideTrigger canClose={false}
+        closeHref={`/pos-terminal?locationId=${encodeURIComponent(saleControl.location.id)}`} />}
+      {returnsOpen && !refundDrawerOpen && <AdminModal isOpen title="Returns & cancellations" badgeIcon={<Undo2 size={22} />}
         subtitle="Find the original invoice to record a return or cancel the sale."
         onClose={() => { if (!controlBusy) setReturnsOpen(false); }} maxWidth="760px"
         footer={<button type="button" className="admin-secondary" disabled={controlBusy} onClick={() => setReturnsOpen(false)}>Done</button>}>
@@ -1457,25 +1480,35 @@ export default function PosTerminal() {
             {saleControl && <div className="invoice-control-card">
               <div className="invoice-control-heading"><strong>{saleControl.invoiceNumber}</strong><span>{saleControl.status} · {saleControl.location.name}</span></div>
               {saleControl.cancellationReason && <p className="field-hint">Cancelled {saleControl.cancelledAt ? `on ${new Date(saleControl.cancelledAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })}` : ''}: {saleControl.cancellationReason}</p>}
-              <div className="invoice-control-totals"><span>Total {formatMoney(saleControl.netTotal)}</span><span>Paid by {saleControl.payment?.method || 'unknown'}</span></div>
-              {saleControl.returns.map((saleReturn) => <div className="prior-return" key={saleReturn.returnNumber}>{saleReturn.returnNumber} · {saleReturn.refund ? `Manual refund ${formatMoney(saleReturn.refund.amount)} (${saleReturn.refund.method})` : 'No money refunded'}</div>)}
+              <div className="invoice-control-totals"><span>Total {formatMoney(saleControl.netTotal, saleControl.location.company?.currency)}</span><span>Paid by {saleControl.payment?.method || 'unknown'}</span></div>
+              {saleControl.returns.map((saleReturn) => <div className="prior-return" key={saleReturn.returnNumber}>{saleReturn.returnNumber} · {saleReturn.refund ? `Manual refund ${formatMoney(saleReturn.refund.amount, saleControl.location.company?.currency)} (${saleReturn.refund.method})` : 'No money refunded'}</div>)}
               {saleControl.status === 'FINALIZED' && <>
                 <label className="control-field">Reason<textarea value={controlReason} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setControlReason(event.target.value)} placeholder="Required: record why this action is being taken" /></label>
                 {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <label className="offline-confirm"><input type="checkbox" checked={confirmedGoodsReturned} disabled={saleControlRetryPending} onChange={(event) => setConfirmedGoodsReturned(event.target.checked)} /> I confirm all goods are physically back at this store.</label>}
                 <label className="control-field">Manual refund method<select value={refundMethod} disabled={saleControlRetryPending} onChange={(event) => setRefundMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE' | 'OTHER')}><option value="CASH">Cash</option><option value="CARD">Card (manual)</option><option value="ONLINE">Online (manual)</option><option value="OTHER">Other</option></select></label>
                 <label className="control-field">Refund reference (optional)<input value={refundReference} disabled={saleControlRetryPending} maxLength={120} onChange={(event) => setRefundReference(event.target.value)} placeholder="No card numbers" /></label>
-                {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <button className="danger-action-button" disabled={controlBusy} onClick={() => void cancelSale(saleControl)}>{saleControlRetryPending ? 'Retry same cancellation' : `Cancel sale · refund ${formatMoney(saleControl.netTotal)}`}</button>}
-                {saleControl.permissions.canProcessReturns && <div className="return-lines-form"><strong>Return inspected items</strong>{saleControl.lines.map((line) => {
+                {refundNeedsDrawer && <Feedback action={saleControl.refundDrawer?.canManage && <button type="button" className="admin-secondary"
+                  onClick={() => { setControlError(''); setRefundDrawerOpen(true); }}>Open cash drawer</button>}>
+                  {saleControl.refundDrawer?.canManage ? `Open your cash drawer at ${saleControl.location.name} before recording a cash refund.`
+                    : 'Ask a supervisor with drawer access at this store to record the cash refund.'}
+                </Feedback>}
+                {saleControl.permissions.canCancelSales && saleControl.returns.length === 0 && <button className="danger-action-button" disabled={controlBusy || refundNeedsDrawer} onClick={() => void cancelSale(saleControl)}>{saleControlRetryPending ? 'Retry same cancellation' : `Cancel sale · refund ${formatMoney(saleControl.netTotal, saleControl.location.company?.currency)}`}</button>}
+                {saleControl.permissions.canProcessReturns && <div className="return-lines-form"><strong>Return inspected items</strong>{saleControl.lines.map((line, index) => {
                   const remaining = line.quantityBaseUnits - line.returnedQuantityBaseUnits;
                   const selection = returnLines[line.id] || { quantity: '', disposition: 'QUARANTINED' as const, inspectionNotes: '' };
                   if (remaining < 1) return null;
+                  const unit = line.variant.product.baseUnit;
+                  const soldAs = line.enteredUnit === 'carton' && line.conversionRatioUsed
+                    ? `${line.quantityBaseUnits / line.conversionRatioUsed} ${line.quantityBaseUnits === line.conversionRatioUsed ? 'carton' : 'cartons'}`
+                    : line.enteredUnit === 'mixed' ? 'cartons and loose items' : `${line.quantityBaseUnits} ${unit}${line.quantityBaseUnits === 1 ? '' : 's'}`;
+                  const label = `line ${index + 1}, ${line.variant.product.name}, sold as ${soldAs}`;
                   return <div className="return-line-entry" key={line.id}>
-                    <span>{line.variant.product.name} · {line.variant.name}<small>{remaining} {line.variant.product.baseUnit} remaining · {line.variant.sku}</small></span>
-                    <input aria-label={`Return quantity for ${line.variant.name}`} type="number" min="0" max={remaining} value={selection.quantity} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, quantity: event.target.value } }))} />
-                    <select aria-label={`Disposition for ${line.variant.name}`} value={selection.disposition} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, disposition: event.target.value as 'RESTOCKED' | 'QUARANTINED' } }))}><option value="QUARANTINED">Quarantine</option><option value="RESTOCKED">Inspected and restock</option></select>
-                    <input aria-label={`Inspection notes for ${line.variant.name}`} value={selection.inspectionNotes} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, inspectionNotes: event.target.value } }))} placeholder="Inspection notes (required)" />
+                    <span>{line.variant.product.name} · {line.variant.name}<small>Sold as {soldAs} · {remaining} {unit}{remaining === 1 ? '' : 's'} remaining · {line.variant.sku}</small></span>
+                    <input aria-label={`Return quantity in ${unit}s for ${label}`} type="number" min="0" max={remaining} value={selection.quantity} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, quantity: event.target.value } }))} />
+                    <select aria-label={`Disposition for ${label}`} value={selection.disposition} disabled={saleControlRetryPending} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, disposition: event.target.value as 'RESTOCKED' | 'QUARANTINED' } }))}><option value="QUARANTINED">Quarantine</option><option value="RESTOCKED">Inspected and restock</option></select>
+                    <input aria-label={`Inspection notes for ${label}`} value={selection.inspectionNotes} disabled={saleControlRetryPending} maxLength={500} onChange={(event) => setReturnLines((current) => ({ ...current, [line.id]: { ...selection, inspectionNotes: event.target.value } }))} placeholder="Inspection notes (required)" />
                   </div>;
-                })}<button className="small-action-button" disabled={controlBusy} onClick={() => void processSaleReturn(saleControl)}>{saleControlRetryPending ? 'Retry same return' : 'Record return'}</button></div>}
+                })}<button className="small-action-button" disabled={controlBusy || refundNeedsDrawer} onClick={() => void processSaleReturn(saleControl)}>{saleControlRetryPending ? 'Retry same return' : 'Record return'}</button></div>}
               </>}
             </div>}
         </section>

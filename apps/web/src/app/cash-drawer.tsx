@@ -18,13 +18,14 @@ type Drawer = {
 };
 
 export function CashDrawer({
-  api, token, locationId, timezone, canClose, closeHref, onDrawer, formatMoney, isOpen, onOpenChange,
+  api, token, locationId, timezone, canClose, closeHref, onDrawer, formatMoney, isOpen, onOpenChange, hideTrigger = false,
 }: {
   api: string;
   token: string;
   locationId: string;
   timezone?: string;
   canClose: boolean;
+  hideTrigger?: boolean;
   isOpen?: boolean;
   onOpenChange?: (value: boolean) => void;
   closeHref?: string;
@@ -102,9 +103,9 @@ export function CashDrawer({
   }
 
   return <>
-    <button type="button" className="admin-secondary" onClick={() => { setError(''); setOpen(true); }}>
+    {!hideTrigger && <button type="button" className="admin-secondary" onClick={() => { setError(''); setOpen(true); }}>
       <Wallet size={16} aria-hidden="true" /> Cash drawer{ready ? drawer ? ' · Open' : ' · Closed' : ''}
-    </button>
+    </button>}
     <AdminModal isOpen={open} onClose={closeDialog} title="Cash drawer" maxWidth="600px"
       badgeIcon={<Wallet size={22} aria-hidden="true" />}
       subtitle={!ready ? undefined : drawer ? 'Compare counted cash and card totals with the register.' : 'Enter the cash available for change at the start of the shift.'}

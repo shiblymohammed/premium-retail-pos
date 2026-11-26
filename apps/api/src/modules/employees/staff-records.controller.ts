@@ -20,7 +20,7 @@ export class PayrollDto {
   @Matches(MONEY) allowances: string;
   @Matches(MONEY) bonus: string;
   @Matches(MONEY) deductions: string;
-  @Matches(MONEY) advanceRecovery: string;
+  @IsOptional() @Matches(MONEY) advanceRecovery?: string;
   @IsOptional() @Matches(MONEY) overtimeHourlyRate?: string;
   @IsOptional() @Matches(MONEY) lateDayDeduction?: string;
   @IsOptional() @Matches(MONEY) absentDayDeduction?: string;

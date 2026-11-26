@@ -47,8 +47,14 @@ export class TransfersService {
     private readonly inventory: InventoryService,
   ) {}
 
+  private assertRestockRequestAccess(actor: TransferActor) {
+    if (!can(actor, 'transfers.request', actor.role === Role.INVENTORY || MANAGER_ROLES.includes(actor.role as Role))) {
+      throw new ForbiddenException('This account cannot request restock');
+    }
+  }
+
   async restockSources(destinationId: string, actor: TransferActor) {
-    this.assertManager(actor, 'transfers.request');
+    this.assertRestockRequestAccess(actor);
     this.assertLocationAccess(actor, destinationId);
     const destination = await this.requireLocation(this.prisma, destinationId);
     if (!destination.isActive || destination.type !== LocationType.RETAIL_STORE) {
@@ -70,7 +76,8 @@ export class TransfersService {
     rawIdempotencyKey: string | undefined,
     manual?: CreateTransferDto,
   ) {
-    this.assertManager(actor, 'transfers.request');
+    if (manual) this.assertRestockRequestAccess(actor);
+    else this.assertManager(actor, 'transfers.request');
     this.assertLocationAccess(actor, destLocationId);
     const idempotencyKey = this.requireIdempotencyKey(rawIdempotencyKey);
     const payloadHash = this.hash({ actorId: actor.userId, destLocationId, ...(manual && { sourceLocationId: manual.sourceLocationId, lines: manual.lines }) });

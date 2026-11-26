@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { downloadPdf } from '@/lib/report-download';
 import { Feedback } from '@/components/ui/feedback';
-import { money, payFields, staffRequest, type PayrollRow } from '../staff-records/records-api';
+import { money, payrollBreakdown, staffRequest, type PayrollRow } from '../staff-records/records-api';
 import styles from '../staff-records/records.module.css';
 
 type PayHistory = { firstName: string; lastName: string; employeeCode: string; location: { name: string }; payroll: PayrollRow[] };
@@ -20,6 +20,7 @@ export default function MyPayslipsPage() {
     return () => controller.abort();
   }, []);
   const record = history?.payroll.find((row) => row.id === selected);
+  const breakdown = record ? payrollBreakdown(record) : [];
   return <main className={`app-page ${styles.page}`}>
     <header className={styles.top}><h1>My payslips</h1></header>
     {error && <Feedback tone="error">{error}</Feedback>}
@@ -33,13 +34,13 @@ export default function MyPayslipsPage() {
         <header className={styles.top}><div><h2>Payslip · {record.period}</h2><p>{history.firstName} {history.lastName} · {history.employeeCode} · {history.location.name}</p></div>
           <button className={`admin-secondary ${styles.printButton}`} onClick={() => downloadPdf(
             `Payslip ${record.period}`, `${history.firstName} ${history.lastName} · ${history.employeeCode} · ${history.location.name}`,
-            [...Object.values(payFields), 'Net pay', 'Payment reference'],
-            [[...Object.keys(payFields).map((key) => money(record[key as keyof typeof payFields] ?? 0, record.currency)), money(record.net, record.currency), record.paymentReference]],
+            [...breakdown.map(([label]) => label), 'Net pay', 'Payment reference'],
+            [[...breakdown.map(([, value]) => value), money(record.net, record.currency), record.paymentReference]],
             `payslip-${record.period}.pdf`,
           )}>Download PDF</button>
         </header>
         <dl className={styles.facts}>
-          {Object.entries(payFields).map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{money(record[key as keyof typeof payFields] ?? 0, record.currency)}</dd></div>)}
+          {breakdown.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
           <div><dt>Net pay</dt><dd>{money(record.net, record.currency)}</dd></div>
           <div><dt>Payment reference</dt><dd>{record.paymentReference}</dd></div>
         </dl>

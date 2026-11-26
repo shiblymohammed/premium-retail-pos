@@ -70,7 +70,7 @@ export function attendanceDay<T extends Shift & { punchType: string }>(punches: 
     if (punch.punchType !== 'IN') continue;
     const next = punches[index + 1];
     const finishedAt = next?.punchType === 'OUT' ? next.punchTimestamp : null;
-    const interval = shiftDuration(punch, finishedAt, now);
+    const interval = shiftDuration(punch, finishedAt, next ? undefined : now);
     workMs += interval.workMs;
     breakMs += interval.breakMs;
     overtimeMs += interval.overtimeMs;
@@ -84,6 +84,32 @@ export function attendanceDay<T extends Shift & { punchType: string }>(punches: 
   };
 }
 
+export function attendanceByShiftDate<T extends Shift & { punchType: string }>(punches: T[], timezone: string) {
+  const byDate = new Map<string, T[]>();
+  for (const [index, punch] of punches.entries()) {
+    const previous = punches[index - 1];
+    if (punch.punchType === 'OUT' && previous?.punchType !== 'IN') continue;
+    const clockIn = punch.punchType === 'OUT' ? previous : punch;
+    const day = localDateKey(clockIn.punchTimestamp, timezone);
+    const entries = byDate.get(day) ?? [];
+    entries.push(punch);
+    byDate.set(day, entries);
+  }
+  return byDate;
+}
+
+function currentDayPunches<T extends Shift & { punchType: string }>(punches: T[], now: Date, timezone: string) {
+  const day = localDateKey(now, timezone);
+  const byDate = attendanceByShiftDate(punches, timezone);
+  const today = byDate.get(day);
+  if (today?.length) return today;
+  const last = punches.at(-1);
+  if (!last || (last.punchType === 'OUT' && localDateKey(last.punchTimestamp, timezone) !== day)) return [];
+  return byDate.get(
+    localDateKey((last.punchType === 'IN' ? last : punches.at(-2) ?? last).punchTimestamp, timezone),
+  ) ?? (last.punchType === 'OUT' ? [last] : []);
+}
+
 @Injectable()
 export class AttendanceService {
   constructor(private readonly prisma: PrismaService) {}
@@ -91,12 +117,14 @@ export class AttendanceService {
   async getToday(actor: RequestUser) {
     const employee = await this.employeeFor(actor);
     const now = new Date();
-    const { start, end } = localDayRange(now, employee.location.company.timezone);
-    const punches = await this.prisma.attendance.findMany({
-      where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
+    const timezone = employee.location.company.timezone;
+    const { previousStart, end } = localDayRange(now, timezone);
+    const nearbyPunches = await this.prisma.attendance.findMany({
+      where: { employeeId: employee.id, locationId: employee.locationId, punchTimestamp: { gte: previousStart, lt: end } },
       select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
       orderBy: { punchTimestamp: 'asc' },
     });
+    const punches = currentDayPunches(nearbyPunches, now, timezone);
     const last = punches.at(-1);
     const status = !last ? 'NOT_STARTED' : last.punchType === 'IN' ? 'WORKING' : 'COMPLETED';
     const { clockIn: _clockIn, clockOut: _clockOut, ...metrics } = attendanceDay(punches, now);
@@ -132,16 +160,15 @@ export class AttendanceService {
       select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
       orderBy: { punchTimestamp: 'asc' },
     });
-    const byDay = new Map<string, typeof punches>();
-    for (const punch of punches) {
-      const key = localDateKey(punch.punchTimestamp, employee.location.company.timezone);
-      byDay.set(key, [...(byDay.get(key) ?? []), punch]);
-    }
+    const byDay = attendanceByShiftDate(punches, employee.location.company.timezone);
+    const latest = punches.at(-1);
+    const activeDate = latest?.punchType === 'IN' && latest.punchTimestamp >= localDayRange(now, employee.location.company.timezone).previousStart
+      ? localDateKey(latest.punchTimestamp, employee.location.company.timezone) : null;
     const days = Array.from({ length: 176 + weekday }, (_, index) => {
       const date = new Date(Date.UTC(startYear, startMonth - 1, startDay + index));
       const dateKey = localDateKey(date, 'UTC');
       const dayPunches = byDay.get(dateKey) ?? [];
-      const { clockIn, clockOut, ...metrics } = attendanceDay(dayPunches, dateKey === today ? now : undefined);
+      const { clockIn, clockOut, ...metrics } = attendanceDay(dayPunches, dateKey === activeDate ? now : undefined);
       return {
         date: dateKey,
         status: !clockIn ? 'off' : clockIn.isLate ? 'late' : 'present',
@@ -169,12 +196,19 @@ export class AttendanceService {
       if (actor.role !== Role.SUPER_ADMIN && !actor.locationIds.includes(employee.locationId)) throw new ForbiddenException('You are not authorized to mark attendance for this workplace');
 
       const now = new Date();
-      const { start, end } = localDayRange(now, employee.location.company.timezone);
-      const punches = await tx.attendance.findMany({
-        where: { employeeId: employee.id, punchTimestamp: { gte: start, lt: end } },
+      const timezone = employee.location.company.timezone;
+      const { previousStart, end } = localDayRange(now, timezone);
+      const nearbyPunches = await tx.attendance.findMany({
+        where: { employeeId: employee.id, locationId: employee.locationId, punchTimestamp: { gte: previousStart, lt: end } },
         select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
         orderBy: { punchTimestamp: 'asc' },
       });
+      const current = currentDayPunches(nearbyPunches, now, timezone);
+      const active = current.at(-1);
+      const today = localDateKey(now, timezone);
+      const startedToday = current.some((punch) => punch.punchType === 'IN' && localDateKey(punch.punchTimestamp, timezone) === today);
+      const orphanOut = current.length === 1 && active?.punchType === 'OUT';
+      const punches = active?.punchType === 'IN' || startedToday || orphanOut ? current : [];
       const last = punches.at(-1);
       if (last?.punchType === 'OUT' && action !== 'IN') throw new ConflictException('Use Clock back in to resume today’s attendance');
       const firstIn = punches.find((row) => row.punchType === 'IN');
@@ -183,7 +217,7 @@ export class AttendanceService {
       if (action && action !== punchType) throw new ConflictException('The shift changed. Refresh attendance before trying again');
       const endTime = employee.location.attendanceEndTime;
       const scheduledEndAt = punchType === 'IN'
-        ? firstIn ? firstIn.scheduledEndAt ?? null : endTime ? localScheduledTime(now, endTime, employee.location.company.timezone) : null
+        ? firstIn ? firstIn.scheduledEndAt ?? null : endTime ? localScheduledTime(now, endTime, timezone, employee.location.attendanceStartTime) : null
         : null;
       const targetStartTime = punchType === 'IN' && !firstIn ? employee.location.attendanceStartTime ?? null : null;
       const isLate = punchType === 'IN' && targetStartTime !== null && isAfterLocalTarget(now, targetStartTime, employee.location.company.timezone);
@@ -210,7 +244,7 @@ export class AttendanceService {
       const now = new Date();
       const range = localDayRange(now, employee.location.company.timezone);
       const active = await tx.attendance.findFirst({
-        where: { employeeId: employee.id, locationId: employee.locationId, punchTimestamp: { gte: range.start, lt: range.end } },
+        where: { employeeId: employee.id, locationId: employee.locationId, punchTimestamp: { gte: range.previousStart, lt: range.end } },
         orderBy: { punchTimestamp: 'desc' },
         select: { id: true, punchType: true, breaks: { where: { endedAt: null }, select: { id: true } } },
       });
@@ -236,13 +270,13 @@ export class AttendanceService {
     });
     if (!location) throw new NotFoundException('Location not found');
     const now = new Date();
-    const { start, end } = localDayRange(now, location.company.timezone);
+    const { previousStart, end } = localDayRange(now, location.company.timezone);
     const employees = await this.prisma.employee.findMany({
       where: { locationId, isActive: true, user: { isActive: true } },
       select: {
         id: true, employeeCode: true, firstName: true, lastName: true,
         attendances: {
-          where: { punchTimestamp: { gte: start, lt: end } },
+          where: { locationId, punchTimestamp: { gte: previousStart, lt: end } },
           select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields, originalTimestamp: true, correctionReason: true },
           orderBy: { punchTimestamp: 'asc' },
         },
@@ -257,7 +291,8 @@ export class AttendanceService {
       targetStartTime: location.attendanceStartTime,
       targetEndTime: location.attendanceEndTime ?? null,
       employees: employees.map((employee) => {
-        const { clockIn, clockOut, ...metrics } = attendanceDay(employee.attendances, now);
+        const punches = currentDayPunches(employee.attendances, now, location.company.timezone);
+        const { clockIn, clockOut, ...metrics } = attendanceDay(punches, now);
         return {
           employee: { id: employee.id, name: `${employee.firstName} ${employee.lastName}`, employeeCode: employee.employeeCode },
           status: clockOut ? 'COMPLETED' : clockIn ? 'WORKING' : 'NOT_STARTED',
@@ -291,7 +326,7 @@ export class AttendanceService {
       if (!location) throw new NotFoundException('Location not found');
       const start = startTime === undefined ? location.attendanceStartTime : startTime;
       const end = endTime === undefined ? location.attendanceEndTime : endTime;
-      if (start && end && start >= end) throw new BadRequestException('Shift end must be later than shift start on the same day');
+      if (start && end && start === end) throw new BadRequestException('Shift start and end must be different times');
       const updated = await tx.location.update({ where: { id: locationId }, data: { attendanceStartTime: start, attendanceEndTime: end }, select: { id: true, name: true, attendanceStartTime: true, attendanceEndTime: true } });
       await tx.auditEvent.create({ data: {
         actorId: actor.userId,
@@ -324,11 +359,20 @@ export class AttendanceService {
         throw new BadRequestException('A punch correction must stay on its original workplace-local date');
       }
       const range = localDayRange(punch.punchTimestamp, location.company.timezone);
-      const dayPunches = await tx.attendance.findMany({
-        where: { employeeId: punch.employeeId, locationId: punch.locationId, punchTimestamp: { gte: range.start, lt: range.end } },
+      const nearbyPunches = await tx.attendance.findMany({
+        where: { employeeId: punch.employeeId, locationId: punch.locationId, punchTimestamp: { gte: range.previousStart, lt: range.followingEnd } },
         select: { id: true, punchType: true, punchTimestamp: true, ...shiftFields },
         orderBy: { punchTimestamp: 'asc' },
       });
+      const shiftDays = attendanceByShiftDate(nearbyPunches, location.company.timezone);
+      const dayPunches = [...shiftDays.values()].find((entries) => entries.some((item) => item.id === attendanceId));
+      if (!dayPunches) throw new ConflictException('This punch has no matching shift');
+      const originalIndex = nearbyPunches.findIndex((item) => item.id === attendanceId);
+      const previous = nearbyPunches[originalIndex - 1];
+      const next = nearbyPunches[originalIndex + 1];
+      if ((previous && correctedAt <= previous.punchTimestamp) || (next && correctedAt >= next.punchTimestamp)) {
+        throw new ConflictException('This correction would put the punch out of order');
+      }
       const timeline = dayPunches.map((item) => ({ ...item, punchTimestamp: item.id === attendanceId ? correctedAt : item.punchTimestamp })).sort((a, b) => a.punchTimestamp.getTime() - b.punchTimestamp.getTime());
       if (timeline.some((item, index) => item.punchType !== (index % 2 === 0 ? 'IN' : 'OUT') ||
         (index > 0 && item.punchTimestamp <= timeline[index - 1].punchTimestamp))) {
@@ -377,12 +421,13 @@ export class AttendanceService {
     const timezone = location.company.timezone;
     const anchorDate = requestedDate ?? localDateKey(new Date(), timezone);
     const range = reportRange(period as 'daily' | 'weekly' | 'monthly', anchorDate, timezone);
+    const throughFollowingDay = localDayRange(range.end, timezone).end;
     const employees = await this.prisma.employee.findMany({
       where: { locationId, isActive: true, user: { isActive: true } },
       select: {
         id: true, employeeCode: true, firstName: true, lastName: true,
         attendances: {
-          where: { locationId, punchTimestamp: { gte: range.start, lt: range.end } },
+          where: { locationId, punchTimestamp: { gte: range.start, lt: throughFollowingDay } },
           select: { id: true, punchType: true, punchTimestamp: true, isLate: true, targetStartTime: true, ...shiftFields },
           orderBy: { punchTimestamp: 'asc' },
         },
@@ -390,12 +435,8 @@ export class AttendanceService {
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     });
     const employeeReports = employees.map((employee) => {
-      const byDate = new Map<string, typeof employee.attendances>();
-      for (const punch of employee.attendances) {
-        const date = localDateKey(punch.punchTimestamp, timezone);
-        byDate.set(date, [...(byDate.get(date) ?? []), punch]);
-      }
-      const entries = [...byDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, punches]) => {
+      const byDate = attendanceByShiftDate(employee.attendances, timezone);
+      const entries = [...byDate.entries()].filter(([date]) => date >= range.startDate && date <= range.endDate).map(([date, punches]) => {
         const { clockIn, clockOut, ...metrics } = attendanceDay(punches);
         return { date, clockInAt: clockIn?.punchTimestamp ?? null, clockOutAt: clockOut?.punchTimestamp ?? null, isLate: clockIn?.isLate ?? false, targetStartTime: clockIn?.targetStartTime ?? null, ...metrics };
       });
@@ -459,7 +500,7 @@ function localDayRange(now: Date, timezone: string) {
   const [year, month, day] = date.split('-').map(Number);
   const start = localMidnightUtc(year, month, day, timezone);
   const end = localMidnightUtc(year, month, day + 1, timezone);
-  return { start, end };
+  return { start, end, previousStart: localMidnightUtc(year, month, day - 1, timezone), followingEnd: localMidnightUtc(year, month, day + 2, timezone) };
 }
 
 function localDateKey(value: Date, timezone: string) {
@@ -500,10 +541,10 @@ function reportRange(period: 'daily' | 'weekly' | 'monthly', date: string, timez
   };
 }
 
-function localScheduledTime(date: Date, time: string, timezone: string) {
+function localScheduledTime(date: Date, time: string, timezone: string, startTime: string | null) {
   const [year, month, day] = localDateKey(date, timezone).split('-').map(Number);
   const [hour, minute] = time.split(':').map(Number);
-  return localMidnightUtc(year, month, day, timezone, hour, minute);
+  return localMidnightUtc(year, month, day + (startTime && time < startTime ? 1 : 0), timezone, hour, minute);
 }
 
 function localMidnightUtc(year: number, month: number, day: number, timezone: string, hour = 0, minute = 0) {
