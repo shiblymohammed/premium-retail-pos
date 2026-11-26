@@ -69,7 +69,7 @@ Each roadmap task is tagged with an industry-standard priority tier:
 - [x] `P0` Implement configurable carton-to-packet conversion rates per product
 - [x] `P1` Support products without variants and products with stock-distinct variants (size, colour, style)
 - [x] `P1` Enforce packet-only tracking for products without carton conversions
-- [x] `P0` Restrict product selling and purchase price changes strictly to Super Admin role
+- [x] `P0` Protect product price changes with role defaults, per-person overrides, and audit history
 - [x] `P0` Implement price change audit log recording old price, new price, actor, timestamp, and reason
 - [x] `P1` Implement mixed-unit formatted display utility (e.g., "27 packets = 2 cartons + 7 packets")
 

@@ -66,7 +66,7 @@ export class ProductsController {
   }
 
   @Get(':id/price-history')
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Permission('products.prices')
   async findPriceHistory(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     const rows = await this.productsService.findPriceHistory(id);
@@ -82,7 +82,7 @@ export class ProductsController {
   }
 
   @Patch(':id/prices')
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Permission('products.prices')
   async updatePrices(
     @Param('id') id: string,

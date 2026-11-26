@@ -30,7 +30,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './operations.module.css';
@@ -172,6 +172,8 @@ function transferTime(date: string, timeZone?: string) {
 const hasIssues = (t: StockTransfer) => !!t.receipt && t.receipt.damaged + t.receipt.missing > 0;
 const isWarehouse = (loc: string) => /warehouse/i.test(loc);
 const activeTransfer = (t: StockTransfer) => !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status);
+const packingStatuses: TransferStatus[] = ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'];
+const receivingStatuses: TransferStatus[] = ['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'];
 const unitsInTransit = (t: StockTransfer) => activeTransfer(t) ? t.items.reduce((sum, item) => sum + outstandingQuantity(item), 0) : 0;
 const pendingItemQuantity = (t: StockTransfer, item: TransferItem) => !activeTransfer(t) ? 0 :
   ['DRAFT', 'PENDING_APPROVAL'].includes(t.status) ? item.requestedQtyBase : Math.max(0, item.approvedQtyBase - item.dispatchedQtyBase);
@@ -235,7 +237,8 @@ export default function OperationsPage() {
   const canReceiveTransfers = can('transfers.receive', apiRole !== 'INVENTORY');
   const receiveOnly = !canRequestTransfers && !canApproveTransfers && !canDispatchTransfers;
 
-  const canActAt = (id: string) => apiRole === 'SUPER_ADMIN' || locations.some((location) => location.id === id);
+  const canActAt = useCallback((id: string) =>
+    apiRole === 'SUPER_ADMIN' || locations.some((location) => location.id === id), [apiRole, locations]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState('');
   const [isCreatingBusy, setIsCreatingBusy] = useState(false);
@@ -464,10 +467,33 @@ export default function OperationsPage() {
     [transfers, locationFilter],
   );
 
+  const transferActions = useMemo(() => new Map(scoped.map((transfer) => {
+    const sourceAccess = canActAt(transfer.sourceLocationId);
+    const destinationAccess = canActAt(transfer.destLocationId);
+    const transitUnits = unitsInTransit(transfer);
+    const waitingUnits = pendingUnits(transfer);
+    const canSubmit = canRequestTransfers && transfer.status === 'DRAFT' && (sourceAccess || destinationAccess);
+    const canApprove = canApproveTransfers && transfer.status === 'PENDING_APPROVAL'
+      && transfer.requestedByUserId !== apiUserId && sourceAccess;
+    const awaitingPacking = packingStatuses.includes(transfer.status) && waitingUnits > 0;
+    const canDispatch = canDispatchTransfers && sourceAccess && awaitingPacking
+      && transfer.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (item.cartonRequired ? item.unitsPerCarton : 1));
+    const canReceive = canReceiveTransfers && destinationAccess && transitUnits > 0 && receivingStatuses.includes(transfer.status);
+    const canPackNow = canDispatch && !transfer.auditLocked;
+    const canReceiveNow = canReceive && !transfer.auditLocked;
+    const actionUnits = (canSubmit || canApprove || canPackNow ? waitingUnits : 0) + (canReceiveNow ? transitUnits : 0);
+    return [transfer.id, {
+      canSubmit, canApprove, canPackNow, canReceiveNow, awaitingPacking, transitUnits, waitingUnits, actionUnits,
+      paused: transfer.auditLocked && (canDispatch || canReceive),
+      needsAction: canSubmit || canApprove || canPackNow || canReceiveNow,
+    }] as const;
+  })), [scoped, canActAt, canRequestTransfers, canApproveTransfers, canDispatchTransfers, canReceiveTransfers, apiUserId]);
+
   const filteredTransfers = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = scoped.filter((t) => {
-      const matchStatus = filterStatus === 'ALL' || (filterStatus === 'PENDING' ? (pendingUnits(t) > 0) : filterStatus === 'TRANSIT' ? (unitsInTransit(t) > 0) : t.status === 'RECEIVED');
+      const actions = transferActions.get(t.id)!;
+      const matchStatus = filterStatus === 'ALL' || (filterStatus === 'PENDING' ? actions.needsAction : filterStatus === 'TRANSIT' ? actions.transitUnits > 0 : t.status === 'RECEIVED');
       if ((fromFilter !== 'ALL' && t.sourceLocationId !== fromFilter) || (toFilter !== 'ALL' && t.destLocationId !== toFilter)) return false;
       const matchSearch = !q
         || t.transferCode.toLowerCase().includes(q)
@@ -479,25 +505,28 @@ export default function OperationsPage() {
       return matchStatus && matchSearch;
     });
     return list.sort((a, b) => (sortKey === 'units' ? unitsOf(b) - unitsOf(a) : (parseStamp(b.createdAt) - parseStamp(a.createdAt)) * (sortKey === 'newest' ? 1 : -1)));
-  }, [scoped, filterStatus, fromFilter, toFilter, sortKey, search]);
+  }, [scoped, transferActions, filterStatus, fromFilter, toFilter, sortKey, search]);
 
   const kpis = useMemo(() => {
-    const inTransit = scoped.filter((t) => (unitsInTransit(t) > 0));
-    const pending = scoped.filter((t) => (pendingUnits(t) > 0));
+    const actions = [...transferActions.values()];
+    const inTransit = actions.filter((action) => action.transitUnits > 0);
+    const pending = actions.filter((action) => action.needsAction);
     const received = scoped.filter((t) => t.status === 'RECEIVED');
     return {
       inTransit: inTransit.length,
-      inTransitUnits: inTransit.reduce((s, t) => s + unitsInTransit(t), 0),
+      inTransitUnits: inTransit.reduce((sum, action) => sum + action.transitUnits, 0),
       pending: pending.length,
-      pendingUnits: pending.reduce((s, t) => s + pendingUnits(t), 0),
+      actionUnits: pending.reduce((sum, action) => sum + action.actionUnits, 0),
       received: received.length,
       withIssues: received.filter(hasIssues).length,
-      openTransfers: new Set([...pending, ...inTransit]).size,
-      openUnits: scoped.reduce((s, t) => s + unitsInTransit(t) + pendingUnits(t), 0),
+      openTransfers: actions.filter((action) => action.waitingUnits > 0 || action.transitUnits > 0).length,
+      openUnits: actions.reduce((sum, action) => sum + action.waitingUnits + action.transitUnits, 0),
     };
-  }, [scoped]);
+  }, [scoped, transferActions]);
 
-  const count = (s: StatusFilter) => s === 'ALL' ? scoped.length : s === 'PENDING' ? scoped.filter((t) => (pendingUnits(t) > 0)).length : s === 'TRANSIT' ? scoped.filter((t) => (unitsInTransit(t) > 0)).length : scoped.filter((t) => t.status === 'RECEIVED').length;
+  const statusCounts: Record<StatusFilter, number> = {
+    ALL: scoped.length, PENDING: kpis.pending, TRANSIT: kpis.inTransit, RECEIVED: kpis.received,
+  };
 
   async function mutate(path: string, method: 'POST' | 'PATCH', body?: unknown) {
     if (!apiToken) throw new Error('Sign in before changing a transfer.');
@@ -796,12 +825,12 @@ export default function OperationsPage() {
         <button type="button" className={`${styles.summaryCard} ${styles.summaryAmber} ${filterStatus === 'PENDING' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'PENDING' ? 'ALL' : 'PENDING')}>
           <i className={styles.summaryIcon}><Icon name="clock" size={18} /></i>
           <div className={styles.summaryMain}>
-            <span className={styles.summaryLabel}>Pending action</span>
+            <span className={styles.summaryLabel}>Needs your action</span>
             <strong className={styles.summaryValue}>{kpis.pending}</strong>
           </div>
           <div className={styles.summaryDetail}>
             <span className={styles.summaryDetailLabel}>Units</span>
-            <b className={`${styles.chip} ${styles.chipAmber}`}>{kpis.pendingUnits}</b>
+            <b className={`${styles.chip} ${styles.chipAmber}`}>{kpis.actionUnits}</b>
           </div>
         </button>
         <button type="button" className={`${styles.summaryCard} ${styles.summaryBlue} ${filterStatus === 'TRANSIT' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'TRANSIT' ? 'ALL' : 'TRANSIT')}>
@@ -845,7 +874,7 @@ export default function OperationsPage() {
           <div className={styles.tabs} role="tablist" aria-label="Filter by status">
             {statusTabs.map((tab) => (
               <button key={tab.key} type="button" role="tab" aria-selected={filterStatus === tab.key} className={filterStatus === tab.key ? styles.tabOn : ''} onClick={() => setFilterStatus(tab.key)}>
-                {tab.label}<span>{count(tab.key)}</span>
+                {tab.label}<span>{statusCounts[tab.key]}</span>
               </button>
             ))}
           </div>
@@ -899,23 +928,18 @@ export default function OperationsPage() {
             const isOpen = expanded === t.id;
             const issues = hasIssues(t);
             const created = splitStamp(t.createdAt, t.timezone);
-            const canApprove = canApproveTransfers && t.requestedByUserId !== apiUserId && canActAt(t.sourceLocationId);
-            const canDispatch = canDispatchTransfers && canActAt(t.sourceLocationId) && ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status) && t.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (item.cartonRequired ? item.unitsPerCarton : 1));
-            const hasOutstanding = t.items.some((item) => outstandingQuantity(item) > 0);
-            const canReceive = canReceiveTransfers && canActAt(t.destLocationId) && hasOutstanding && ['DISPATCHED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status);
-            const awaitingPacking = ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'].includes(t.status)
-              && t.items.some((item) => item.approvedQtyBase > item.dispatchedQtyBase);
+            const { canSubmit, canApprove, canPackNow, canReceiveNow, awaitingPacking, transitUnits, waitingUnits, paused } = transferActions.get(t.id)!;
             const nextSteps = [
               t.status === 'DRAFT' ? 'Submit · requesting manager' : null,
               t.status === 'PENDING_APPROVAL' ? `Approve · another manager at ${t.sourceLocation}` : null,
-              awaitingPacking ? `Pack · manager at ${t.sourceLocation}` : null,
-              hasOutstanding ? `Receive · authorized team at ${t.destLocation}` : null,
+              awaitingPacking ? canPackNow ? `Pack · ${t.sourceLocation}` : `Awaiting packing at ${t.sourceLocation}` : null,
+              transitUnits > 0 ? `Receive · authorized team at ${t.destLocation}` : null,
             ].filter(Boolean);
             return (
               <Fragment key={t.id}>
                 <li className={`${styles.row} ${isOpen ? styles.rowOpen : ''}`}>
                   <button type="button" className={styles.rowMain} onClick={() => setExpanded(isOpen ? null : t.id)} aria-expanded={isOpen}>
-                    <span className={`${styles.rowIcon} ${styles[`icon_${issues ? 'issue' : meta.tone}`]}`}><Icon name={t.status === 'RECEIVED' ? 'inbox' : (unitsInTransit(t) > 0) ? 'truck' : 'clock'} size={17} /></span>
+                    <span className={`${styles.rowIcon} ${styles[`icon_${issues ? 'issue' : meta.tone}`]}`}><Icon name={t.status === 'RECEIVED' ? 'inbox' : transitUnits > 0 ? 'truck' : 'clock'} size={17} /></span>
                     <span className={styles.rowTitle}>
                       <strong>{t.transferCode}</strong>
                       <small>{created.day} · {created.time}</small>
@@ -930,9 +954,9 @@ export default function OperationsPage() {
 
                   <span className={`${styles.items} ${styles.right}`}>
                     <strong>{t.items.length === 1
-                      ? shipmentQuantity(t.status === 'RECEIVED' ? t.receipt?.good ?? 0 : unitsInTransit(t), t.items[0].baseUnit, t.items[0].unitsPerCarton)
-                      : `${t.status === 'RECEIVED' ? t.receipt?.good ?? 0 : unitsInTransit(t)} units`} {t.status === 'RECEIVED' ? 'received good' : 'in transit'}</strong>
-                    {pendingUnits(t) > 0 && <small>{t.items.length === 1 ? shipmentQuantity(pendingUnits(t), t.items[0].baseUnit, t.items[0].unitsPerCarton) : `${pendingUnits(t)} units`} {awaitingPacking ? 'to pack' : 'to approve'}</small>}
+                      ? shipmentQuantity(t.status === 'RECEIVED' ? t.receipt?.good ?? 0 : transitUnits, t.items[0].baseUnit, t.items[0].unitsPerCarton)
+                      : `${t.status === 'RECEIVED' ? t.receipt?.good ?? 0 : transitUnits} units`} {t.status === 'RECEIVED' ? 'received good' : 'in transit'}</strong>
+                    {waitingUnits > 0 && <small>{t.items.length === 1 ? shipmentQuantity(waitingUnits, t.items[0].baseUnit, t.items[0].unitsPerCarton) : `${waitingUnits} units`} {awaitingPacking ? 'to pack' : 'to approve'}</small>}
                     <small>{t.items.length === 1
                       ? shipmentQuantity(t.items[0].requestedQtyBase, t.items[0].baseUnit, t.items[0].unitsPerCarton) + ' requested'
                       : `${t.items.length} products · view quantities`}</small>
@@ -941,22 +965,22 @@ export default function OperationsPage() {
                   <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? `${meta.label} · issues` : meta.label}</span>{nextSteps.map((step) => <small className={styles.nextStep} key={step}>{step}</small>)}</span>
 
                   <span className={styles.rowActions}>
-                    {canRequestTransfers && t.status === 'DRAFT' && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
+                    {canSubmit && <button type="button" className={styles.actionButton} onClick={() => submitTransfer(t)}>Submit</button>}
                     {t.status === 'PENDING_APPROVAL' && (canApprove ? <button type="button" className={styles.actionButton} onClick={() => approveTransfer(t)}>Approve</button> : <small>Waiting for another manager</small>)}
-                    {t.auditLocked && (canDispatch || canReceive) && <small role="status">Paused for stock count</small>}
-                    {canDispatch && !t.auditLocked && <button type="button" className={styles.actionButton} onClick={() => openPacking(t)}>Confirm packing</button>}
-                    {canReceive && !t.auditLocked && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
+                    {paused && <small role="status">Paused for stock count</small>}
+                    {canPackNow && <button type="button" className={styles.actionButton} onClick={() => openPacking(t)}>Confirm packing</button>}
+                    {canReceiveNow && <button type="button" className={styles.actionButton} onClick={() => openReceive(t)}>Receive</button>}
                     <span className={styles.menuWrap} data-row-menu>
                       <button type="button" className={`${styles.moreButton} ${menuFor === t.id ? styles.moreOn : ''}`} onClick={() => setMenuFor(menuFor === t.id ? null : t.id)} aria-haspopup="menu" aria-expanded={menuFor === t.id} aria-label={`Options for ${t.transferCode}`}><Icon name="more" size={16} /></button>
                       {menuFor === t.id && (
                         <div className={styles.menu} role="menu">
                           <div className={styles.menuHeading}>{t.transferCode}</div>
                           <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setExpanded(isOpen ? null : t.id); }}><Icon name="eye" size={15} /><span><b>{isOpen ? 'Hide details' : 'View details'}</b><small>Products, timeline and notes</small></span></button>
-                          {canRequestTransfers && t.status === 'DRAFT' && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
+                          {canSubmit && <button type="button" role="menuitem" onClick={() => submitTransfer(t)}><Icon name="send" size={15} /><span><b>Submit for approval</b><small>Send draft to a manager</small></span></button>}
                           {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => approveTransfer(t)}><Icon name="check" size={15} /><span><b>Approve</b><small>Approver cannot be the requester</small></span></button>}
                           {canApprove && t.status === 'PENDING_APPROVAL' && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Reject ${t.transferCode}?`, submit: (reason) => rejectTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Reject transfer</b><small>Record a reason</small></span></button>}
-                          {canDispatch && !t.auditLocked && <button type="button" role="menuitem" onClick={() => openPacking(t)}><Icon name="send" size={15} /><span><b>Confirm packed quantities</b><small>Server checks available inventory</small></span></button>}
-                          {canReceive && !t.auditLocked && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
+                          {canPackNow && <button type="button" role="menuitem" onClick={() => openPacking(t)}><Icon name="send" size={15} /><span><b>Confirm packed quantities</b><small>Server checks available inventory</small></span></button>}
+                          {canReceiveNow && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
                           {canApproveTransfers && !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
                           <button type="button" role="menuitem" onClick={() => copyTracking(t)}><Icon name="copy" size={15} /><span><b>Copy tracking number</b><small>{t.trackingNumber}</small></span></button>
                           <div className={styles.menuDivider} />
@@ -1016,7 +1040,7 @@ export default function OperationsPage() {
           <div className={styles.empty}>
             <span><Icon name="truck" size={26} /></span>
             <strong>{loading ? 'Loading transfers…' : 'No transfers found'}</strong>
-            <p>{loading ? 'Loading current transfers from the server.' : apiToken ? 'Create the first transfer after setting up locations and products.' : 'Sign in with a manager account to access transfers.'}</p>
+            <p>{loading ? 'Loading current transfers from the server.' : filterStatus === 'PENDING' ? 'No matching transfers need your action.' : 'Try a different status or location filter.'}</p>
             <button type="button" className={styles.ghostButton} onClick={() => { setFilterStatus('ALL'); setLocationFilter('ALL'); setFromFilter('ALL'); setToFilter('ALL'); setSearch(''); }}>Clear filters</button>
           </div>
         )}

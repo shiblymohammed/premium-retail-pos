@@ -37,11 +37,11 @@ type Profile = {
   };
   permissionDefinitions?: Record<string, string>;
   permissionDefaults?: { canProcessReturns: boolean; canCancelSales: boolean; canCountStockAudits: boolean; discountLimitPercent: number };
-  attendance: Array<{ at: string; action: string; late: boolean }>;
-  workMinutes: number;
-  breakMinutes: number;
-  overtimeMinutes: number;
-  earlyCheckouts: number;
+  attendance?: Array<{ at: string; action: string; late: boolean }>;
+  workMinutes?: number;
+  breakMinutes?: number;
+  overtimeMinutes?: number;
+  earlyCheckouts?: number;
   sales?: { bills: number; sales: string; previousSales: string; discounts: string; returns: number };
   drawers?: Array<{ closedAt: string; expectedCash: string; countedCash: string; difference: string }>;
   payroll?: PayrollRow[];
@@ -122,7 +122,7 @@ export default function StaffRecordsPage() {
   }, [selected, month, reload]);
 
   useEffect(() => {
-    if (!comparisonOpen || !month) return;
+    if (!comparisonOpen || !month || profile?.attendance === undefined) return;
     const controller = new AbortController();
     setComparison(null);
     setComparisonError('');
@@ -130,7 +130,7 @@ export default function StaffRecordsPage() {
       .then((data) => { if (!controller.signal.aborted) setComparison(data); })
       .catch((error) => { if (!controller.signal.aborted) setComparisonError(error.message); });
     return () => controller.abort();
-  }, [comparisonOpen, month]);
+  }, [comparisonOpen, month, profile?.attendance]);
 
   const payroll = profile?.payroll?.find((row) => row.period === month);
   const draftRecoveries = payroll && !payroll.paidAt ? (profile?.loans ?? []).flatMap((loan) =>
@@ -238,7 +238,11 @@ export default function StaffRecordsPage() {
     && !accessLoading && can('staff.manage', true);
   const canEdit = profile?.staff.id === selected && profile.staff.userId !== actor?.id &&
     (canEditAdmin || (canMaintainOutlet && ['STAFF', 'CASHIER', 'INVENTORY'].includes(profile.staff.user.role)));
-  const activeView = (view === 'payroll' && !profile?.payroll) || (view === 'loans' && !profile?.loans) ? 'activity' : view;
+  const visibleViews: Array<typeof view> = [];
+  if (profile?.attendance !== undefined) visibleViews.push('activity');
+  if (profile?.payroll) visibleViews.push('payroll');
+  if (profile?.loans) visibleViews.push('loans');
+  const activeView = visibleViews.includes(view) ? view : visibleViews[0];
 
   return <main className={`app-page ${styles.page}`}>
     <header className={styles.top}>
@@ -263,14 +267,14 @@ export default function StaffRecordsPage() {
       <button type="button" className="admin-secondary" disabled={busy} onClick={() => setArchiveOpen(false)}>Cancel</button>
       <button type="button" className="admin-primary" disabled={busy} onClick={() => void archiveEmployee()}>Archive account</button>
     </>}><p>{profile.staff.firstName} {profile.staff.lastName} will lose login access. Payroll and attendance history stay available.</p></AdminModal>}
-    {profile && <nav className={styles.tabs} aria-label="Staff record sections">
-      {(['activity', ...(profile.payroll ? ['payroll'] : []), ...(profile.loans ? ['loans'] : [])] as typeof view[]).map((section) =>
+    {visibleViews.length > 0 && <nav className={styles.tabs} aria-label="Staff record sections">
+      {visibleViews.map((section) =>
         <button className={activeView === section ? 'admin-primary' : 'admin-secondary'} key={section} type="button"
           aria-pressed={activeView === section} disabled={busy || !!editor} onClick={() => setView(section)}>
           {section === 'activity' ? 'Activity' : section === 'payroll' ? 'Payroll' : 'Loans & advances'}
         </button>)}
     </nav>}
-    {activeView === 'activity' && can('staff.view', true) && <section className={styles.panel}>
+    {activeView === 'activity' && <section className={styles.panel}>
       <button className="admin-secondary" type="button" aria-expanded={comparisonOpen} onClick={() => setComparisonOpen(!comparisonOpen)}>
         {comparisonOpen ? 'Hide staff comparison' : 'Compare staff for this month'}
       </button>
@@ -322,7 +326,7 @@ export default function StaffRecordsPage() {
       }
       const localTime = (at: string) => new Date(at).toLocaleString('en-IN', { timeZone: timezone });
       return <>
-        {activeView === 'activity' && <div className={styles.grid}>
+        {activeView === 'activity' && attendance && <div className={styles.grid}>
           <section className={styles.panel}>
             <h2>{staff.firstName} {staff.lastName}</h2>
             <dl className={styles.facts}>{[
@@ -340,7 +344,7 @@ export default function StaffRecordsPage() {
             ].map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
           </section>}
           <section className={styles.panel}><h2>Attendance</h2>
-            <p>{Math.floor(profile.workMinutes / 60)}h {profile.workMinutes % 60}m across completed shifts</p>
+            <p>{Math.floor((profile.workMinutes ?? 0) / 60)}h {(profile.workMinutes ?? 0) % 60}m across completed shifts</p>
             <p>{profile.breakMinutes} min of breaks · {profile.overtimeMinutes} min overtime · {profile.earlyCheckouts} early checkouts</p>
             {attendance.length ? <div className={styles.scroll}><table><thead><tr><th>Time</th><th>Punch</th><th>Status</th></tr></thead><tbody>{attendance.map((entry, index) =>
               <tr key={index}><td>{localTime(entry.at)}</td><td>{entry.action === 'IN' ? 'Clock in' : 'Clock out'}</td><td>{entry.late ? 'Late' : '—'}</td></tr>)}</tbody></table></div> : <p>No punches for this month.</p>}

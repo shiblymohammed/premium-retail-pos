@@ -9,6 +9,27 @@ describe('Staff report visibility', () => {
     user: { role: Role.STAFF },
   };
 
+  it('returns payroll within the assigned location without loading punches when attendance access is denied', async () => {
+    const prisma = {
+      employee: { findFirst: jest.fn().mockResolvedValue(staff), findUnique: jest.fn() },
+      payrollRecord: { findMany: jest.fn().mockResolvedValue([{ period: '2026-01' }]) },
+      loan: { findMany: jest.fn().mockResolvedValue([]) },
+      attendanceBreak: { findMany: jest.fn() },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+    };
+    const service = new StaffRecordsService(prisma as any, {} as any);
+    const profile = await service.profile(staff.id, '2026-01', {
+      role: Role.STORE_MANAGER, userId: 'viewer', email: 'viewer@example.test', locationIds: ['store'],
+      permissionOverrides: { 'staff.view': false, 'payroll.view': true },
+    });
+
+    expect(profile.payroll).toEqual([{ period: '2026-01' }]);
+    expect(profile).not.toHaveProperty('attendance');
+    expect(profile).not.toHaveProperty('overtimeMinutes');
+    expect(prisma.$queryRaw.mock.calls.some(([query]) => query.sql.includes('FROM attendances'))).toBe(false);
+    expect(prisma.attendanceBreak.findMany).not.toHaveBeenCalled();
+  });
+
   it.each<{
     role: Role; overrides: RequestUser['permissionOverrides']; sales: boolean; cash: boolean;
   }>([

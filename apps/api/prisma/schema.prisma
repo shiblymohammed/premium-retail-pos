@@ -2,7 +2,7 @@
 // Phase 1: Identity, Access Control, Organization & Locations
 //
 // Invariant 11: Backend-Enforced Role & Location Scoping
-// Invariant 10: Super Admin-Exclusive Price Changes
+// Invariant 10: Authorized and Audited Price Changes
 // ADR-004: Dual-Axis Authorization (RBAC + Location Scope)
 // ADR-008: Immutable Audit Logging
 

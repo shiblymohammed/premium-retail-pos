@@ -83,6 +83,7 @@ export class ReportsController {
   }
 
   @Get('price-changes')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Permission('products.prices')
   async priceChanges(@Query() query: ReportQuery, @CurrentUser() actor: RequestUser) {
     const rows = await this.reports.priceChanges(query, actor);

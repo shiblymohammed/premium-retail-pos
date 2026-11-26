@@ -80,7 +80,8 @@ export default function StaffPermissionsPage() {
     {error && <Feedback tone="error">{error}</Feedback>}
     {notice && <Feedback tone="success">{notice}</Feedback>}
     {profile && id && <form onSubmit={(event) => void save(event)} className={styles.panel}>
-      <PermissionMatrix definitions={profile.definitions} overrides={overrides} setOverrides={setOverrides} disabled={saving} />
+      <PermissionMatrix definitions={profile.definitions} overrides={overrides} setOverrides={setOverrides}
+        disabled={saving} role={people.find((person) => person.id === id)?.role} />
       <div className={styles.fields}>
         <button className="admin-primary" disabled={saving}>Save access</button>
         <Link className="admin-secondary" href="/admin/sales-permissions">Returns, cancellations and stock counting</Link>

@@ -347,7 +347,9 @@ export class ReportsService {
   }
 
   async priceChanges(query: ReportQuery, actor: RequestUser) {
-    if (actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Price history reports are limited to Super Admin accounts');
+    if (!can(actor, 'products.prices', actor.role === Role.ADMIN)) {
+      throw new ForbiddenException('Price history is not permitted for this account');
+    }
     const scope = await this.resolveScope(query, actor);
     return this.prisma.priceChangeLog.findMany({ where: { createdAt: { gte: scope.from, lt: scope.to } }, include: { product: { select: { name: true } }, changedBy: { select: { email: true } } }, orderBy: { createdAt: 'desc' }, take: 5000 });
   }

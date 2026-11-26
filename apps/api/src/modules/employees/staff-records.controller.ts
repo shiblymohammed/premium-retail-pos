@@ -61,8 +61,6 @@ export class StaffRecordsController {
   constructor(private readonly staff: StaffRecordsService) {}
 
   @Get()
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.STORE_MANAGER)
-  @Permission('staff.view', 'payroll.view', 'payroll.manage', 'staff.manage')
   async directory(@CurrentUser() actor: RequestUser) {
     return { data: await this.staff.directory(actor) };
   }
@@ -116,8 +114,6 @@ export class StaffRecordsController {
   }
 
   @Get(':id')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN, Role.STORE_MANAGER)
-  @Permission('staff.view', 'payroll.view', 'payroll.manage', 'staff.manage')
   async profile(@Param('id') id: string, @Query('month') month: string, @CurrentUser() actor: RequestUser) {
     if (!/^[1-9]\d{3}-(?:0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException('Choose a valid month');
     return { data: await this.staff.profile(id, month, actor) };

@@ -294,7 +294,8 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
     if (isSuperUser) return true;
     switch (href) {
       case '/pos-terminal': return canOverride('sales.checkout', roleDefault) || canOverride('cash.drawer', roleDefault) || canOverride('sales.receipts', roleDefault);
-      case '/reports': return canOverride('sales.reports', roleDefault) || canOverride('stock.view', roleDefault) || overrides['cash.reports'] === true || overrides['products.prices'] === true;
+      case '/reports': return canOverride('sales.reports', roleDefault) || canOverride('stock.view', roleDefault)
+        || overrides['cash.reports'] === true || canOverride('products.prices', rawRole === 'ADMIN');
       case '/products': return canOverride('stock.view', roleDefault);
       case '/operations': {
         const manager = roleDefault && !['CASHIER', 'STAFF', 'INVENTORY'].includes(rawRole);
@@ -304,8 +305,8 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
       }
       case '/trade': return canOverride('purchasing.orders', roleDefault) || overrides['customers.credit'] === true || overrides['purchasing.payments'] === true;
       case '/attendance/manage': return canOverride('staff.view', roleDefault) || overrides['attendance.manage'] === true;
-      case '/staff-records': return canOverride('staff.view', roleDefault) || overrides['staff.manage'] === true ||
-        overrides['payroll.view'] === true || overrides['payroll.manage'] === true;
+      case '/staff-records': return canOverride('staff.view', roleDefault) || canOverride('staff.manage', roleDefault)
+        || canOverride('payroll.view', canOverride('payroll.manage', rawRole === 'ADMIN') || rawRole === 'ADMIN');
       case '/audits': return canOverride('stock.auditManagement', roleDefault) || (auditCapabilityLoaded && canCountStockAudits);
       default: return roleDefault;
     }

@@ -218,9 +218,14 @@ export class ProductsService {
   }
 
   async updatePrices(id: string, dto: UpdateProductPricesDto, actor: { userId: string; role: string; permissionOverrides?: PermissionOverrides }) {
-    if (!can(actor, 'products.prices', false)) throw new ForbiddenException('Shared catalogue price changes require explicit permission');
+    if (!can(actor, 'products.prices', actor.role === Role.ADMIN)) {
+      throw new ForbiddenException('Shared catalogue price changes are not permitted for this account');
+    }
     const hasSellingPrice = dto.sellingPrice !== undefined;
     const hasPurchasePrice = dto.purchasePrice !== undefined;
+    if (hasPurchasePrice && !can(actor, 'products.prices', false)) {
+      throw new ForbiddenException('Changing the purchase price requires an explicit price permission');
+    }
     if (hasPurchasePrice && !can(actor, 'products.cost', actor.role === Role.ADMIN || actor.role === Role.INVENTORY)) {
       throw new ForbiddenException('Product cost access is required to change the purchase price');
     }
@@ -432,7 +437,7 @@ export class ProductsService {
 
   private assertSuperAdmin(role: string): void {
     if (role !== Role.SUPER_ADMIN) {
-      throw new ForbiddenException('Only a Super Admin can create or change product prices');
+      throw new ForbiddenException('Only a Super Admin can create products');
     }
   }
 }

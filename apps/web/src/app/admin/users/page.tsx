@@ -1264,7 +1264,7 @@ export default function UserManagementPage() {
                 <details className="admin-user-permission-review">
                   <summary>Review all permissions before creating the account</summary>
                   {permissionDefinitions ? <PermissionMatrix definitions={permissionDefinitions} overrides={accessOverrides}
-                    setOverrides={setAccessOverrides} disabled={savingUser} />
+                    setOverrides={setAccessOverrides} disabled={savingUser} role={formRole} />
                     : <p role="status">{permissionDefinitionError || 'Loading permissions…'}</p>}
                 </details>}
               {!editingUser && (

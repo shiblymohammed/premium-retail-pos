@@ -12,13 +12,26 @@ describe('ProductsService security and price history', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
-  it('rejects price changes by non-Super-Admins before database access', async () => {
+  it.each([
+    { role: Role.STORE_MANAGER },
+    { role: Role.ADMIN, permissionOverrides: { 'products.prices': false } },
+  ])('rejects selling price changes without access before database access ($role)', async (access) => {
     const prisma = { $transaction: jest.fn() };
     const service = new ProductsService(prisma as any);
 
     await expect(service.updatePrices('product-id', { sellingPrice: 120, reason: 'Approved update' }, {
       userId: 'admin-id',
-      role: Role.ADMIN,
+      ...access,
+    })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit price grant for an Admin to edit acquisition cost', async () => {
+    const prisma = { $transaction: jest.fn() };
+    const service = new ProductsService(prisma as any);
+
+    await expect(service.updatePrices('product-id', { purchasePrice: 70, reason: 'Approved update' }, {
+      userId: 'admin-id', role: Role.ADMIN,
     })).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
@@ -84,7 +97,7 @@ describe('ProductsService security and price history', () => {
     }));
   });
 
-  it('locks the product before reading prices and writes the prior value to the audit log', async () => {
+  it('lets Admins edit selling prices and locks the product before logging the prior value', async () => {
     const current = {
       id: 'product-id',
       sellingPrice: new Prisma.Decimal(100),
@@ -102,15 +115,15 @@ describe('ProductsService security and price history', () => {
     const service = new ProductsService(prisma as any);
 
     await service.updatePrices('product-id', { sellingPrice: 120, reason: 'Approved update' }, {
-      userId: 'super-admin-id',
-      role: Role.SUPER_ADMIN,
+      userId: 'admin-id',
+      role: Role.ADMIN,
     });
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(tx.product.findUnique).toHaveBeenCalledTimes(1);
     expect(tx.priceChangeLog.createMany).toHaveBeenCalledWith({
       data: [expect.objectContaining({
-        changedByUserId: 'super-admin-id',
+        changedByUserId: 'admin-id',
         fieldChanged: 'selling_price',
         oldValue: current.sellingPrice,
         newValue: new Prisma.Decimal(120),

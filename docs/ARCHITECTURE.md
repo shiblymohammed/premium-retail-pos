@@ -160,7 +160,7 @@ The system is partitioned into twelve modular domains. Each module enforces stri
 | :--- | :--- | :--- |
 | **1. Identity & Access** | User credentials, JWT issuance, session termination, password resets, role management. | Passwords hashed with bcrypt; deactivated users rejected immediately; user-location bindings enforced. |
 | **2. Organization & Locations** | Company settings, warehouse and store records, manager assignments. | Tiered hierarchy (`Main Warehouse` &rarr; `Sub-Warehouse` &rarr; `Retail Store`); active history prevents hard deletion. |
-| **3. Product Catalogue & Pricing** | Products, variants (size/colour), SKU/barcodes, unit conversion ratios, pricing. | **Super Admin only** may alter purchase/selling prices; price edits require logged reason; variants have distinct SKU identities. |
+| **3. Product Catalogue & Pricing** | Products, variants (size/colour), SKU/barcodes, unit conversion ratios, pricing. | Super Admins and Admins can edit selling prices by default. Super Admins can edit purchase prices. Other users need an explicit price grant and access to product costs to edit purchase prices. All price edits record a reason. |
 | **4. Inventory Ledger** | Canonical base unit stock tracking, stock state segregation, ledger reconciliation. | All stock changes create append-only ledger movements; stock balance is a pure function of historical movements; negative stock is permitted with prominent UI warnings and negative balance display (`OD-03`). |
 | **5. Supplier Receiving** | Supplier stock-in recording, carton/loose packet receipt validation. | Confirmed receipts, line conversion snapshots, receiving actor, and `SUPPLIER_RECEIPT` movements commit atomically; receipt documents are immutable and idempotent. |
 | **6. Transfers & Replenishment** | Auto-replenishment calculation, transfer lifecycle state machine, transit tracking. | In-transit stock cannot be sold at destination; cancelled transfers reversed via ledger; transfers support full cartons and loose packets between any locations in the same company (`OD-01`, `OD-02`). |
@@ -264,10 +264,10 @@ classDiagram
 - **Implementation Status**: *Required implementation rule (Pending codebase implementation).*
 - **Design Enforcement**: `Invoice.status` set to `CANCELLED`; a linked `SaleCancellation` record is created with manager reason; opposite positive movements (`+qty`, `SALE_CANCELLATION`) are posted to restore stock.
 
-### Invariant 10: Super Admin-Exclusive Price Changes
-- **Rule**: Only users holding the `SUPER_ADMIN` role may modify purchase or selling prices.
-- **Implementation Status**: Implemented in Phase 3.
-- **Design Enforcement**: Backend `@Roles(SUPER_ADMIN)` protection on product creation and `PATCH /api/v1/products/:id/prices`; each initial or changed selling/purchase price is transactionally recorded in `PriceChangeLog` with old/new values, actor ID, timestamp, and reason.
+### Invariant 10: Authorized and Audited Price Changes
+- **Rule**: Super Admins and Admins can edit selling prices by default. Super Admins can edit purchase prices. Other users need an explicit price grant and product cost access to edit purchase prices.
+- **Implementation Status**: Implemented in the product catalogue and price history reports.
+- **Design Enforcement**: Product creation requires Super Admin access. Price edits honor role defaults and per-person overrides. Each initial or changed price is recorded in the same transaction with its old and new values, actor ID, timestamp, and reason.
 
 ### Invariant 11: Backend-Enforced Role & Location Scoping
 - **Rule**: Every protected endpoint must validate user role capabilities and location boundaries on the server. UI-only hiding is strictly insufficient.
@@ -462,7 +462,7 @@ The proposed testing pyramid ensures strict adherence to business rules, concurr
 
 ### 8.4 Security & Boundary Tests
 - Verifying that a Cashier assigned to Store A receives HTTP 403 Forbidden when attempting to query or bill stock at Store B.
-- Verifying that non-Super Admin roles receive HTTP 403 Forbidden when attempting to invoke price modification endpoints.
+- Verifying that selling price edits respect role defaults and overrides, and that purchase price edits require both the price grant and access to product costs.
 
 ---
 

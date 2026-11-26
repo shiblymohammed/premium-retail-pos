@@ -47,6 +47,17 @@ function staffReportAccess(actor: RequestUser) {
   };
 }
 
+function staffProfileAccess(actor: RequestUser) {
+  const defaultStaffView = actor.role === Role.ADMIN || actor.role === Role.STORE_MANAGER;
+  const managePayroll = can(actor, 'payroll.manage', actor.role === Role.ADMIN);
+  return {
+    viewAttendance: can(actor, 'staff.view', defaultStaffView),
+    manageStaff: can(actor, 'staff.manage', defaultStaffView),
+    managePayroll,
+    viewPayroll: can(actor, 'payroll.view', actor.role === Role.ADMIN || managePayroll),
+  };
+}
+
 function checkPayrollRevision(basis: Prisma.JsonValue, expected: string | null | undefined) {
   const revision = basis && typeof basis === 'object' && !Array.isArray(basis) ? basis.revision ?? null : null;
   if ((expected ?? null) !== revision) {
@@ -63,6 +74,7 @@ export class StaffRecordsService {
   }
 
   async directory(actor: RequestUser) {
+    this.requireProfileAccess(actor);
     return this.prisma.employee.findMany({
       where: this.locationScope(actor), orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
       select: { id: true, firstName: true, lastName: true, employeeCode: true, location: { select: { name: true } } },
@@ -77,22 +89,25 @@ export class StaffRecordsService {
     return result;
   }
 
+  private requireProfileAccess(actor: RequestUser) {
+    const access = staffProfileAccess(actor);
+    if (!access.viewAttendance && !access.manageStaff && !access.viewPayroll) {
+      throw new ForbiddenException('This account is not authorized to view staff records');
+    }
+    return access;
+  }
+
   async profile(id: string, month: string, actor: RequestUser) {
+    const access = this.requireProfileAccess(actor);
     const staff = await this.employee(id, actor);
     const { timezone } = staff.location.company;
     const { includeSales, includeCash } = staffReportAccess(actor);
-    const canManagePayroll = can(actor, 'payroll.manage', actor.role === Role.ADMIN);
-    const canSeePayroll = can(actor, 'payroll.view', actor.role === Role.ADMIN || canManagePayroll);
+    const { viewAttendance, managePayroll, viewPayroll } = access;
     const from = Prisma.sql`((${month + '-01'}::date)::timestamp AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
     const to = Prisma.sql`((${month + '-01'}::date + INTERVAL '1 month') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
     const previousFrom = Prisma.sql`((${month + '-01'}::date - INTERVAL '1 month') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
-    const throughFollowingDay = Prisma.sql`((${month + '-01'}::date + INTERVAL '1 month 1 day') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
-    const [nearbyAttendance, sales, drawers, payroll, baseSalary, loans] = await Promise.all([
-      this.prisma.$queryRaw<Array<{ id: string; at: Date; action: string; late: boolean; scheduledEndAt: Date | null }>>(Prisma.sql`
-        SELECT id, punch_timestamp AS at, punch_type AS action, is_late AS late, scheduled_end_at AS "scheduledEndAt" FROM attendances
-        WHERE employee_id = ${id} AND location_id = ${staff.locationId} AND punch_timestamp >= ${from} AND punch_timestamp < ${throughFollowingDay}
-        ORDER BY punch_timestamp
-      `),
+    const [attendance, sales, drawers, payroll, baseSalary, loans] = await Promise.all([
+      viewAttendance ? this.monthlyAttendance(staff, month) : undefined,
       includeSales ? this.prisma.$queryRaw<Array<{ bills: number; sales: string; previousSales: string; discounts: string; returns: number }>>(Prisma.sql`
         SELECT COUNT(*) FILTER (WHERE invoice.status = 'FINALIZED' AND invoice.created_at >= ${from})::int AS bills,
           COALESCE(SUM(invoice.net_total) FILTER (WHERE invoice.status = 'FINALIZED' AND invoice.created_at >= ${from}), 0)::text AS sales,
@@ -112,9 +127,9 @@ export class StaffRecordsService {
         FROM cash_drawer_sessions WHERE operator_id = ${staff.userId} AND location_id = ${staff.locationId}
           AND closed_at >= ${from} AND closed_at < ${to} ORDER BY closed_at DESC
       `) : undefined,
-      canSeePayroll ? this.prisma.payrollRecord.findMany({ where: { employeeId: id }, select: payrollFields, orderBy: { period: 'desc' } }) : undefined,
-      canSeePayroll ? this.prisma.employee.findUnique({ where: { id }, select: { monthlyBaseSalary: true } }) : undefined,
-      canSeePayroll ? this.prisma.loan.findMany({ where: { employeeId: id }, select: loanFields, orderBy: { issueDate: 'desc' } }) : undefined,
+      viewPayroll ? this.prisma.payrollRecord.findMany({ where: { employeeId: id }, select: payrollFields, orderBy: { period: 'desc' } }) : undefined,
+      viewPayroll ? this.prisma.employee.findUnique({ where: { id }, select: { monthlyBaseSalary: true } }) : undefined,
+      viewPayroll ? this.prisma.loan.findMany({ where: { employeeId: id }, select: loanFields, orderBy: { issueDate: 'desc' } }) : undefined,
     ]);
     const manualPaymentIds = loans?.flatMap((loan) => loan.repayments.filter((payment) => !payment.isPayrollDeduction).map((payment) => payment.id)) ?? [];
     const collectionEvents = manualPaymentIds.length ? await this.prisma.auditEvent.findMany({
@@ -130,10 +145,35 @@ export class StaffRecordsService {
         // Older audit entries may contain plain text.
       }
     }
-    const breaks = await this.prisma.attendanceBreak.findMany({
+    return { staff, permissionDefinitions: PERMISSIONS, permissionDefaults: roleDefaults(staff.user.role), ...attendance,
+      canManagePayroll: viewPayroll && managePayroll, sales: sales?.[0], drawers, payroll,
+      baseSalary: baseSalary?.monthlyBaseSalary,
+      loans: loans?.map(({ repayments, ...loan }) => ({
+        ...loan, repayments: repayments.map(({ payroll: collectionPayroll, ...payment }) => ({
+          ...payment, payrollPeriod: collectionPayroll?.period ?? null,
+          paymentReference: collectionReferences.get(payment.id) ?? null,
+        })),
+        outstanding: loan.amount.sub(repayments.filter((item) => item.status === 'CONFIRMED')
+          .reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
+        collectible: loan.amount.sub(repayments.reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
+        scheduled: repayments.find((item) => item.status === 'PENDING' && item.isPayrollDeduction && !item.payrollId)?.amount ?? null,
+      })) };
+
+  }
+
+  private async monthlyAttendance(staff: Prisma.EmployeeGetPayload<{ select: typeof employeeFields }>, month: string) {
+    const { timezone } = staff.location.company;
+    const from = Prisma.sql`((${month + '-01'}::date)::timestamp AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
+    const throughFollowingDay = Prisma.sql`((${month + '-01'}::date + INTERVAL '1 month 1 day') AT TIME ZONE ${timezone}) AT TIME ZONE 'UTC'`;
+    const nearbyAttendance = await this.prisma.$queryRaw<Array<{ id: string; at: Date; action: string; late: boolean; scheduledEndAt: Date | null }>>(Prisma.sql`
+      SELECT id, punch_timestamp AS at, punch_type AS action, is_late AS late, scheduled_end_at AS "scheduledEndAt" FROM attendances
+      WHERE employee_id = ${staff.id} AND location_id = ${staff.locationId} AND punch_timestamp >= ${from} AND punch_timestamp < ${throughFollowingDay}
+      ORDER BY punch_timestamp
+    `);
+    const breaks = nearbyAttendance.length ? await this.prisma.attendanceBreak.findMany({
       where: { clockInId: { in: nearbyAttendance.filter((punch) => punch.action === 'IN').map((punch) => punch.id) } },
       select: { clockInId: true, startedAt: true, endedAt: true },
-    });
+    }) : [];
     const breaksByShift = new Map<string, typeof breaks>();
     for (const pause of breaks) {
       const shiftBreaks = breaksByShift.get(pause.clockInId) ?? [];
@@ -154,20 +194,7 @@ export class StaffRecordsService {
       totals.overtimeMinutes += metrics.overtimeMinutes;
       if (metrics.earlyMinutes > 0) totals.earlyCheckouts += 1;
     }
-    return { staff, permissionDefinitions: PERMISSIONS, permissionDefaults: roleDefaults(staff.user.role), attendance,
-      canManagePayroll: canSeePayroll && canManagePayroll, ...totals, sales: sales?.[0], drawers, payroll,
-      baseSalary: baseSalary?.monthlyBaseSalary,
-      loans: loans?.map(({ repayments, ...loan }) => ({
-        ...loan, repayments: repayments.map(({ payroll: collectionPayroll, ...payment }) => ({
-          ...payment, payrollPeriod: collectionPayroll?.period ?? null,
-          paymentReference: collectionReferences.get(payment.id) ?? null,
-        })),
-        outstanding: loan.amount.sub(repayments.filter((item) => item.status === 'CONFIRMED')
-          .reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
-        collectible: loan.amount.sub(repayments.reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
-        scheduled: repayments.find((item) => item.status === 'PENDING' && item.isPayrollDeduction && !item.payrollId)?.amount ?? null,
-      })) };
-
+    return { attendance, ...totals };
   }
 
   async comparison(month: string, actor: RequestUser) {
@@ -300,8 +327,8 @@ export class StaffRecordsService {
   }
 
   private checkPayrollAccess(actor: RequestUser) {
-    if (!can(actor, 'payroll.manage', actor.role === Role.ADMIN) ||
-        !can(actor, 'payroll.view', actor.role === Role.ADMIN || actor.permissionOverrides?.['payroll.manage'] === true)) {
+    const { managePayroll, viewPayroll } = staffProfileAccess(actor);
+    if (!managePayroll || !viewPayroll) {
       throw new ForbiddenException('Payroll management and visibility are required');
     }
   }
@@ -381,8 +408,8 @@ export class StaffRecordsService {
     if (!new Prisma.Decimal(dto.advanceRecovery ?? 0).isZero()) {
       throw new BadRequestException('To deduct a loan or advance from payroll, queue a collection for that loan in Staff records');
     }
-    const profile = await this.profile(id, dto.period, actor);
-    const { staff } = profile;
+    const staff = await this.employee(id, actor);
+    const { attendance, overtimeMinutes } = await this.monthlyAttendance(staff, dto.period);
     const timezone = staff.location.company.timezone;
     const today = localDay(new Date(), timezone);
     const scheduledDates = [...new Set(dto.scheduledDates ?? [])].sort();
@@ -391,10 +418,10 @@ export class StaffRecordsService {
       const parsed = new Date(date + 'T00:00:00Z');
       return !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date;
     })) throw new BadRequestException('Choose completed work dates in the payroll month on or after the joining date');
-    const present = new Set(profile.attendance.filter((punch) => punch.action === 'IN').map((punch) => localDay(punch.at, timezone)));
-    const lateDays = new Set(profile.attendance.filter((punch) => punch.action === 'IN' && punch.late).map((punch) => localDay(punch.at, timezone))).size;
+    const present = new Set(attendance.filter((punch) => punch.action === 'IN').map((punch) => localDay(punch.at, timezone)));
+    const lateDays = new Set(attendance.filter((punch) => punch.action === 'IN' && punch.late).map((punch) => localDay(punch.at, timezone))).size;
     const absences = scheduledDates.filter((date) => !present.has(date));
-    const overtimePay = new Prisma.Decimal(dto.overtimeHourlyRate ?? 0).mul(profile.overtimeMinutes).div(60).toDecimalPlaces(2);
+    const overtimePay = new Prisma.Decimal(dto.overtimeHourlyRate ?? 0).mul(overtimeMinutes).div(60).toDecimalPlaces(2);
     const attendanceDeduction = new Prisma.Decimal(dto.lateDayDeduction ?? 0).mul(lateDays)
       .add(new Prisma.Decimal(dto.absentDayDeduction ?? 0).mul(absences.length));
     const { period, base, allowances, bonus, deductions } = dto;
@@ -443,7 +470,7 @@ export class StaffRecordsService {
         if (advanceRecovery.gt(max)) throw new BadRequestException('Payroll recovery exceeds the supported amount');
         const data = {
           base, allowances, bonus, deductions, advanceRecovery, overtimePay, attendanceDeduction,
-          attendanceBasis: { overtimeMinutes: profile.overtimeMinutes, lateDays, scheduledDates, absences,
+          attendanceBasis: { overtimeMinutes, lateDays, scheduledDates, absences,
             overtimeHourlyRate: dto.overtimeHourlyRate ?? '0', lateDayDeduction: dto.lateDayDeduction ?? '0',
             absentDayDeduction: dto.absentDayDeduction ?? '0', ...(draft && { revision: randomUUID() }) },
           net: remainingPay,

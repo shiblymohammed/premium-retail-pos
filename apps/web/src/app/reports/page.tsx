@@ -139,14 +139,16 @@ export default function ReportsPage() {
     return () => { window.removeEventListener('mousedown', onClick); window.removeEventListener('keydown', onKey); };
   }, [exportOpen]);
 
-  // Sync selected location from global app frame if present
   useEffect(() => {
     const authSession = getStoredSession();
     if (authSession?.accessToken) {
       setToken(authSession.accessToken);
     }
     setRole(authSession?.user?.role ?? '');
-
+    const params = new URLSearchParams(window.location.search);
+    const requestedReport = REPORT_TABS.find((tab) => tab.key === params.get('tab'));
+    if (requestedReport) setReport(requestedReport.key);
+    if (params.get('alerts') === '1') setShowNotifications(true);
   }, []);
 
   const canConsolidate = role === 'SUPER_ADMIN' || role === 'ADMIN';
@@ -198,22 +200,6 @@ export default function ReportsPage() {
   }, [token]);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('alerts') === '1') setShowNotifications(true);
-  }, []);
-
-  // Deep link: /reports?tab=stock opens that tab; switching tabs keeps the URL in sync.
-  useEffect(() => {
-    const routeParams = new URLSearchParams(window.location.search);
-    const requested = routeParams.get('tab');
-    if (routeParams.get('alerts') === '1') setShowNotifications(true);
-    if (!requested || !REPORT_TABS.some((t) => t.key === requested)) return;
-    const requestedTab = requested as ReportKind;
-    if (requestedTab === 'priceChanges' && role !== 'SUPER_ADMIN') return;
-    if (requestedTab === 'itemDeletions' && role !== 'SUPER_ADMIN' && role !== 'ADMIN') return;
-    setReport(requestedTab);
-  }, [role]);
-
-  useEffect(() => {
     if (!showNotifications || !token || notifications) return;
     const controller = new AbortController();
 
@@ -242,8 +228,8 @@ export default function ReportsPage() {
   const canReadStock = can('stock.view', reportRole);
   const visibleReportTabs = REPORT_TABS.filter((tab) => {
     if (tab.key === 'overview') return canReadSales && canReadStock;
-    if (tab.key === 'priceChanges') return can('products.prices', role === 'SUPER_ADMIN');
-    if (tab.key === 'itemDeletions') return canReadSales;
+    if (tab.key === 'priceChanges') return can('products.prices', canConsolidate);
+    if (tab.key === 'itemDeletions') return canReadSales && canConsolidate;
     if (['stock', 'lowStock', 'ledger', 'transferDiscrepancies', 'auditVariances'].includes(tab.key)) return canReadStock;
     return canReadSales;
   });
@@ -253,11 +239,12 @@ export default function ReportsPage() {
     if (!accessLoading && !canReadReport && visibleReportTabs.length) setReport(visibleReportTabs[0].key);
   }, [accessLoading, canReadReport, visibleReportTabs]);
   useEffect(() => {
+    if (accessLoading || !role || !canReadReport) return;
     const url = new URL(window.location.href);
     if (report === 'overview') url.searchParams.delete('tab');
     else url.searchParams.set('tab', report);
     window.history.replaceState(null, '', url);
-  }, [report]);
+  }, [accessLoading, canReadReport, report, role]);
 
   const scopedLocations = locationId
     ? locations.filter((location) => location.id === locationId)
@@ -279,7 +266,7 @@ export default function ReportsPage() {
     timezones.size > 1 ? 'Choose a location to use its company’s reporting time zone.' :
     !from || !to || from > to ? 'Choose a valid reporting period.' : '';
   const reportKey = JSON.stringify([report, locationId, from, to, timezone, report === 'salesDetails' ? invoicePage : 1, reportRetry]);
-  const loaded = locationState === 'ready' && !scopeError && reportResult.key === reportKey && !reportResult.error;
+  const loaded = canReadReport && locationState === 'ready' && !scopeError && reportResult.key === reportKey && !reportResult.error;
   const failure = reportResult.key === reportKey ? reportResult.error : '';
   const formatAmount = (value: number, digits = 2) => formatMoney(currency, value, digits);
   const formatShortAmount = (value: number) => formatCompactMoney(currency, value);
@@ -610,7 +597,8 @@ export default function ReportsPage() {
       {locationState === 'error' && <Feedback tone="error">Could not load reporting locations. <button type="button" className={styles.textButton} onClick={() => setLocationRetry((value) => value + 1)}>Retry</button></Feedback>}
       {scopeError && <Feedback tone="error">{scopeError}</Feedback>}
       {failure && <Feedback tone="error">{failure} <button type="button" className={styles.textButton} onClick={() => setReportRetry((value) => value + 1)}>Retry</button></Feedback>}
-      {!loaded && !scopeError && !failure && locationState !== 'error' && <p role="status">Loading report…</p>}
+      {!accessLoading && !visibleReportTabs.length && <p>No reports are available for this account.</p>}
+      {!loaded && (accessLoading || visibleReportTabs.length > 0) && !scopeError && !failure && locationState !== 'error' && <p role="status">Loading report…</p>}
       {loaded && usesSalesCutoff && <p className={styles.mutedText}>
         Sales are grouped by invoice date. Refunds and cancellations are included through the selected end date.
         Extend the end date to include later changes to those invoices.
