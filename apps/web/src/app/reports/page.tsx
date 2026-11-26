@@ -7,6 +7,7 @@ import { useAccess } from '@/lib/permissions';
 import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
 import { ArrowRight } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
@@ -71,7 +72,7 @@ const REPORT_TABS: Array<{ key: ReportKind; label: string }> = [
   { key: 'productPerformance', label: 'Product performance' },
   { key: 'lowStock', label: 'Low stock' },
   { key: 'ledger', label: 'Movements' },
-  { key: 'transferDiscrepancies', label: 'Transfers' },
+  { key: 'transferDiscrepancies', label: 'Transfer discrepancies' },
   { key: 'auditVariances', label: 'Audits' },
   { key: 'priceChanges', label: 'Price history' },
   { key: 'cancellations', label: 'Voided sales' },
@@ -226,6 +227,9 @@ export default function ReportsPage() {
   const reportRole = ['SUPER_ADMIN', 'ADMIN', 'CENTRAL_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'STORE_MANAGER'].includes(role);
   const canReadSales = can('sales.reports', reportRole);
   const canReadStock = can('stock.view', reportRole);
+  const canOpenTransfers = can('transfers.request', reportRole || role === 'INVENTORY')
+    || can('transfers.receive', reportRole || role === 'CASHIER' || role === 'STAFF')
+    || can('transfers.approve', reportRole) || can('transfers.dispatch', reportRole);
   const visibleReportTabs = REPORT_TABS.filter((tab) => {
     if (tab.key === 'overview') return canReadSales && canReadStock;
     if (tab.key === 'priceChanges') return can('products.prices', canConsolidate);
@@ -774,10 +778,12 @@ export default function ReportsPage() {
       </>}
       {loaded && report === 'stock' && stock && <StockView stock={stock} matches={matches} />}
       {loaded && !['overview', 'sales', 'salesDetails', 'stock'].includes(report) && tableData && <Card title={tableData.title} subtitle={report === 'productPerformance' ? 'Net units and sales for the period. Available stock is current.' : tableData.description}
-        action={report === 'productPerformance' && <PillDropdown
+        action={report === 'productPerformance' ? <PillDropdown
           value={productOrder} onChange={setProductOrder} ariaLabel="Rank products" heading="Rank products"
           options={[{ value: 'top', label: 'Most sold' }, { value: 'slow', label: 'Fewest sold' }, { value: 'unsold', label: 'In stock with no net sales' }]}
-        />}>
+        /> : report === 'transferDiscrepancies' && canOpenTransfers && <Link href="/operations" className={styles.textButton}>
+          Open full transfer history <ArrowRight size="1em" className="inline-icon" aria-hidden="true" />
+        </Link>}>
         <Table headers={getExportData().headers} rows={getExportData().rows.map((row) => row.map(String))} />
       </Card>}
     </div>

@@ -4,6 +4,7 @@ import { Prisma, Role } from '@prisma/client';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { formatMixedUnitQuantity } from '../products/unit-conversion';
 import { receiptDiscrepancies } from '../transfers/receipt-discrepancies';
 import { ReportQuery } from './reports.controller';
 
@@ -292,22 +293,37 @@ export class ReportsService {
         select: { id: true, transferNumber: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true } } },
       }) : [],
       invoiceIds.length ? this.prisma.invoice.findMany({
-        where: { id: { in: invoiceIds }, locationId: { in: scope.locationIds } }, select: { id: true, invoiceNumber: true },
+        where: { id: { in: invoiceIds }, locationId: { in: scope.locationIds } },
+        select: {
+          id: true, invoiceNumber: true,
+          lines: {
+            where: { conversionRatioUsed: { not: null } },
+            select: { variantId: true, quantityBaseUnits: true, conversionRatioUsed: true },
+          },
+        },
       }) : [],
       returnIds.length ? this.prisma.saleReturn.findMany({
         where: { id: { in: returnIds }, invoice: { locationId: { in: scope.locationIds } } }, select: { id: true, returnNumber: true },
       }) : [],
     ]);
     const transferById = new Map(transfers.map((transfer) => [transfer.id, transfer] as const));
+    const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice] as const));
     const documentById = new Map([
       ...transfers.map((row) => [row.id, row.transferNumber] as const),
       ...invoices.map((row) => [row.id, row.invoiceNumber] as const),
       ...returns.map((row) => [row.id, row.returnNumber] as const),
     ]);
-    return movements.map((movement) => ({
-      ...movement, transferRoute: transferById.get(movement.referenceId ?? '') ?? null,
-      documentNumber: documentById.get(movement.referenceId ?? '') ?? null,
-    }));
+    return movements.map((movement) => {
+      const reference = movement.referenceId ?? '';
+      const saleLine = movement.referenceType === 'sale_invoice' ? invoiceById.get(reference)?.lines.find((line) =>
+        line.variantId === movement.variantId && line.quantityBaseUnits === Math.abs(movement.quantityBaseUnits)) : undefined;
+      return {
+        ...movement,
+        formattedQuantity: formatMixedUnitQuantity(movement.quantityBaseUnits, movement.variant.product.baseUnit, saleLine?.conversionRatioUsed ?? null),
+        transferRoute: transferById.get(reference) ?? null,
+        documentNumber: documentById.get(reference) ?? null,
+      };
+    });
   }
 
   async lowStock(query: ReportQuery, actor: RequestUser) {

@@ -99,7 +99,6 @@ type Schedule = {
   timezone: string;
   lastRunDate: string | null;
   locationType: string;
-  allowedDays: string;
   earliestStartTime: string | null;
   canStartNow: boolean;
 };
@@ -464,6 +463,9 @@ export default function AuditsPage() {
   const duration = (a: string, b: string | null) => (b ? `${Math.max(1, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 60000))} min` : '—');
   const initials = (name: string) => name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const countWindow = schedule
+    ? `${schedule.locationType === 'RETAIL_STORE' ? 'Every day' : 'Sundays'} from ${schedule.startTime ?? '19:00'} (${schedule.timezone})`
+    : null;
 
   // Three plain-language steps
   const steps = ['Start', 'Count', 'Review & finish'];
@@ -570,7 +572,7 @@ export default function AuditsPage() {
                     <Icon name="play" size={16} /> {isFinished ? 'Start a new count' : 'Start stock count'}
                   </button>
                   <span className={styles.heroHint}>
-                    {!capabilities.canManage ? 'A manager starts the count.' : !schedule ? 'Schedule unavailable.' : !schedule.canStartNow ? `Count window: ${schedule.allowedDays} from ${schedule.startTime} (${schedule.timezone}).` : lastAudit ? <>Last approved count: <b>{fmtDate(lastAudit.startedAt)}</b> · {plural(lastAudit._count.countItems, 'product')}</> : 'No approved audits yet'}
+                    {!capabilities.canManage ? 'A manager starts the count.' : !schedule ? 'Schedule unavailable.' : !schedule.canStartNow ? `Count window: ${countWindow}.` : lastAudit ? <>Last approved count: <b>{fmtDate(lastAudit.startedAt)}</b> · {plural(lastAudit._count.countItems, 'product')}</> : 'No approved audits yet'}
                   </span>
                 </>
               )}
@@ -768,7 +770,7 @@ export default function AuditsPage() {
               </div>}
               <div className={styles.settingGroup}>
                 <h4>When counts can start</h4>
-                <p>{schedule?.allowedDays}, from {schedule?.startTime || '19:00'} ({schedule?.timezone}).</p>
+                <p>{countWindow ? `${countWindow}.` : 'Schedule unavailable.'}</p>
                 <label className={styles.field}>
                   <span>Start time</span>
                   <input type="time" min="19:00" value={scheduleTime} disabled={busy} onChange={(e) => setScheduleTime(e.target.value)} />

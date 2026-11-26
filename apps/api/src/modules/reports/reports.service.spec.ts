@@ -30,6 +30,37 @@ describe('ReportsService authorization', () => {
   });
 });
 
+describe('ReportsService movement quantities', () => {
+  it('shows the original carton conversion alongside the signed stock deduction', async () => {
+    const movement = {
+      referenceType: 'sale_invoice', referenceId: 'invoice-a', variantId: 'variant-a',
+      variant: { product: { baseUnit: 'packet', unitsPerCarton: 6 } },
+    };
+    const prisma = {
+      inventoryMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          { ...movement, quantityBaseUnits: -10 },
+          { ...movement, quantityBaseUnits: -1 },
+          { ...movement, referenceType: 'opening_stock', referenceId: null, quantityBaseUnits: 8 },
+        ]),
+      },
+      invoice: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'invoice-a', invoiceNumber: 'INV-1',
+          lines: [{ variantId: 'variant-a', quantityBaseUnits: 10, conversionRatioUsed: 10 }],
+        }]),
+      },
+    };
+    const service = new ReportsService(prisma as any, {} as any);
+    const rows = await service.movementLedger({ locationId: 'store-a', limit: 50 }, {
+      userId: 'admin-1', email: 'admin@example.test', role: Role.SUPER_ADMIN, locationIds: [],
+    });
+
+    expect(rows.map((row) => row.formattedQuantity)).toEqual(['-10 packets = -1 carton', '-1 packet', '8 packets']);
+    expect(rows[0].documentNumber).toBe('INV-1');
+  });
+});
+
 describe('ReportsService financial summaries', () => {
   it('exports the original charge, refunds and remaining net with the return status', async () => {
     const total = new Prisma.Decimal('57.20');

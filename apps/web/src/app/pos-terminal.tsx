@@ -425,6 +425,17 @@ export default function PosTerminal() {
   const auditBlocksCheckout = Boolean(terminal?.location.isAuditLocked && !saleRetryPending);
   const checkoutDisabled = auditBlocksCheckout || busy || !!removingVariantId || drawerBlocksCheckout || cart.length === 0 || cart.some((line) => !baseQuantity(line))
     || stockBlocksCheckout || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001);
+  const cashAmount = Number(cashTendered);
+  const validateCashTender = paymentMethod === 'CASH' && !saleRetryPending;
+  let cashTenderError = '';
+  if (validateCashTender && cashTendered) {
+    if (!Number.isFinite(cashAmount) || Math.abs(cashAmount * 100 - Math.round(cashAmount * 100)) > 0.000001) {
+      cashTenderError = 'Enter a cash amount with up to two decimal places.';
+    } else if (cashAmount < saleTotals.net) {
+      cashTenderError = 'Cash received must cover the amount due.';
+    }
+  }
+  const cashPaymentBlocked = validateCashTender && (!cashTendered || Boolean(cashTenderError));
 
   const formatMoney = (amount: number | string, currency = terminal?.location.currency || 'INR') => new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -1002,7 +1013,7 @@ export default function PosTerminal() {
   }
 
   async function checkout() {
-    if (!token || !cart.length || busy) return;
+    if (!token || !cart.length || busy || cashPaymentBlocked) return;
     if (cart.some((line) => !baseQuantity(line))) {
       setError('Enter a quantity for every basket line.');
       return;
@@ -1035,12 +1046,9 @@ export default function PosTerminal() {
           paymentMethod,
           paymentAmount: Number(saleTotals.net.toFixed(2)),
           ...(Number(billDiscount || 0) > 0 ? { billDiscountPercent: Number(billDiscount) } : {}),
-          ...(paymentMethod === 'CASH' ? { cashTenderedAmount: Number(cashTendered) } : {}),
+          ...(paymentMethod === 'CASH' ? { cashTenderedAmount: cashAmount } : {}),
           ...(paymentMethod !== 'CASH' && transactionReference.trim() ? { transactionReference: transactionReference.trim() } : {}),
         };
-        if (paymentMethod === 'CASH' && (!cashTendered || Number(cashTendered) < saleTotals.net)) {
-          throw new Error('Enter cash tendered equal to or greater than the sale total.');
-        }
         pendingSaleRef.current = { key: crypto.randomUUID(), body: JSON.stringify(body) };
       }
       const queuePendingSale = async (queueError?: string) => {
@@ -1350,7 +1358,7 @@ export default function PosTerminal() {
             <div className="scanner-status"><span className="status-dot" /> Ready to scan · Enter a barcode or search</div>
           </div>
 
-          {error && <Feedback tone="error">{error}</Feedback>}
+          {error && !checkoutOpen && <Feedback tone="error">{error}</Feedback>}
           {notice && !error && <div className="notice-line">{notice}</div>}
           {saleRetryPending && <div className="alert stock-error">The checkout response was interrupted. Retry the same sale to safely confirm its result; keep this terminal open.</div>}
           {stockError && <div className="alert stock-error">Stock refresh failed: {stockError}</div>}
@@ -1612,9 +1620,24 @@ export default function PosTerminal() {
           <header><div><div className="eyebrow">PAYMENT</div><div className="heading-with-info"><h2 id="checkout-title">Complete sale</h2><InfoHint label="About checkout">Choose the payment method. For cash, enter the amount received to calculate change.</InfoHint></div><p>Review tender and confirm the amount received.</p></div><button className="modal-close" disabled={busy} onClick={() => setCheckoutOpen(false)} aria-label="Close checkout"><X size={16} className="inline-icon" aria-hidden="true" /></button></header>
           <div className="checkout-due"><span>Amount due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
           <label className="payment-select">Payment method<select value={paymentMethod} disabled={saleRetryPending} onChange={(event) => setPaymentMethod(event.target.value as 'CASH' | 'CARD' | 'ONLINE')}><option value="CASH">Cash</option><option value="CARD">Card</option><option value="ONLINE">Online</option></select></label>
-          {paymentMethod === 'CASH' ? <><label className="payment-select">Cash received<input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending} onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} /></label><div className="cash-chips" aria-label="Quick cash amounts"><button disabled={saleRetryPending} onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>{(terminal.location.currency === 'INR' ? [100, 200, 500, 2000] : [5, 10, 20, 50]).map((amount) => <button key={amount} disabled={saleRetryPending} onClick={() => setCashTendered(String(amount))}>{formatMoney(amount)}</button>)}</div><div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, Number(cashTendered || 0) - saleTotals.net))}</strong></div></> : <label className="payment-select">{paymentMethod === 'CARD' ? 'Card terminal reference (optional)' : 'Online payment reference (optional)'}<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
+          {paymentMethod === 'CASH' ? <>
+            <label className="payment-select">
+              Cash received
+              <input autoFocus type="number" min={saleTotals.net} step="0.01" value={cashTendered} disabled={saleRetryPending}
+                aria-invalid={Boolean(cashTenderError)} aria-describedby={cashTenderError ? 'checkout-cash-error' : undefined}
+                onChange={(event) => setCashTendered(event.target.value)} placeholder={saleTotals.net.toFixed(2)} />
+            </label>
+            {cashTenderError && <Feedback tone="error"><span id="checkout-cash-error">{cashTenderError}</span></Feedback>}
+            <div className="cash-chips" aria-label="Quick cash amounts">
+              <button disabled={saleRetryPending} onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>
+              {(terminal.location.currency === 'INR' ? [100, 200, 500, 2000] : [5, 10, 20, 50]).map((amount) => (
+                <button key={amount} disabled={saleRetryPending} onClick={() => setCashTendered(String(amount))}>{formatMoney(amount)}</button>
+              ))}
+            </div>
+            <div className="checkout-change"><span>Change due</span><strong>{formatMoney(Math.max(0, cashAmount - saleTotals.net))}</strong></div>
+          </> : <label className="payment-select">{paymentMethod === 'CARD' ? 'Card terminal reference (optional)' : 'Online payment reference (optional)'}<input type="text" maxLength={120} value={transactionReference} disabled={saleRetryPending} onChange={(event) => setTransactionReference(event.target.value)} placeholder="Do not enter card numbers" /></label>}
           {error && <Feedback tone="error">{error}</Feedback>}
-          <button className="checkout-button" disabled={checkoutDisabled} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
+          <button className="checkout-button" disabled={checkoutDisabled || cashPaymentBlocked} onClick={() => void checkout()}><span>{busy ? 'Completing…' : saleRetryPending ? 'Retry same sale safely' : 'Confirm payment'}</span><span><ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
         </section>
       </div>}
       {receiptHistoryOpen && <div className="receipt-overlay">

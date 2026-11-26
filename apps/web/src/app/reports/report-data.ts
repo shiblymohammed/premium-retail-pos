@@ -46,7 +46,7 @@ export function toReportTable(report: keyof typeof EXTRA_REPORTS, raw: unknown, 
         list.map((item) => [
           item.createdAt ? new Date(String(item.createdAt)).toLocaleString('en', { timeZone: timezone, timeZoneName: 'short' }) : '—', cell(item.type), at(item, 'location', 'name'),
           at(item, 'variant', 'product', 'name'), at(item, 'variant', 'sku'),
-          `${cell(item.quantityBaseUnits)} ${at(item, 'variant', 'product', 'baseUnit')}`,
+          cell(item.formattedQuantity ?? `${cell(item.quantityBaseUnits)} ${at(item, 'variant', 'product', 'baseUnit')}${Math.abs(Number(item.quantityBaseUnits)) === 1 ? '' : 's'}`),
           cell(item.stockState), item.transferRoute ? route(item.transferRoute) : '—',
           `${cell(item.referenceType)} · ${cell(item.documentNumber ?? item.referenceId)}`, at(item, 'actor', 'email'),
         ]));

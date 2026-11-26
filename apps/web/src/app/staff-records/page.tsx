@@ -65,7 +65,8 @@ export default function StaffRecordsPage() {
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
   const [selected, setSelected] = useState('');
   const [month, setMonth] = useState('');
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loadedProfile, setProfile] = useState<Profile | null>(null);
+  const profile = loadedProfile?.staff.id === selected ? loadedProfile : null;
   const [inputs, setInputs] = useState({ base: '', ...payrollInputs });
   const [editingPayroll, setEditingPayroll] = useState(false);
   const [correctionReason, setCorrectionReason] = useState('');
@@ -231,6 +232,8 @@ export default function StaffRecordsPage() {
 
   const visibleEmployees = directory.filter((row) =>
     `${row.firstName} ${row.lastName} ${row.employeeCode} ${row.location.name}`.toLowerCase().includes(employeeSearch.trim().toLowerCase()));
+  const selectedEmployee = directory.find((row) => row.id === selected);
+  const selectionOutsideSearch = selectedEmployee && !visibleEmployees.some((row) => row.id === selected);
   const canMaintainOutlet = manager && !accessLoading && can('staff.manage', true);
   const adminActor = actor?.role === 'SUPER_ADMIN' || actor?.role === 'ADMIN';
   const targetRole = profile?.staff.user.role;
@@ -253,7 +256,10 @@ export default function StaffRecordsPage() {
       <label className={styles.search}>Search employees<input type="search" placeholder="Name, employee code or workplace"
         value={employeeSearch} disabled={busy || !!editor} onChange={(event) => setEmployeeSearch(event.target.value)} /></label>
       <label>Employee<select aria-label="Employee" value={selected} disabled={busy || !!editor || !directory.length} onChange={(e) => setSelected(e.target.value)}>
-        {!visibleEmployees.some((row) => row.id === selected) && <option value={selected}>{visibleEmployees.length ? 'Select a matching employee' : 'No matching employees'}</option>}
+        {!selectedEmployee && <option value="">{visibleEmployees.length ? 'Select an employee' : 'No employees'}</option>}
+        {selectionOutsideSearch && <option value={selected}>
+          {selectedEmployee.firstName} {selectedEmployee.lastName} · {selectedEmployee.employeeCode} · Outside search results
+        </option>}
         {visibleEmployees.map((row) => <option key={row.id} value={row.id}>{row.firstName} {row.lastName} · {row.employeeCode} · {row.location.name}</option>)}
       </select></label>
       <label>Month<input type="month" value={month} disabled={busy || !!editor} onChange={(e) => { if (e.target.value) setMonth(e.target.value); }} /></label>
