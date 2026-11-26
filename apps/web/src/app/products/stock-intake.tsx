@@ -5,7 +5,7 @@ import { Feedback } from '@/components/ui/feedback';
 import styles from './products.module.css';
 
 export type StockLocation = { id: string; name: string; type: string };
-export type StockVariant = { variantId: string; name: string; variant: string; sku: string; unitsPerCarton: number };
+export type StockVariant = { variantId: string; name: string; variant: string; sku: string; unitsPerCarton: number; baseUnit?: string };
 export type IntakeMode = 'opening' | 'supplier';
 
 type Line = { variantId: string; cartons: number; looseBaseUnits: number };

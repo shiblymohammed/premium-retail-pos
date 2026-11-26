@@ -8,6 +8,9 @@ import styles from '../staff-records/records.module.css';
 import { tradeRequest } from './trade-api';
 
 type OrderLine = { variantId: string; quantity: number; unitCost: string; variant: { sku: string; product: { name: string; baseUnit: string } } };
+type DraftLine = { item: StockVariant; quantity: string; unit: 'individual' | 'carton'; unitCost: string };
+const MAX_QUANTITY = 2147483647;
+const baseQuantity = (line: DraftLine) => Number(line.quantity) * (line.unit === 'carton' ? line.item.unitsPerCarton : 1);
 export type Order = {
   id: string; number: string; supplierName: string; currency: string;
   lines: OrderLine[];
@@ -24,7 +27,7 @@ export function PurchaseOrders({ token, locationId, catalogue, canPay, canOrder,
   const [number, setNumber] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [product, setProduct] = useState('');
-  const [lines, setLines] = useState<Array<{ variantId: string; quantity: string; unitCost: string }>>([]);
+  const [lines, setLines] = useState<DraftLine[]>([]);
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
   const [serial, setSerial] = useState(0);
@@ -32,6 +35,11 @@ export function PurchaseOrders({ token, locationId, catalogue, canPay, canOrder,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const order = orders.find((row) => row.id === selected);
+  const nextProduct = catalogue.find((item) => item.variantId === product);
+
+  function updateLine(variantId: string, change: Partial<Omit<DraftLine, 'item'>>) {
+    setLines((values) => values.map((line) => line.item.variantId === variantId ? { ...line, ...change } : line));
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -54,7 +62,9 @@ export function PurchaseOrders({ token, locationId, catalogue, canPay, canOrder,
         setAmount(''); setReference('');
       } else {
         const saved = await tradeRequest<Order>('/trade/orders', token, undefined, {
-          locationId, number, supplierName, lines: lines.map((line) => ({ ...line, quantity: Number(line.quantity) })),
+          locationId, number, supplierName, lines: lines.map((line) => ({
+            variantId: line.item.variantId, unitCost: line.unitCost, quantity: baseQuantity(line),
+          })),
         });
         setSelected(saved.id);
         setCreateOpen(false); setNumber(''); setSupplierName(''); setLines([]);
@@ -85,20 +95,34 @@ export function PurchaseOrders({ token, locationId, catalogue, canPay, canOrder,
       <div className={styles.fields}>
         <label>Product<select value={product} onChange={(e) => setProduct(e.target.value)}>
           <option value="">Choose a SKU</option>
-          {catalogue.filter((item) => !lines.some((line) => line.variantId === item.variantId)).map((item) => <option key={item.variantId} value={item.variantId}>{item.name} · {item.sku}</option>)}
+          {catalogue.filter((item) => !lines.some((line) => line.item.variantId === item.variantId)).map((item) => <option key={item.variantId} value={item.variantId}>{item.name} · {item.sku}</option>)}
         </select></label>
-        <button type="button" className="admin-secondary" disabled={!product || busy} onClick={() => {
-          setLines((values) => [...values, { variantId: product, quantity: '1', unitCost: '' }]); setProduct('');
+        <button type="button" className="admin-secondary" disabled={!nextProduct || busy} onClick={() => {
+          if (!nextProduct) return;
+          setLines((values) => [...values, { item: nextProduct, quantity: '1', unit: 'individual', unitCost: '' }]);
+          setProduct('');
         }}>Add line</button>
       </div>
-      {lines.map((line) => <div className={styles.fields} key={line.variantId}>
-        <strong>{catalogue.find((product) => product.variantId === line.variantId)?.sku}</strong>
-        <label>Individual units<input type="number" required min="1" max="2147483647" step="1" value={line.quantity} onChange={(e) =>
-          setLines((values) => values.map((item) => item.variantId === line.variantId ? { ...item, quantity: e.target.value } : item))} /></label>
-        <label>Cost per unit<input type="number" required min="0" max="9999999999.99" step="0.01" value={line.unitCost} onChange={(e) =>
-          setLines((values) => values.map((item) => item.variantId === line.variantId ? { ...item, unitCost: e.target.value } : item))} /></label>
-        <button type="button" className="admin-secondary" onClick={() => setLines((values) => values.filter((item) => item.variantId !== line.variantId))}>Remove line</button>
-      </div>)}
+      {lines.map((line) => {
+        const { variantId, sku, baseUnit = 'unit', unitsPerCarton } = line.item;
+        return <fieldset className={styles.schedule} key={variantId}>
+          <legend>{sku}</legend>
+          <div className={styles.fields}>
+            {unitsPerCarton > 1 && <label>Order unit<select value={line.unit}
+              onChange={(event) => updateLine(variantId, { unit: event.target.value as DraftLine['unit'] })}>
+              <option value="individual">Individual {baseUnit}s</option>
+              <option value="carton">Cartons ({unitsPerCarton} {baseUnit}s each)</option>
+            </select></label>}
+            <label>Quantity<input type="number" required min="1" step="1" value={line.quantity}
+              max={line.unit === 'carton' ? Math.floor(MAX_QUANTITY / unitsPerCarton) : MAX_QUANTITY}
+              onChange={(event) => updateLine(variantId, { quantity: event.target.value })} /></label>
+            <label>Cost per {baseUnit}<input type="number" required min="0" max="9999999999.99" step="0.01" value={line.unitCost}
+              onChange={(event) => updateLine(variantId, { unitCost: event.target.value })} /></label>
+            <button type="button" className="admin-secondary" onClick={() => setLines((values) => values.filter((item) => item.item.variantId !== variantId))}>Remove line</button>
+          </div>
+          <p>{baseQuantity(line)} {baseUnit}{baseQuantity(line) === 1 ? '' : 's'} total</p>
+        </fieldset>;
+      })}
       <div><button className="admin-primary" disabled={busy || lines.length === 0}>Save order</button></div>
     </form>}
     {loading && <p role="status">Loading orders…</p>}
@@ -110,7 +134,7 @@ export function PurchaseOrders({ token, locationId, catalogue, canPay, canOrder,
       <div className={styles.scroll}><table>
         <thead><tr><th>Product</th><th>Ordered</th><th>Received</th><th>Outstanding</th><th>Unit cost</th></tr></thead>
         <tbody>{order.lines.map((line) => <tr key={line.variantId}>
-          <td>{line.variant.product.name} · {line.variant.sku}</td><td>{line.quantity} {line.variant.product.baseUnit}</td>
+          <td>{line.variant.product.name} · {line.variant.sku}</td><td>{line.quantity} {line.variant.product.baseUnit}{line.quantity === 1 ? '' : 's'}</td>
           <td>{arrived.get(line.variantId) ?? 0}</td><td>{line.quantity - (arrived.get(line.variantId) ?? 0)}</td><td>{money(line.unitCost, order.currency)}</td>
         </tr>)}</tbody>
       </table></div>

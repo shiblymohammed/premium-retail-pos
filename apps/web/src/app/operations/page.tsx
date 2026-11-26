@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
+import { downloadCsv } from '@/lib/report-download';
 import { PillDropdown } from '@/components/ui/pill-dropdown';
 import styles from './operations.module.css';
 
@@ -55,6 +56,8 @@ interface TransferItem {
   receivedQtyBase: number;
   shortQtyBase: number;
   damagedQtyBase: number;
+  excessQtyBase?: number;
+  discrepancyNotes?: string | null;
 }
 
 interface ReceiptSummary {
@@ -62,6 +65,12 @@ interface ReceiptSummary {
   damaged: number;
   missing: number;
 }
+
+type ReceiptDiscrepancy = {
+  variantId: string; receivedAt: string; short: number; damaged: number; excess: number; note: string | null;
+};
+
+type ReceiptQuantity = { received: number; damaged: number; closeShortage: boolean };
 
 interface StockTransfer {
   id: string;
@@ -71,6 +80,8 @@ interface StockTransfer {
   requestedByName?: string;
   timezone?: string;
   auditLocked?: boolean;
+  hasStockToPack?: boolean;
+  receiptDiscrepancies?: ReceiptDiscrepancy[];
   transferCode: string;
   sourceLocation: string;
   destLocation: string;
@@ -122,6 +133,13 @@ function shipmentQuantity(quantity: number, baseUnit: string, unitsPerCarton: nu
 const isReceiver = (role?: string) => role === 'STAFF' || role === 'CASHIER';
 const outstandingQuantity = (item: TransferItem) => Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase);
 
+function receiptAmounts(expected: number, { received, damaged, closeShortage }: ReceiptQuantity) {
+  const accepted = Math.min(received, expected);
+  const excess = received - accepted;
+  const short = closeShortage ? expected - accepted : 0;
+  return { accepted, excess, short, good: Math.max(0, accepted - damaged), pending: expected - accepted - short };
+}
+
 type StatusFilter = 'ALL' | 'PENDING' | 'TRANSIT' | 'RECEIVED';
 type SortKey = 'newest' | 'oldest' | 'units';
 
@@ -169,7 +187,7 @@ const depotRequest = (request: ReplenishmentRequest) =>
 function transferTime(date: string, timeZone?: string) {
   return new Intl.DateTimeFormat('en-IN', { timeZone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(date));
 }
-const hasIssues = (t: StockTransfer) => !!t.receipt && t.receipt.damaged + t.receipt.missing > 0;
+const hasIssues = (t: StockTransfer) => t.items.some((item) => item.damagedQtyBase + item.shortQtyBase + (item.excessQtyBase ?? 0) > 0);
 const isWarehouse = (loc: string) => /warehouse/i.test(loc);
 const activeTransfer = (t: StockTransfer) => !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status);
 const packingStatuses: TransferStatus[] = ['APPROVED', 'PARTIALLY_DISPATCHED', 'PARTIALLY_RECEIVED'];
@@ -255,7 +273,7 @@ export default function OperationsPage() {
 
   // Receive modal
   const [receivingTransfer, setReceivingTransfer] = useState<StockTransfer | null>(null);
-  const [receiptIssues, setReceiptIssues] = useState<Record<string, { damaged: number; missing: number }>>({});
+  const [receiptQuantities, setReceiptQuantities] = useState<Record<string, ReceiptQuantity>>({});
   const [receiveNotes, setReceiveNotes] = useState('');
   const [receiveError, setReceiveError] = useState('');
   const [isReceivingBusy, setIsReceivingBusy] = useState(false);
@@ -297,6 +315,8 @@ export default function OperationsPage() {
         receivedQtyBase: availableQty,
         shortQtyBase: Number(line.shortQtyBase || 0),
         damagedQtyBase: Number(line.damagedQtyBase || 0),
+        excessQtyBase: Number(line.excessQtyBase || 0),
+        discrepancyNotes: line.discrepancyNotes ?? null,
       };
     });
     const damaged = items.reduce((sum, item) => sum + item.damagedQtyBase, 0);
@@ -313,6 +333,8 @@ export default function OperationsPage() {
       timezone: row.destLocation?.company?.timezone,
       auditLocked: Boolean(row.sourceLocation?.isAuditLocked || row.destLocation?.isAuditLocked),
       status: row.status,
+      hasStockToPack: row.hasStockToPack,
+      receiptDiscrepancies: row.receiptDiscrepancies,
       createdAt: row.createdAt,
       dispatchedAt: row.dispatchedAt,
       receivedAt: row.receivedAt,
@@ -479,11 +501,12 @@ export default function OperationsPage() {
     const canDispatch = canDispatchTransfers && sourceAccess && awaitingPacking
       && transfer.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (item.cartonRequired ? item.unitsPerCarton : 1));
     const canReceive = canReceiveTransfers && destinationAccess && transitUnits > 0 && receivingStatuses.includes(transfer.status);
-    const canPackNow = canDispatch && !transfer.auditLocked;
+    const noStockToPack = canDispatch && transfer.hasStockToPack === false;
+    const canPackNow = canDispatch && !transfer.auditLocked && !noStockToPack;
     const canReceiveNow = canReceive && !transfer.auditLocked;
     const actionUnits = (canSubmit || canApprove || canPackNow ? waitingUnits : 0) + (canReceiveNow ? transitUnits : 0);
     return [transfer.id, {
-      canSubmit, canApprove, canPackNow, canReceiveNow, awaitingPacking, transitUnits, waitingUnits, actionUnits,
+      canSubmit, canApprove, canPackNow, canReceiveNow, awaitingPacking, transitUnits, waitingUnits, actionUnits, noStockToPack,
       paused: transfer.auditLocked && (canDispatch || canReceive),
       needsAction: canSubmit || canApprove || canPackNow || canReceiveNow,
     }] as const;
@@ -549,7 +572,9 @@ export default function OperationsPage() {
   function openReceive(transfer: StockTransfer) {
     setMenuFor(null);
     setReceivingTransfer(transfer);
-    setReceiptIssues({});
+    setReceiptQuantities(Object.fromEntries(transfer.items.map((item) => [item.variantId, {
+      received: outstandingQuantity(item), damaged: 0, closeShortage: false,
+    }])));
     setReceiveNotes('');
     setReceiveError('');
   }
@@ -558,14 +583,19 @@ export default function OperationsPage() {
     event.preventDefault();
     if (!receivingTransfer || isReceivingBusy) return;
     const lines = receivingTransfer.items.filter((item) => outstandingQuantity(item) > 0).map((item) => {
-      const { damaged = 0, missing = 0 } = receiptIssues[item.variantId] ?? {};
-      return { variantId: item.variantId, expected: outstandingQuantity(item), damaged, missing };
-    });
-    if (!lines.length || lines.some((line) => line.damaged + line.missing > line.expected)) {
-      setReceiveError('Damaged and missing units cannot exceed the outstanding units on each product.');
+      const expected = outstandingQuantity(item);
+      const quantities = receiptQuantities[item.variantId];
+      return { variantId: item.variantId, expected, ...quantities, ...receiptAmounts(expected, quantities) };
+    }).filter((line) => line.received > 0 || line.closeShortage);
+    if (!lines.length) {
+      setReceiveError('Enter a received quantity or close a confirmed shortage.');
       return;
     }
-    if (lines.some((line) => line.damaged || line.missing) && !receiveNotes.trim()) {
+    if (lines.some((line) => line.damaged > line.accepted)) {
+      setReceiveError('Damaged units cannot exceed the received quantity within the dispatch.');
+      return;
+    }
+    if (lines.some((line) => line.damaged || line.short || line.excess) && !receiveNotes.trim()) {
       setReceiveError('Add a note to explain the discrepancy.');
       return;
     }
@@ -573,12 +603,13 @@ export default function OperationsPage() {
     setReceiveError('');
     try {
       await mutate(`/transfers/${receivingTransfer.id}/receive`, 'POST', {
-        lines: lines.map(({ variantId, expected, damaged, missing }) => ({
+        lines: lines.map(({ variantId, expected, received, damaged, short, excess }) => ({
           variantId,
-          receivedQtyBase: expected - missing,
+          expectedOutstandingQtyBase: expected,
+          receivedQtyBase: received,
           damagedQtyBase: damaged,
-          ...(missing ? { shortQtyBase: missing, finalizeLine: true } : {}),
-          ...((damaged || missing) ? { discrepancyNotes: receiveNotes.trim() } : {}),
+          ...(short ? { shortQtyBase: short, finalizeLine: true } : {}),
+          ...((damaged || short || excess) ? { discrepancyNotes: receiveNotes.trim() } : {}),
         })),
       });
       setReceivingTransfer(null);
@@ -775,15 +806,19 @@ export default function OperationsPage() {
 
   function exportCsv(list: StockTransfer[]) {
     setMenuFor(null);
-    const header = ['Transfer', 'Status', 'From', 'To', 'Carrier', 'Tracking', 'Created', 'Dispatched', 'Received', 'SKU', 'Product', 'Requested cartons', 'Units/carton', 'Requested loose', 'Requested units', 'Approved units', 'Packed units', 'In transit', 'Awaiting packing / approval', 'Received good', 'Damaged', 'Missing'];
-    const rows = list.flatMap((t) => t.items.map((i) => [t.transferCode, STATUS_META[t.status].label, t.sourceLocation, t.destLocation, t.carrier, t.trackingNumber, t.createdAt, t.dispatchedAt ?? '', t.receivedAt ?? '', i.sku, i.name, i.cartons, i.unitsPerCarton, i.looseUnits, i.requestedQtyBase, i.approvedQtyBase, i.dispatchedQtyBase, activeTransfer(t) ? outstandingQuantity(i) : 0, pendingItemQuantity(t, i), i.receivedQtyBase - i.damagedQtyBase, i.damagedQtyBase, i.shortQtyBase]));
-    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = list.length === 1 ? `${list[0].transferCode}.csv` : `transfers-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const header = ['Transfer', 'Status', 'From', 'To', 'Carrier', 'Tracking', 'Created', 'Dispatched', 'Received', 'SKU', 'Product', 'Requested cartons', 'Units/carton', 'Requested loose', 'Requested units', 'Approved units', 'Packed units', 'In transit', 'Awaiting packing / approval', 'Received good', 'Damaged', 'Missing', 'Excess', 'Receipt discrepancies'];
+    const rows = list.flatMap((t) => t.items.map((item) => {
+      const history = (t.receiptDiscrepancies ?? []).filter((event) => event.variantId === item.variantId);
+      const notes = history.map((event) =>
+        `${event.receivedAt} · ${event.damaged} damaged, ${event.short} missing, ${event.excess} excess${event.note ? ` · ${event.note}` : ''}`);
+      return [t.transferCode, STATUS_META[t.status].label, t.sourceLocation, t.destLocation, t.carrier, t.trackingNumber,
+        t.createdAt, t.dispatchedAt ?? '', t.receivedAt ?? '', item.sku, item.name, item.cartons, item.unitsPerCarton,
+        item.looseUnits, item.requestedQtyBase, item.approvedQtyBase, item.dispatchedQtyBase,
+        activeTransfer(t) ? outstandingQuantity(item) : 0, pendingItemQuantity(t, item),
+        item.receivedQtyBase - item.damagedQtyBase, item.damagedQtyBase, item.shortQtyBase, item.excessQtyBase ?? 0,
+        notes.join('\n') || item.discrepancyNotes || ''];
+    }));
+    downloadCsv(header, rows, list.length === 1 ? `${list[0].transferCode}.csv` : `transfers-${new Date().toISOString().slice(0, 10)}.csv`);
     setNotice(`Exported ${list.length} transfer${list.length === 1 ? '' : 's'} to CSV.`);
   }
 
@@ -928,11 +963,12 @@ export default function OperationsPage() {
             const isOpen = expanded === t.id;
             const issues = hasIssues(t);
             const created = splitStamp(t.createdAt, t.timezone);
-            const { canSubmit, canApprove, canPackNow, canReceiveNow, awaitingPacking, transitUnits, waitingUnits, paused } = transferActions.get(t.id)!;
+            const { canSubmit, canApprove, canPackNow, canReceiveNow, awaitingPacking, transitUnits, waitingUnits, paused, noStockToPack } = transferActions.get(t.id)!;
             const nextSteps = [
               t.status === 'DRAFT' ? 'Submit · requesting manager' : null,
               t.status === 'PENDING_APPROVAL' ? `Approve · another manager at ${t.sourceLocation}` : null,
-              awaitingPacking ? canPackNow ? `Pack · ${t.sourceLocation}` : `Awaiting packing at ${t.sourceLocation}` : null,
+              noStockToPack ? 'No stock to pack' : null,
+              awaitingPacking && !noStockToPack ? canPackNow ? `Pack · ${t.sourceLocation}` : `Awaiting packing at ${t.sourceLocation}` : null,
               transitUnits > 0 ? `Receive · authorized team at ${t.destLocation}` : null,
             ].filter(Boolean);
             return (
@@ -1005,9 +1041,18 @@ export default function OperationsPage() {
                                 Requested: item.requestedQtyBase, Approved: item.approvedQtyBase,
                                 Packed: item.dispatchedQtyBase, 'In transit': activeTransfer(t) ? outstandingQuantity(item) : 0,
                                 'Received good': item.receivedQtyBase - item.damagedQtyBase,
-                                Damaged: item.damagedQtyBase, Missing: item.shortQtyBase,
+                                Damaged: item.damagedQtyBase, Missing: item.shortQtyBase, Excess: item.excessQtyBase ?? 0,
                               }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{shipmentQuantity(value, item.baseUnit, item.unitsPerCarton)}</dd></div>)}
                             </dl>
+                            {(t.receiptDiscrepancies ?? []).filter((event) => event.variantId === item.variantId).map((event, index) =>
+                              <p className={styles.receiptNote} key={index}>
+                                <strong>{transferTime(event.receivedAt, t.timezone)}</strong>
+                                {' · '}{event.damaged} damaged · {event.short} missing · {event.excess} excess
+                                {event.note && <span>{event.note}</span>}
+                              </p>)}
+                            {item.discrepancyNotes && !t.receiptDiscrepancies?.some((event) => event.variantId === item.variantId && event.note) &&
+                              <p className={styles.receiptNote}>{item.discrepancyNotes}</p>}
+
                           </div>
                         ))}
                       </div>
@@ -1166,19 +1211,38 @@ export default function OperationsPage() {
                 <div className={styles.manifest}>
                   {receivingTransfer.items.filter((item) => outstandingQuantity(item) > 0).map((item) => {
                     const expected = outstandingQuantity(item);
-                    const issues = receiptIssues[item.variantId] ?? { damaged: 0, missing: 0 };
+                    const quantities = receiptQuantities[item.variantId];
+                    const { accepted, good, excess, short, pending } = receiptAmounts(expected, quantities);
+                    const update = (changes: Partial<ReceiptQuantity>) => setReceiptQuantities((current) => ({
+                      ...current, [item.variantId]: { ...current[item.variantId], ...changes },
+                    }));
                     return <fieldset key={item.variantId} className={styles.receiptLine}>
                       <legend>{item.name} · {item.sku}</legend>
-                      <span>Expected <strong>{shipmentQuantity(expected, item.baseUnit, item.unitsPerCarton)}</strong>
-                      </span>
-                      <label>Damaged<input type="number" min="0" step="1" max={expected} value={issues.damaged} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, damaged: Number(event.target.value) } }))} /></label>
-                      <label>Missing<input type="number" min="0" step="1" max={expected} value={issues.missing} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, missing: Number(event.target.value) } }))} /></label>
-                      <span>Into stock <strong>{Math.max(0, expected - issues.damaged - issues.missing)} {item.baseUnit}{expected - issues.damaged - issues.missing === 1 ? '' : 's'}</strong></span>
+                      <p className={styles.receiptFull}>Expected <strong>{shipmentQuantity(expected, item.baseUnit, item.unitsPerCarton)}</strong></p>
+                      <label>Actually received ({item.baseUnit}s)
+                        <input type="number" required min="0" step="1" max="2147483647" value={quantities.received}
+                          onChange={(event) => update({ received: Number(event.target.value), closeShortage: false })} />
+                      </label>
+                      <label>Damaged within dispatch
+                        <input type="number" required min="0" step="1" max={accepted} value={quantities.damaged}
+                          onChange={(event) => update({ damaged: Number(event.target.value) })} />
+                      </label>
+                      {quantities.received < expected && <label className={styles.closeShortage}>
+                        <input type="checkbox" checked={quantities.closeShortage}
+                          onChange={(event) => update({ closeShortage: event.target.checked })} />
+                        Confirm remaining {expected - accepted} as missing
+                      </label>}
+                      <div className={styles.receiptFull}>
+                        <strong>{good} into stock</strong> · {quantities.damaged + excess} into quarantine
+                        {excess > 0 && ` (${excess} excess)`}
+                        {pending > 0 && ` · ${pending} still in transit`}
+                        {short > 0 && ` · ${short} confirmed missing`}
+                      </div>
                     </fieldset>;
                   })}
                 </div>
 
-                <label className={styles.field}><span>Note</span><textarea rows={2} value={receiveNotes} onChange={(e) => setReceiveNotes(e.target.value)} placeholder="e.g. 1 carton crushed, 2 units missing" /></label>
+                <label className={styles.field}><span>Note</span><textarea rows={2} maxLength={1000} value={receiveNotes} onChange={(e) => setReceiveNotes(e.target.value)} placeholder="e.g. 1 carton crushed, 2 units missing" /></label>
                 {receiveError && <p className={styles.formError}><Icon name="alert" size={14} /> {receiveError}</p>}
               </div>
               <div className={styles.modalFoot}>

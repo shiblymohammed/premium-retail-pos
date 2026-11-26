@@ -4,6 +4,7 @@ import { Prisma, Role } from '@prisma/client';
 import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { receiptDiscrepancies } from '../transfers/receipt-discrepancies';
 import { ReportQuery } from './reports.controller';
 
 function invoiceStatusAt(invoice: { status: string; cancelledAt: Date | null }, cutoff: Date) {
@@ -327,11 +328,13 @@ export class ReportsService {
 
   async transferDiscrepancies(query: ReportQuery, actor: RequestUser) {
     const scope = await this.resolveScope(query, actor);
-    return this.prisma.transfer.findMany({
-      where: { OR: [{ sourceLocationId: { in: scope.locationIds } }, { destLocationId: { in: scope.locationIds } }], updatedAt: { gte: scope.from, lt: scope.to }, lines: { some: { OR: [{ shortQtyBase: { gt: 0 } }, { damagedQtyBase: { gt: 0 } }, { excessQtyBase: { gt: 0 } }] } } },
-      include: { sourceLocation: { select: { id: true, name: true } }, destLocation: { select: { id: true, name: true } }, lines: { where: { OR: [{ shortQtyBase: { gt: 0 } }, { damagedQtyBase: { gt: 0 } }, { excessQtyBase: { gt: 0 } }] }, include: { variant: { select: { sku: true, name: true } } } } },
-      orderBy: { updatedAt: 'desc' }, take: 1000,
-    });
+    const locations = Prisma.join(scope.locationIds);
+    const events = await receiptDiscrepancies(this.prisma, Prisma.sql`
+      (t.source_location_id IN (${locations}) OR t.dest_location_id IN (${locations}))
+      AND m.created_at >= ${utcTimestamp(scope.from)} AND m.created_at < ${utcTimestamp(scope.to)}
+    `, 1001);
+    if (events.length > 1000) throw new BadRequestException('More than 1,000 receipt discrepancies match. Choose a shorter date range or one location.');
+    return events;
   }
 
   async auditVariances(query: ReportQuery, actor: RequestUser) {

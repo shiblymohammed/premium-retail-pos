@@ -40,7 +40,7 @@ export default function TradePage() {
       return;
     }
     const controller = new AbortController();
-    type Catalogue = { name: string; unitsPerCarton: number | null; variants: Array<{ id: string; sku: string; name: string; isActive: boolean }> };
+    type Catalogue = { name: string; baseUnit: string; unitsPerCarton: number | null; variants: Array<{ id: string; sku: string; name: string; isActive: boolean }> };
     void Promise.all([
       tradeRequest<StockLocation[]>('/locations', session.accessToken, controller.signal),
       tradeRequest<Catalogue[]>('/products?isActive=true', session.accessToken, controller.signal),
@@ -48,7 +48,8 @@ export default function TradePage() {
       setLocations(locations);
       setLocationId(locations[0]?.id ?? '');
       setCatalogue(products.flatMap((product) => product.variants.filter((variant) => variant.isActive).map((variant) => ({
-        variantId: variant.id, sku: variant.sku, name: product.name, variant: variant.name, unitsPerCarton: product.unitsPerCarton ?? 1,
+        variantId: variant.id, sku: variant.sku, name: product.name, variant: variant.name,
+        baseUnit: product.baseUnit, unitsPerCarton: product.unitsPerCarton ?? 1,
       }))));
       setToken(session.accessToken);
       setRole(session.user.role);

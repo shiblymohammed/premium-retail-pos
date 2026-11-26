@@ -69,11 +69,11 @@ export function toReportTable(report: keyof typeof EXTRA_REPORTS, raw: unknown, 
       return table('Product performance', ['Product', 'Variant', 'SKU', 'Base unit', 'Net units sold', 'Net sales', 'Available now'],
         list.map((item) => [cell(item.product), cell(item.variant), cell(item.sku), cell(item.baseUnit), cell(item.sold), cell(item.netSales), cell(item.available)]));
     case 'transferDiscrepancies':
-      return table('Transfer discrepancies', ['Transfer', 'Status', 'Route', 'Updated', 'SKU', 'Short', 'Damaged', 'Excess'],
-        list.flatMap((item) => records(item.lines).map((line) => [
-          cell(item.transferNumber), cell(item.status), route(item), cell(item.updatedAt),
-          at(line, 'variant', 'sku'), cell(line.shortQtyBase), cell(line.damagedQtyBase), cell(line.excessQtyBase),
-        ])));
+      return table('Transfer discrepancies', ['Transfer', 'Received (UTC)', 'Route', 'SKU', 'Short', 'Damaged', 'Excess', 'Receipt note'],
+        list.map((item) => [
+          cell(item.transferNumber), cell(item.receivedAt), `${cell(item.sourceName)} → ${cell(item.destinationName)}`,
+          cell(item.sku), cell(item.short), cell(item.damaged), cell(item.excess), cell(item.note),
+        ]), 'Reported by receipt date. Quantities are in base units.');
     case 'auditVariances':
       return table('Stock audit variances', ['Audit', 'Location', 'Status', 'Product', 'SKU', 'Expected', 'First count', 'Recounted', 'Approved', 'Variance', 'Recount status'],
         list.map((item) => [

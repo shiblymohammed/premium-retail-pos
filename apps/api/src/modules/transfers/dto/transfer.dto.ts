@@ -75,6 +75,13 @@ export class TransferReceiptLineDto {
   @IsUUID()
   variantId: string;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  expectedOutstandingQtyBase?: number;
+
   /** Total physically received, including damaged and excess units, in base units. */
   @Type(() => Number)
   @IsInt()

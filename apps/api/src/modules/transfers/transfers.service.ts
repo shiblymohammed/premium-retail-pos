@@ -10,6 +10,7 @@ import { createHash, randomUUID } from 'crypto';
 import { LocationType, MovementType, Prisma, ReplenishmentStatus, Role, StockState, TransferStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { receiptDiscrepancies } from './receipt-discrepancies';
 import { convertToBaseUnits } from '../products/unit-conversion';
 import {
   ApproveReplenishmentDto,
@@ -32,6 +33,7 @@ const MANAGER_ROLES: Role[] = [
 ];
 const STORE_RECEIPT_ROLES: Role[] = [Role.STAFF, Role.CASHIER];
 const STORE_DELIVERY_STATUSES: TransferStatus[] = [TransferStatus.DISPATCHED, TransferStatus.PARTIALLY_DISPATCHED, TransferStatus.PARTIALLY_RECEIVED, TransferStatus.RECEIVED];
+const PACKING_STATUSES: TransferStatus[] = [TransferStatus.APPROVED, TransferStatus.PARTIALLY_DISPATCHED, TransferStatus.PARTIALLY_RECEIVED];
 const TERMINAL_TRANSFER_STATUSES: TransferStatus[] = [
   TransferStatus.RECEIVED,
   TransferStatus.CANCELLED,
@@ -427,7 +429,8 @@ export class TransfersService {
       : actor.role === Role.SUPER_ADMIN
         ? {}
         : { OR: [{ sourceLocationId: { in: actor.locationIds } }, { destLocationId: { in: actor.locationIds } }] };
-    return this.prisma.transfer.findMany({ where, include: transferInclude, orderBy: { createdAt: 'desc' } });
+    const transfers = await this.prisma.transfer.findMany({ where, include: transferInclude, orderBy: { createdAt: 'desc' } });
+    return this.withReceiptHistoryAndPacking(transfers, actor);
   }
 
   async findTransfer(id: string, actor: TransferActor) {
@@ -442,7 +445,52 @@ export class TransfersService {
         throw new ForbiddenException('This transfer is unavailable for store receiving');
       }
     } else this.assertCanViewTransfer(actor, transfer.sourceLocationId, transfer.destLocationId);
-    return transfer;
+    const [result] = await this.withReceiptHistoryAndPacking([transfer], actor);
+    return result;
+  }
+
+  private async withReceiptHistoryAndPacking(
+    transfers: Prisma.TransferGetPayload<{ include: typeof transferInclude }>[],
+    actor: TransferActor,
+  ) {
+    if (!transfers.length) return [];
+    const candidates = new Map<string, Set<string>>();
+    const packableTransfers = new Set<string>();
+    if (can(actor, 'transfers.dispatch', MANAGER_ROLES.includes(actor.role as Role))) {
+      for (const transfer of transfers) {
+        if (!PACKING_STATUSES.includes(transfer.status)
+          || (actor.role !== Role.SUPER_ADMIN && !actor.locationIds.includes(transfer.sourceLocationId))) continue;
+        const pending = transfer.lines.filter((line) => (line.approvedQtyBase ?? 0) > (line.dispatchedQtyBase ?? 0));
+        if (!pending.length) continue;
+        packableTransfers.add(transfer.id);
+        const variants = candidates.get(transfer.sourceLocationId) ?? new Set<string>();
+        for (const line of pending) variants.add(line.variantId);
+        candidates.set(transfer.sourceLocationId, variants);
+      }
+    }
+    const [discrepancies, balances] = await Promise.all([
+      receiptDiscrepancies(this.prisma, Prisma.sql`t.id IN (${Prisma.join(transfers.map(({ id }) => id))})`),
+      Promise.all([...candidates].map(async ([locationId, variantIds]) => [locationId, new Map(
+        (await this.inventory.getBalances({ locationId, variantIds: [...variantIds], stockState: StockState.AVAILABLE }))
+          .map((row) => [row.variantId, row.quantityBaseUnits]),
+      )] as const)),
+    ]);
+    const historyByTransfer = new Map<string, typeof discrepancies>();
+    for (const event of discrepancies) {
+      const history = historyByTransfer.get(event.transferId) ?? [];
+      history.push(event);
+      historyByTransfer.set(event.transferId, history);
+    }
+    const stockByLocation = new Map(balances);
+    return transfers.map((transfer) => ({
+      ...transfer,
+      receiptDiscrepancies: historyByTransfer.get(transfer.id) ?? [],
+      hasStockToPack: packableTransfers.has(transfer.id) ? transfer.lines.some((line) => {
+        const minimum = line.cartonRequired ? (line.unitsPerCarton ?? 1) : 1;
+        const remaining = (line.approvedQtyBase ?? 0) - (line.dispatchedQtyBase ?? 0);
+        return remaining >= minimum && (stockByLocation.get(transfer.sourceLocationId)?.get(line.variantId) ?? 0) >= minimum;
+      }) : undefined,
+    }));
   }
 
   async submitTransfer(id: string, actor: TransferActor, idempotencyKey: string | undefined) {
@@ -594,6 +642,9 @@ export class TransfersService {
         const receivedBefore = line.receivedQtyBase ?? 0;
         const shortBefore = line.shortQtyBase;
         const outstanding = dispatched - receivedBefore - shortBefore;
+        if (receipt.expectedOutstandingQtyBase !== undefined && receipt.expectedOutstandingQtyBase !== outstanding) {
+          throw new ConflictException('The dispatched balance changed. Reopen the delivery after refreshing the transfer list.');
+        }
         if (outstanding <= 0 && receipt.receivedQtyBase === 0 && !receipt.finalizeLine) {
           throw new BadRequestException(`There is no outstanding dispatch to reconcile for variant ${variantId}`);
         }

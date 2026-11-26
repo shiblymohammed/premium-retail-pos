@@ -411,6 +411,11 @@ button.summaryCard { cursor: pointer; }
 .receiptLine legend { padding-inline: 0.35rem; font-weight: 650; }
 .receiptLine label { display: grid; gap: 0.35rem; }
 .receiptLine input { width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 0.4rem 0.5rem; }
+.receiptFull, .receiptLine .closeShortage { grid-column: 1 / -1; margin: 0; }
+.receiptLine .closeShortage { display: flex; align-items: center; }
+.receiptLine .closeShortage input { width: auto; }
+.receiptNote { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-line; }
+.receiptNote span { display: block; }
 
 .nextStep { display: block; margin-top: 4px; color: var(--muted); line-height: 1.4; }
 

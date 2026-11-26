@@ -1,7 +1,7 @@
 'use client';
 
 import { addCalendarDays, businessDate, businessMidnight } from '@/lib/business-date';
-import { downloadPdf } from '@/lib/report-download';
+import { downloadCsv, downloadPdf } from '@/lib/report-download';
 
 import { useAccess } from '@/lib/permissions';
 import { InfoHint } from '@/components/ui/info-hint';
@@ -399,15 +399,7 @@ export default function ReportsPage() {
       if (format === 'PDF') {
         const title = report === 'overview' ? 'Store performance overview' : reportLabel;
         downloadPdf(title, usesSalesCutoff ? `${scopeName} · ${SALES_CUTOFF_LABEL}` : `${rows.length} records · ${scopeName}`, headers, rows, filename);
-      } else {
-        const csv = [headers, ...rows].map((line) => line.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
-        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        link.click();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      }
+      } else downloadCsv(headers, rows, filename);
       setNotice(`Exported ${rows.length} records to ${format}.`);
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'Could not export this report.');

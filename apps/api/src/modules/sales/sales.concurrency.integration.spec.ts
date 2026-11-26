@@ -169,4 +169,38 @@ const isolatedTestDatabase = (() => {
     }
   });
 
+  it('keeps receipt discrepancies in their original period after a later transfer update', async () => {
+    const destination = await prisma.location.findUniqueOrThrow({ where: { id: locationId } });
+    const source = await prisma.location.create({
+      data: { companyId: destination.companyId, name: `Report warehouse ${suffix}`, type: 'MAIN_WAREHOUSE' },
+    });
+    const receivedAt = new Date('2026-01-01T18:29:59Z');
+    const transfer = await prisma.transfer.create({
+      data: { transferNumber: `RECEIPT-${suffix}`, requestedByUserId: cashierId,
+        sourceLocationId: source.id, destLocationId: destination.id, status: 'PARTIALLY_DISPATCHED', receivedAt },
+    });
+    const movement = { variantId, actorId: cashierId, type: MovementType.TRANSFER_RECEIPT, referenceId: transfer.id,
+      notes: 'Damaged and missing on first arrival', createdAt: receivedAt };
+    await prisma.inventoryMovement.createMany({ data: [
+      { ...movement, referenceType: 'transfer_shortage', locationId: source.id, stockState: StockState.IN_TRANSIT, quantityBaseUnits: -1 },
+      { ...movement, referenceType: 'transfer', locationId, stockState: StockState.QUARANTINED, quantityBaseUnits: 2 },
+      { ...movement, referenceType: 'transfer', locationId, stockState: StockState.AVAILABLE, quantityBaseUnits: 7 },
+      { ...movement, referenceType: 'transfer_excess', locationId, stockState: StockState.QUARANTINED, quantityBaseUnits: 1,
+        notes: 'Extra packet in second arrival', createdAt: new Date('2026-01-01T18:30:00Z') },
+    ] });
+    await prisma.transfer.update({ where: { id: transfer.id }, data: {
+      dispatchedAt: new Date('2026-01-02T20:00:00Z'), updatedAt: new Date('2026-01-02T20:00:00Z'),
+    } });
+    const reports = new ReportsService(prisma as any, inventory);
+    const actor = { userId: cashierId, role: Role.STORE_MANAGER, email: 'report-fixture@example.test', locationIds: [locationId] };
+    const from = '2025-12-31T18:30:00Z';
+    const to = '2026-01-01T18:30:00Z';
+    const row = { transferId: transfer.id, sku: `P11-${suffix}`, receivedAt, damaged: 2, short: 1, excess: 0, note: movement.notes };
+    const firstDay = await reports.transferDiscrepancies({ locationId, from, to }, actor);
+    expect(firstDay).toMatchObject([row]);
+    const secondDay = await reports.transferDiscrepancies({ locationId, from: to, to: '2026-01-02T18:30:00Z' }, actor);
+    expect(secondDay).toMatchObject([{ transferId: transfer.id, damaged: 0, short: 0, excess: 1, note: 'Extra packet in second arrival' }]);
+    await expect(reports.transferDiscrepancies({ locationId: source.id, from, to }, actor)).rejects.toThrow(/authorized/);
+  });
+
 });
