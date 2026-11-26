@@ -9,6 +9,7 @@ import { ReturnHistory, soldUnitPrice, type SaleReturnRecord } from '@/component
 import { InfoHint } from '@/components/ui/info-hint';
 import {
   ArrowRight,
+  CloudUpload,
   Coffee,
   Cookie,
   CookingPot,
@@ -356,6 +357,9 @@ export default function PosTerminal() {
   const [syncingSales, setSyncingSales] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [offlineDrawerOpen, setOfflineDrawerOpen] = useState(false);
+  const [queueLocationChecked, setQueueLocationChecked] = useState<string>();
+  const [queueLoadError, setQueueLoadError] = useState('');
+  const [drawerRefreshKey, setDrawerRefreshKey] = useState(0);
   const [attendanceStatus, setAttendanceStatus] = useState<'WORKING' | 'NOT_STARTED' | 'COMPLETED' | 'unknown'>('unknown');
   const requestSequence = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -460,14 +464,19 @@ export default function PosTerminal() {
   }
 
   const syncOfflineSales = useCallback(async () => {
-    if (!token || !terminal || !navigator.onLine || syncingSalesRef.current) return;
+    if (!token || !terminal || syncingSalesRef.current) return;
     syncingSalesRef.current = true;
     setSyncingSales(true);
+    let loaded = false;
     try {
       const ownSales = (await readOfflineSales())
         .filter((sale) => sale.ownerUserId === terminal.cashierUserId && sale.locationId === terminal.location.id)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       setOfflineSales(ownSales);
+      setQueueLocationChecked(terminal.location.id);
+      setQueueLoadError('');
+      loaded = true;
+      if (!navigator.onLine) return;
       for (const sale of ownSales) {
         if (sale.status === 'needs_review') break;
         let response: Response;
@@ -482,6 +491,9 @@ export default function PosTerminal() {
             body: sale.body,
           });
         } catch {
+          const retry = { ...sale, error: 'The connection was interrupted. Retry when connected.' };
+          await saveOfflineSale(retry);
+          setOfflineSales((current) => current.map((item) => item.idempotencyKey === sale.idempotencyKey ? retry : item));
           break;
         }
         if (response.ok) {
@@ -489,7 +501,8 @@ export default function PosTerminal() {
           await deleteOfflineSale(sale.idempotencyKey);
           setOfflineSales((current) => current.filter((item) => item.idempotencyKey !== sale.idempotencyKey));
           setLastReceipt(payload.data as SaleReceipt);
-          setNotice(`Offline sale synchronized · ${payload.data.invoiceNumber}`);
+          setDrawerRefreshKey((current) => current + 1);
+          setNotice(`Pending sale synchronized · ${payload.data.invoiceNumber}`);
           continue;
         }
         const message = await readError(response);
@@ -505,7 +518,9 @@ export default function PosTerminal() {
         break;
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not read the offline sale queue');
+      const message = caught instanceof Error ? caught.message : 'Could not access pending sales';
+      if (loaded) setError(message);
+      else setQueueLoadError(message);
     } finally {
       syncingSalesRef.current = false;
       setSyncingSales(false);
@@ -669,6 +684,7 @@ export default function PosTerminal() {
   }, [stockVariantIds, terminal, token]);
 
   useEffect(() => {
+    let active = true;
     const updateOnlineState = () => setIsOnline(navigator.onLine);
     const handleOnline = () => {
       updateOnlineState();
@@ -680,11 +696,17 @@ export default function PosTerminal() {
     window.addEventListener('offline', updateOnlineState);
     if (token && terminal) {
       readOfflineSales()
-        .then((sales) => setOfflineSales(sales.filter((sale) => sale.ownerUserId === terminal.cashierUserId && sale.locationId === terminal.location.id)))
-        .then(() => { if (navigator.onLine) void syncOfflineSales(); })
-        .catch((caught: Error) => setError(caught.message));
+        .then((sales) => {
+          if (!active) return;
+          setOfflineSales(sales.filter((sale) => sale.ownerUserId === terminal.cashierUserId && sale.locationId === terminal.location.id));
+          setQueueLocationChecked(terminal.location.id);
+          setQueueLoadError('');
+          if (navigator.onLine) void syncOfflineSales();
+        })
+        .catch((caught: Error) => { if (active) setQueueLoadError(caught.message); });
     }
     return () => {
+      active = false;
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', updateOnlineState);
     };
@@ -707,7 +729,7 @@ export default function PosTerminal() {
   useEffect(() => {
     if (!terminal) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (customerLookupOpen || clearBasketOpen || drawerOpen || returnsOpen) return;
+      if (customerLookupOpen || clearBasketOpen || drawerOpen || returnsOpen || offlineDrawerOpen) return;
       if (event.key === 'Escape') {
         setCheckoutOpen(false);
         setOfflineDrawerOpen(false);
@@ -721,7 +743,7 @@ export default function PosTerminal() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [checkoutDisabled, checkoutDisabledForClear, checkoutOpen, clearBasketOpen, customerLookupOpen, drawerOpen, returnsOpen, terminal]);
+  }, [checkoutDisabled, checkoutDisabledForClear, checkoutOpen, clearBasketOpen, customerLookupOpen, drawerOpen, returnsOpen, terminal, offlineDrawerOpen]);
 
   function addToCart(product: Product, variant: Variant) {
     const stock = stockBalances[variant.id];
@@ -1278,7 +1300,14 @@ export default function PosTerminal() {
           {canOpenDrawer && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id} timezone={terminal.location.timezone}
             onDrawer={setCashDrawerId} formatMoney={formatMoney} isOpen={drawerOpen || (refundDrawerOpen && refundAtTerminal)}
             onOpenChange={refundDrawerOpen && refundAtTerminal ? setRefundDrawerOpen : setDrawerOpen}
-            canClose={!cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length} />}
+            canClose={!queueLoadError && queueLocationChecked === terminal.location.id && !cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length}
+            refreshKey={drawerRefreshKey}
+            onReviewPendingSales={offlineSales.length || queueLoadError ? () => setOfflineDrawerOpen(true) : undefined} />}
+        {(offlineSales.length > 0 || queueLoadError) && (
+          <button type="button" className="admin-secondary" onClick={() => setOfflineDrawerOpen(true)}>
+            <CloudUpload size={16} aria-hidden="true" /> Pending sales{!queueLoadError && ` (${offlineSales.length})`}
+          </button>
+        )}
         {canCreateSale && <button type="button" ref={customerButton} className="admin-secondary" onClick={() => setCustomerLookupOpen(true)}>Customers</button>}
           {can('sales.receipts', terminal.access?.receipts ?? true) && <button className="admin-secondary" type="button" onClick={() => { setReceiptHistory(null); setReceiptHistoryOpen(true); }}><ReceiptText size={16} /> Receipt history</button>}
           {(salesPermissions.canCancelSales || salesPermissions.canProcessReturns) &&
@@ -1288,7 +1317,7 @@ export default function PosTerminal() {
               const url = new URL(window.location.href);
               url.searchParams.delete('locationId');
               window.history.replaceState(null, '', url);
-              setTerminal(null); setCashDrawerId(null); setResults([]); setSaleControl(null); setOfflineSales([]); setCheckoutLocation('');
+              setTerminal(null); setCashDrawerId(null); setResults([]); setSaleControl(null); setOfflineSales([]); setQueueLoadError(''); setQueueLocationChecked(undefined); setCheckoutLocation('');
             }}>Change store</button>}
         </div>
         {canCreateSale && <>
@@ -1436,28 +1465,7 @@ export default function PosTerminal() {
               })}
             </div>
           ) : <div className="basket-empty"><div className="basket-empty-icon" aria-hidden="true"><ShoppingCart size="1em" className="inline-icon" aria-hidden="true" /></div><strong>Your basket is empty</strong><span>Scan an item or choose a product to get started.</span></div>}
-          {offlineDrawerOpen && <div className="offline-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOfflineDrawerOpen(false); }}><section className="offline-queue offline-drawer" role="dialog" aria-modal="true" aria-label="Offline sale queue">
-            <div className="offline-drawer-title"><div><div className="eyebrow">LOCAL SYNC QUEUE</div><h2>Offline sales</h2></div><button className="small-action-button" onClick={() => setOfflineDrawerOpen(false)}>Close</button></div>
-            {offlineSales.length === 0 && <p className="offline-empty-note">No sales are waiting to sync.</p>}
-            <div className="offline-queue-heading"><div><strong>{offlineSales.length} pending sale{offlineSales.length === 1 ? '' : 's'}</strong><small>Saved on this device; not finalized yet.</small></div><button className="small-action-button" disabled={!isOnline || syncingSales} onClick={() => void syncOfflineSales()}>{syncingSales ? 'Syncing…' : 'Sync now'}</button></div>
-            {offlineSales.map((sale) => {
-              const quote = offlineQuotes[sale.idempotencyKey];
-              const totalMatch = sale.error?.match(/Current server total is ([0-9]+\.[0-9]{2})/);
-              return <div className="offline-sale-row" key={sale.idempotencyKey}>
-                <strong>{new Date(sale.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })} · {sale.status === 'needs_review' ? 'Needs review' : 'Waiting to sync'}</strong>
-                {sale.error && <p>{sale.error}</p>}
-                {sale.status === 'needs_review' && <>
-                  <div className="offline-quote-actions"><button className="small-action-button" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale)}>Quote with discounts</button><button className="small-action-button secondary" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale, true)}>Remove discounts and quote</button></div>
-                  {quote && <div className="offline-reconcile-form">
-                    <p>Current server total: <strong>{formatMoney(quote.netTotal)}</strong>. Reconcile any amount difference with the customer before confirming.</p>
-                    {JSON.parse(sale.body).paymentMethod === 'CASH' ? <label>Cash received<input type="number" min={quote.netTotal} step="0.01" value={offlineCashTendered[sale.idempotencyKey] || totalMatch?.[1] || ''} onChange={(event) => setOfflineCashTendered((current) => ({ ...current, [sale.idempotencyKey]: event.target.value }))} /></label> : <label>Updated transaction reference (optional)<input type="text" maxLength={120} value={offlineReference[sale.idempotencyKey] || ''} onChange={(event) => setOfflineReference((current) => ({ ...current, [sale.idempotencyKey]: event.target.value }))} /></label>}
-                    <label className="offline-confirm"><input type="checkbox" checked={offlinePaymentConfirmed[sale.idempotencyKey] || false} onChange={(event) => setOfflinePaymentConfirmed((current) => ({ ...current, [sale.idempotencyKey]: event.target.checked }))} /> I reconciled the actual payment with this total.</label>
-                    <button className="small-action-button" disabled={!isOnline || syncingSales || !offlinePaymentConfirmed[sale.idempotencyKey]} onClick={() => void confirmOfflineSale(sale)}>Confirm and sync</button>
-                  </div>}
-                </>}
-              </div>;
-            })}
-          </section></div>}
+
 
           </div>
           <div className="basket-footer">
@@ -1476,6 +1484,39 @@ export default function PosTerminal() {
         </aside>
         </>}
       </div>
+      <AdminModal isOpen={offlineDrawerOpen} onClose={() => setOfflineDrawerOpen(false)}
+        title="Pending sales" maxWidth="560px" badgeIcon={<CloudUpload size={22} aria-hidden="true" />}>
+          <section className="offline-queue">
+            {queueLoadError ? (
+              <Feedback tone="error" action={<button type="button" className="admin-secondary" disabled={syncingSales} onClick={() => void syncOfflineSales()}>Retry</button>}>
+                Could not load pending sales. {queueLoadError}
+              </Feedback>
+            ) : offlineSales.length === 0 ? <p className="offline-empty-note">No sales are waiting to sync.</p> : (
+              <div className="offline-queue-heading">
+                <div><strong>{offlineSales.length} pending sale{offlineSales.length === 1 ? '' : 's'}</strong>
+                  <small>{isOnline ? 'Saved on this device. Sync to finalize these sales.' : 'Reconnect to sync these sales.'}</small></div>
+                <button type="button" className="small-action-button" disabled={!isOnline || syncingSales} onClick={() => void syncOfflineSales()}>{syncingSales ? 'Syncing…' : 'Sync now'}</button>
+              </div>
+            )}
+            {offlineSales.map((sale) => {
+              const quote = offlineQuotes[sale.idempotencyKey];
+              const totalMatch = sale.error?.match(/Current server total is ([0-9]+\.[0-9]{2})/);
+              return <div className="offline-sale-row" key={sale.idempotencyKey}>
+                <strong>{new Date(sale.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })} · {sale.status === 'needs_review' ? 'Needs review' : 'Waiting to sync'}</strong>
+                {sale.error && <p>{sale.error}</p>}
+                {sale.status === 'needs_review' && <>
+                  <div className="offline-quote-actions"><button className="small-action-button" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale)}>Quote with discounts</button><button className="small-action-button secondary" disabled={!isOnline || syncingSales} onClick={() => void quoteOfflineSale(sale, true)}>Remove discounts and quote</button></div>
+                  {quote && <div className="offline-reconcile-form">
+                    <p>Current server total: <strong>{formatMoney(quote.netTotal)}</strong>. Reconcile any amount difference with the customer before confirming.</p>
+                    {JSON.parse(sale.body).paymentMethod === 'CASH' ? <label>Cash received<input type="number" min={quote.netTotal} step="0.01" value={offlineCashTendered[sale.idempotencyKey] || totalMatch?.[1] || ''} onChange={(event) => setOfflineCashTendered((current) => ({ ...current, [sale.idempotencyKey]: event.target.value }))} /></label> : <label>Updated transaction reference (optional)<input type="text" maxLength={120} value={offlineReference[sale.idempotencyKey] || ''} onChange={(event) => setOfflineReference((current) => ({ ...current, [sale.idempotencyKey]: event.target.value }))} /></label>}
+                    <label className="offline-confirm"><input type="checkbox" checked={offlinePaymentConfirmed[sale.idempotencyKey] || false} onChange={(event) => setOfflinePaymentConfirmed((current) => ({ ...current, [sale.idempotencyKey]: event.target.checked }))} /> I reconciled the actual payment with this total.</label>
+                    <button className="small-action-button" disabled={!isOnline || syncingSales || !offlinePaymentConfirmed[sale.idempotencyKey]} onClick={() => void confirmOfflineSale(sale)}>Confirm and sync</button>
+                  </div>}
+                </>}
+              </div>;
+            })}
+          </section>
+      </AdminModal>
       {refundDrawerOpen && saleControl && !refundAtTerminal && <CashDrawer
         key={saleControl.location.id} api={API_BASE} token={token} locationId={saleControl.location.id}
         timezone={saleControl.location.company?.timezone} onDrawer={updateRefundDrawer} formatMoney={(amount) => formatMoney(amount, saleControl.location.company?.currency)}
@@ -1590,7 +1631,7 @@ export default function PosTerminal() {
           <button type="button" className="admin-secondary" onClick={() => setReceiptHistoryOpen(false)}>Close</button>
         </section>
       </div>}
-      {lastReceipt && <div className="receipt-overlay">
+      {lastReceipt && !offlineDrawerOpen && !drawerOpen && <div className="receipt-overlay">
         <section className="receipt-card receipt-history-card" role="dialog" aria-modal="true" aria-label="Sale receipt"
           onKeyDown={(event) => { if (event.key === 'Escape') setLastReceipt(null); }}>
           <div className="eyebrow">{terminal.location.name}</div>

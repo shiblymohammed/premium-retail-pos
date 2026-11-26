@@ -400,6 +400,18 @@ export default function OperationsPage() {
     }))));
   };
 
+  async function retryOperations() {
+    setLoading(true);
+    setApiError('');
+    try {
+      await reloadOperations();
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Could not load transfers.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     const session = getStoredSession();
     if (!session?.accessToken) {
@@ -846,15 +858,27 @@ export default function OperationsPage() {
           <p>{receiveOnly ? 'Check and receive stock at your assigned store.' : 'Send stock between locations, follow it on the road and receive it into inventory.'}</p>
         </div>
         {!receiveOnly && <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={!canRequestTransfers || !apiToken || openingRestock || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE' || (restockDestination.type === 'SUB_WAREHOUSE' && !canGenerateDepotRestock)}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
-          <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={!canRequestTransfers || !apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
+          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || openingRestock || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE' || (restockDestination.type === 'SUB_WAREHOUSE' && !canGenerateDepotRestock)}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
+          <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
         </div>}
       </header>
 
-      {apiError && <div className={styles.notice} role="alert"><Icon name="alert" size={16} /><span>{apiError}</span><button type="button" onClick={() => { setLoading(true); reloadOperations().then(() => setApiError('')).catch((error) => setApiError(error.message)).finally(() => setLoading(false)); }}>Retry</button></div>}
-
       {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
 
+      {loading ? (
+        <section className={styles.tableCard}><div className={styles.empty} role="status">Loading transfers…</div></section>
+      ) : apiError ? (
+        <section className={styles.tableCard} aria-label="Transfer load failure">
+          <div className={styles.empty}>
+            <span><Icon name="alert" size={24} /></span>
+            <div role="alert">
+              <strong>{receiveOnly ? 'Could not load incoming deliveries' : 'Could not load transfers and restock requests'}</strong>
+              <p>{apiError}</p>
+            </div>
+            {apiToken && <button type="button" className={styles.ghostButton} onClick={() => void retryOperations()}>Retry</button>}
+          </div>
+        </section>
+      ) : <>
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Transfer summary">
         <button type="button" className={`${styles.summaryCard} ${styles.summaryAmber} ${filterStatus === 'PENDING' ? styles.summaryOn : ''}`} onClick={() => setFilterStatus(filterStatus === 'PENDING' ? 'ALL' : 'PENDING')}>
@@ -1084,8 +1108,8 @@ export default function OperationsPage() {
         {!filteredTransfers.length && (
           <div className={styles.empty}>
             <span><Icon name="truck" size={26} /></span>
-            <strong>{loading ? 'Loading transfers…' : 'No transfers found'}</strong>
-            <p>{loading ? 'Loading current transfers from the server.' : filterStatus === 'PENDING' ? 'No matching transfers need your action.' : 'Try a different status or location filter.'}</p>
+            <strong>No transfers found</strong>
+            <p>{filterStatus === 'PENDING' ? 'No matching transfers need your action.' : 'Try a different status or location filter.'}</p>
             <button type="button" className={styles.ghostButton} onClick={() => { setFilterStatus('ALL'); setLocationFilter('ALL'); setFromFilter('ALL'); setToFilter('ALL'); setSearch(''); }}>Clear filters</button>
           </div>
         )}
@@ -1132,6 +1156,8 @@ export default function OperationsPage() {
           })}</ul>
         )}
       </section>}
+
+      </>}
 
       {(packing || replenishing) && <div className={styles.backdrop}>
         <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="transfer-quantities-title">

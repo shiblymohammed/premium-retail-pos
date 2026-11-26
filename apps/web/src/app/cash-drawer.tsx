@@ -18,7 +18,7 @@ type Drawer = {
 };
 
 export function CashDrawer({
-  api, token, locationId, timezone, canClose, closeHref, onDrawer, formatMoney, isOpen, onOpenChange, hideTrigger = false,
+  api, token, locationId, timezone, canClose, closeHref, onDrawer, formatMoney, isOpen, onOpenChange, onReviewPendingSales, refreshKey, hideTrigger = false,
 }: {
   api: string;
   token: string;
@@ -29,6 +29,8 @@ export function CashDrawer({
   isOpen?: boolean;
   onOpenChange?: (value: boolean) => void;
   closeHref?: string;
+  onReviewPendingSales?: () => void;
+  refreshKey?: number;
   onDrawer: (id: string | null) => void;
   formatMoney: (amount: number | string) => string;
 }) {
@@ -68,9 +70,10 @@ export function CashDrawer({
 
   useEffect(() => {
     const controller = new AbortController();
+    setReady(false);
     void refresh(controller.signal).catch((cause: Error) => { if (!controller.signal.aborted) setError(cause.message); });
     return () => controller.abort();
-  }, [refresh, open]);
+  }, [refresh, open, refreshKey]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -136,7 +139,12 @@ export function CashDrawer({
                 {cardVariance !== null && <small>Difference {formatMoney(cardVariance)}</small>}
               </label>
             </div>}
-            {!canClose && <Feedback>{closeHref ? 'Settle the drawer from Checkout.' : 'Complete or clear the basket and sync queued sales before closing.'}</Feedback>}
+            {!canClose && <Feedback action={onReviewPendingSales && <button type="button" className="admin-secondary" disabled={busy}
+              onClick={() => { closeDialog(); onReviewPendingSales(); }}>Review pending sales</button>}>
+              {closeHref ? 'Settle the drawer from Checkout.' : onReviewPendingSales
+                ? 'Resolve pending sales before closing this drawer.'
+                : 'Complete or clear the basket before closing. Checkout also checks for pending sales.'}
+            </Feedback>}
           </> : <div className="drawer-fields drawer-fields--opening">
             <label><span><Banknote size={16} aria-hidden="true" /> Opening cash float</span>
               <input type="number" inputMode="decimal" min="0" max="9999999999.99" step="0.01" required placeholder="0.00" value={opening} onChange={(event) => setOpening(event.target.value)} />

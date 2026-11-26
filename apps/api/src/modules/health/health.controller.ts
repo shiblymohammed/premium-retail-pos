@@ -13,7 +13,8 @@ export class HealthController {
   @Get('readiness')
   async readiness() {
     try {
-      await this.prisma.$queryRaw`SELECT 1`;
+      // Resolve a column the stock ledger requires without reading any inventory rows.
+      await this.prisma.$queryRaw`SELECT receipt_id FROM public.inventory_movements LIMIT 0`;
       return {
         status: 'ok',
         database: 'connected',
@@ -22,7 +23,7 @@ export class HealthController {
     } catch {
       throw new ServiceUnavailableException({
         status: 'degraded',
-        database: 'disconnected',
+        database: 'unavailable',
         timestamp: new Date().toISOString(),
       });
     }

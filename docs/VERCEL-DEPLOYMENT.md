@@ -47,7 +47,7 @@ Provision PostgreSQL separately. Before importing client data, deploy migrations
 npm run db:deploy --workspace=apps/api
 ```
 
-Verify the API health endpoint (`/api/v1/health/liveness`) and database connectivity before configuring the Vercel frontend. Configure the API host's shared gateway rate limits if running multiple API instances; the app's built-in broad request limiter is process-local.
+Apply the checked-in migrations to the target database before releasing the upgraded API. Use `/api/v1/health/readiness` as the API traffic gate. It checks access to the required stock ledger schema and returns HTTP 503 if the check fails. Verify stock posting and the transfer report on a staging fixture before promotion. Configure the API host's shared gateway rate limits if running multiple API instances; the app's built-in broad request limiter is process-local.
 
 ## Readiness status
 
