@@ -7,7 +7,7 @@ import { attendanceDay } from '../attendance/attendance.service';
 import type { CreateUserWithEmployeeDto } from '../users/dto/create-user-with-employee.dto';
 import { UsersService, roleDefaults } from '../users/users.service';
 import type { UpdateEmployeeDto } from './dto';
-import type { PayrollDto, PayrollLoanDto } from './staff-records.controller';
+import type { LoanCollectionDto, PayrollDto, PayrollLoanDto } from './staff-records.controller';
 
 const employeeFields = {
   id: true, userId: true, locationId: true, firstName: true, lastName: true, employeeCode: true,
@@ -24,7 +24,9 @@ const payrollFields = {
 
 const loanFields = {
   id: true, amount: true, status: true, monthlyInstallment: true, kind: true, issueDate: true, terms: true,
-  repayments: { select: { amount: true, status: true } },
+  repayments: { orderBy: { paymentDate: 'desc' }, select: {
+    id: true, amount: true, status: true, payrollId: true, isPayrollDeduction: true, paymentDate: true,
+  } },
 } satisfies Prisma.LoanSelect;
 
 function localDay(date: Date, timezone: string) {
@@ -126,8 +128,11 @@ export class StaffRecordsService {
       drawers: actor.permissionOverrides?.['cash.reports'] === false ? undefined : drawers, payroll,
       baseSalary: baseSalary?.monthlyBaseSalary,
       loans: loans?.map(({ repayments, ...loan }) => ({
-        ...loan, outstanding: loan.amount.sub(repayments.filter((item) => item.status === 'CONFIRMED')
+        ...loan, repayments,
+        outstanding: loan.amount.sub(repayments.filter((item) => item.status === 'CONFIRMED')
           .reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
+        collectible: loan.amount.sub(repayments.reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0))),
+        scheduled: repayments.find((item) => item.status === 'PENDING' && item.isPayrollDeduction && !item.payrollId)?.amount ?? null,
       })) };
 
   }
@@ -175,22 +180,33 @@ export class StaffRecordsService {
   }
 
   async updateOutletStaff(id: string, dto: UpdateEmployeeDto, actor: RequestUser) {
+    return this.updateStaffProfile(id, dto, actor);
+  }
+
+  async updateStaffProfile(id: string, dto: UpdateEmployeeDto, actor: RequestUser) {
     if (dto.locationId !== undefined || dto.reportingToId !== undefined) {
-      throw new ForbiddenException('Store managers cannot change location or reporting assignments');
+      throw new ForbiddenException('Change location or reporting assignments in the user directory');
     }
     if (!Object.values(dto).some((value) => value !== undefined)) throw new BadRequestException('Enter a profile change');
-    const scope: Prisma.EmployeeWhereInput = {
-      id, locationId: { in: actor.locationIds }, location: { type: 'RETAIL_STORE' },
-      userId: { not: actor.userId },
-      user: { role: { in: OUTLET_STAFF_ROLES }, locationScopes: { every: { locationId: { in: actor.locationIds } } } },
-    };
+    const scope: Prisma.EmployeeWhereInput = { id, userId: { not: actor.userId }, ...this.locationScope(actor) };
+    if (actor.role !== Role.SUPER_ADMIN) {
+      scope.user = {
+        role: { in: actor.role === Role.STORE_MANAGER ? OUTLET_STAFF_ROLES : [
+          Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.STORE_MANAGER, ...OUTLET_STAFF_ROLES,
+        ] },
+        locationScopes: { some: {}, every: { locationId: { in: actor.locationIds } } },
+      };
+    } else {
+      scope.user = { role: { not: Role.SUPER_ADMIN } };
+    }
+    if (actor.role === Role.STORE_MANAGER) scope.location = { type: 'RETAIL_STORE' };
     try {
       const result = await this.prisma.employee.updateMany({
         where: scope, data: {
           ...dto, hireDate: dto.hireDate ? new Date(dto.hireDate) : undefined,
         },
       });
-      if (!result.count) throw new NotFoundException('Editable outlet staff profile not found');
+      if (!result.count) throw new NotFoundException('Editable staff profile not found in your assigned locations');
       return { id };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -221,13 +237,13 @@ export class StaffRecordsService {
     await this.employee(id, actor);
     const amount = new Prisma.Decimal(dto.amount);
     const monthlyInstallment = new Prisma.Decimal(dto.monthlyInstallment);
-    if (!amount.gt(0) || !monthlyInstallment.gt(0) || monthlyInstallment.gt(amount) || !dto.terms.trim()) {
-      throw new BadRequestException('Enter an issued amount, monthly recovery up to the issued amount, and a reference or terms');
+    if (!amount.gt(0) || monthlyInstallment.gt(amount) || !dto.terms.trim()) {
+      throw new BadRequestException('Enter an issued amount, a monthly recovery up to that amount, and a reference or terms');
     }
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
       const loan = await tx.loan.create({
-        data: { employeeId: id, amount, monthlyInstallment, kind: dto.kind, terms: dto.terms.trim(),
+        data: { employeeId: id, amount, monthlyInstallment: monthlyInstallment.isZero() ? null : monthlyInstallment, kind: dto.kind, terms: dto.terms.trim(),
           issueDate: new Date(), approvedByUserId: actor.userId },
       });
       await tx.auditEvent.create({ data: {
@@ -235,6 +251,52 @@ export class StaffRecordsService {
         afterValue: JSON.stringify({ kind: loan.kind, amount, monthlyInstallment }),
       } });
       return loan;
+    });
+  }
+
+  async collectLoan(id: string, loanId: string, dto: LoanCollectionDto, actor: RequestUser) {
+    this.checkPayrollAccess(actor);
+    await this.employee(id, actor);
+    const amount = new Prisma.Decimal(dto.amount);
+    const manual = dto.method === 'MANUAL';
+    const reference = dto.reference?.trim();
+    if (!amount.gt(0) || (manual && !reference)) {
+      throw new BadRequestException('Enter a positive amount and a payment reference for manual collection');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
+      const loan = await tx.loan.findFirst({ where: { id: loanId, employeeId: id }, select: loanFields });
+      if (!loan) throw new NotFoundException('Loan or advance not found');
+      const replay = loan.repayments.find((payment) => payment.id === dto.id);
+      if (replay) {
+        if (!replay.amount.eq(amount) || replay.isPayrollDeduction === manual) {
+          throw new ConflictException('This collection reference is already in use');
+        }
+        return replay;
+      }
+      if (loan.status !== 'ACTIVE') throw new ConflictException('This loan or advance is closed');
+      if (!manual && loan.repayments.some((payment) => payment.status === 'PENDING' && payment.isPayrollDeduction && !payment.payrollId)) {
+        throw new ConflictException('A collection is already queued for payroll');
+      }
+      const allocated = loan.repayments.reduce((sum, payment) => sum.add(payment.amount), new Prisma.Decimal(0));
+      if (amount.gt(loan.amount.sub(allocated))) {
+        throw new BadRequestException('Amount exceeds the balance available to collect after payroll reservations');
+      }
+      const repayment = await tx.repayment.create({ data: {
+        id: dto.id, loanId, amount, paymentDate: new Date(), isPayrollDeduction: !manual,
+        status: manual ? 'CONFIRMED' : 'PENDING', confirmedByUserId: manual ? actor.userId : null,
+      } });
+      if (manual) {
+        const confirmed = loan.repayments.filter((payment) => payment.status === 'CONFIRMED')
+          .reduce((sum, payment) => sum.add(payment.amount), amount);
+        if (confirmed.eq(loan.amount)) await tx.loan.update({ where: { id: loanId }, data: { status: 'FULLY_REPAID' } });
+      }
+      await tx.auditEvent.create({ data: {
+        actorId: actor.userId, targetEntity: 'Repayment', targetId: repayment.id,
+        action: manual ? 'STAFF_REPAYMENT_COLLECTED' : 'STAFF_PAYROLL_COLLECTION_QUEUED',
+        afterValue: JSON.stringify({ loanId, amount, reference }),
+      } });
+      return repayment;
     });
   }
 
@@ -263,7 +325,10 @@ export class StaffRecordsService {
       return await this.prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM employees WHERE id = ${id} FOR UPDATE`;
         const loans = await tx.loan.findMany({
-          where: { employeeId: id, status: 'ACTIVE', monthlyInstallment: { not: null } },
+          where: { employeeId: id, status: 'ACTIVE', OR: [
+            { monthlyInstallment: { gt: 0 } },
+            { repayments: { some: { status: 'PENDING', isPayrollDeduction: true, payrollId: null } } },
+          ] },
           select: loanFields, orderBy: [{ issueDate: 'asc' }, { id: 'asc' }],
         });
         const manualRecovery = new Prisma.Decimal(dto.advanceRecovery);
@@ -271,18 +336,28 @@ export class StaffRecordsService {
           .sub(deductions).sub(attendanceDeduction).sub(manualRecovery);
         if (remainingPay.isNegative()) throw new BadRequestException('Deductions cannot exceed gross pay');
         const allocations: Array<{ loanId: string; amount: Prisma.Decimal }> = [];
+        const scheduled: Array<{ id: string; amount: Prisma.Decimal }> = [];
         for (const loan of loans) {
           if (localDay(loan.issueDate, timezone).slice(0, 7) > period) continue;
+          const queued = loan.repayments.find((payment) => payment.status === 'PENDING' && payment.isPayrollDeduction && !payment.payrollId);
+          if (queued) {
+            if (period >= localDay(queued.paymentDate, timezone).slice(0, 7) && remainingPay.gte(queued.amount)) {
+              scheduled.push(queued);
+              remainingPay = remainingPay.sub(queued.amount);
+            }
+            // A one-time collection replaces this loan's regular installment for this payroll.
+            continue;
+          }
           const allocated = loan.repayments.reduce((sum, item) => sum.add(item.amount), new Prisma.Decimal(0));
-          const amount = Prisma.Decimal.min(loan.monthlyInstallment!, loan.amount.sub(allocated), remainingPay);
+          const amount = Prisma.Decimal.min(loan.monthlyInstallment ?? 0, loan.amount.sub(allocated), remainingPay);
           if (amount.gt(0)) {
             allocations.push({ loanId: loan.id, amount });
             remainingPay = remainingPay.sub(amount);
           }
         }
-        const advanceRecovery = allocations.reduce((sum, item) => sum.add(item.amount), manualRecovery);
+        const advanceRecovery = [...allocations, ...scheduled].reduce((sum, item) => sum.add(item.amount), manualRecovery);
         if (advanceRecovery.gt(max)) throw new BadRequestException('Payroll recovery exceeds the supported amount');
-        return tx.payrollRecord.create({
+        const record = await tx.payrollRecord.create({
           data: { period, base, allowances, bonus, deductions, advanceRecovery, overtimePay, attendanceDeduction,
             attendanceBasis: { overtimeMinutes: profile.overtimeMinutes, lateDays, scheduledDates, absences,
               overtimeHourlyRate: dto.overtimeHourlyRate ?? '0', lateDayDeduction: dto.lateDayDeduction ?? '0',
@@ -294,6 +369,10 @@ export class StaffRecordsService {
           },
           select: payrollFields,
         });
+        if (scheduled.length) await tx.repayment.updateMany({
+          where: { id: { in: scheduled.map((item) => item.id) } }, data: { payrollId: record.id },
+        });
+        return record;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

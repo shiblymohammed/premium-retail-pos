@@ -230,7 +230,7 @@ export class ReportsService {
     const data = [...rows.values()].map((row) => {
       const reorderLevelBase = reorderByProduct.get(row.productId) ?? null;
       const unitsPerCarton = row.unitsPerCarton;
-      return { ...row, reorderLevelBase, cartons: unitsPerCarton ? Math.trunc(row.available / unitsPerCarton) : null, looseBaseUnits: unitsPerCarton ? row.available % unitsPerCarton : row.available, lowStock: reorderLevelBase !== null && row.available <= reorderLevelBase, negativeStock: row.available < 0 };
+      return { ...row, reorderLevelBase, cartons: unitsPerCarton ? Math.trunc(row.available / unitsPerCarton) : null, looseBaseUnits: unitsPerCarton ? row.available % unitsPerCarton : row.available, lowStock: row.available === 0 || (reorderLevelBase !== null && row.available <= reorderLevelBase), negativeStock: row.available < 0 };
     });
     return { locations: scope.locationIds, totals: data.reduce((sum, row) => ({ variants: sum.variants + 1, availableBaseUnits: sum.availableBaseUnits + row.available, lowStockVariants: sum.lowStockVariants + Number(row.lowStock), negativeStockVariants: sum.negativeStockVariants + Number(row.negativeStock) }), { variants: 0, availableBaseUnits: 0, lowStockVariants: 0, negativeStockVariants: 0 }), rows: data.sort((a, b) => a.locationName.localeCompare(b.locationName) || a.sku.localeCompare(b.sku)) };
   }

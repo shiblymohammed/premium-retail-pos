@@ -1,5 +1,6 @@
 'use client';
 
+import { AdminActionMenu } from '@/components/admin/admin-action-menu';
 import { useAccess } from '@/lib/permissions';
 import { CameraScanner } from '@/components/ui/camera-scanner';
 import { Feedback } from '@/components/ui/feedback';
@@ -156,7 +157,6 @@ export default function ProductsPage() {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [filterOpen, setFilterOpen] = useState(false);
-  const [menuFor, setMenuFor] = useState<number | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
 
   const [reorderInput, setReorderInput] = useState('');
@@ -383,19 +383,18 @@ export default function ProductsPage() {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
 
-  // Close the filter popover and row menus on outside click / Escape
+  // Close the filter popover on outside click or Escape.
   useEffect(() => {
-    if (!filterOpen && menuFor === null) return;
+    if (!filterOpen) return;
     const onClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (filterOpen && !filterRef.current?.contains(target)) setFilterOpen(false);
-      if (menuFor !== null && !target.closest('[data-row-menu]')) setMenuFor(null);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setFilterOpen(false); setMenuFor(null); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setFilterOpen(false); } };
     window.addEventListener('mousedown', onClick);
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('mousedown', onClick); window.removeEventListener('keydown', onKey); };
-  }, [filterOpen, menuFor]);
+  }, [filterOpen]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -801,24 +800,19 @@ export default function ProductsPage() {
                     <div><span className={`${styles.pill} ${statusTone(product.status)}`}>{product.status === 'Negative' ? 'Negative' : product.status}</span></div>
 
                     <div className={styles.actionsCell}>
-                      <button type="button" className={styles.iconAction} onClick={openReplenish} title="Open replenishment tools" aria-label="Open replenishment tools"><Icon name="truck" size={15} /></button>
+                      <button type="button" className={styles.iconAction} onClick={openReplenish} title="Open restock tools" aria-label="Open restock tools"><Icon name="truck" size={15} /></button>
                       <button type="button" className={styles.iconAction} onClick={() => copySku(product)} title="Copy SKU" aria-label={`Copy SKU ${product.sku}`}><Icon name="copy" size={15} /></button>
-                      <div className={styles.menuWrap} data-row-menu>
-                        <button type="button" className={styles.iconAction} onClick={() => setMenuFor(menuFor === product.id ? null : product.id)} aria-haspopup="menu" aria-expanded={menuFor === product.id} aria-label="More actions"><Icon name="more" size={15} /></button>
-                        {menuFor === product.id && (
-                          <div className={styles.rowMenu} role="menu">
-                            {['SUPER_ADMIN', 'ADMIN'].includes(operator.role) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openProductDialog(product); }}><Icon name="package" size={14} /> Edit packaging and reorder level</button>}
-                            {canEditPrices && <button type="button" role="menuitem" onClick={() => {
-                              setEditingPackaging(null); setPriceTarget(product); setPriceInput(String(product.price)); setPriceReason('');
-                              setProductSaveError(''); setMenuFor(null); setAddProductModalOpen(true);
-                            }}>Edit selling price</button>}
-                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); openReplenish(); }}><Icon name="truck" size={14} /> Open replenishment tools</button>
-                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); copySku(product); }}><Icon name="copy" size={14} /> Copy SKU</button>
-                            <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setSelectedCategory(product.category); setCurrentPage(1); }}><Icon name="tag" size={14} /> Show {product.category}</button>
-                            <a role="menuitem" href="/reports?tab=stock"><Icon name="fileText" size={14} /> Open stock report</a>
-                          </div>
-                        )}
-                      </div>
+                      <AdminActionMenu label={`More actions for ${product.sku}`}>
+                        {['SUPER_ADMIN', 'ADMIN'].includes(operator.role) && <button type="button" onClick={() => { openProductDialog(product); }}><Icon name="package" size={14} /> Edit packaging and reorder level</button>}
+                        {canEditPrices && <button type="button" onClick={() => {
+                          setEditingPackaging(null); setPriceTarget(product); setPriceInput(String(product.price)); setPriceReason('');
+                          setProductSaveError(''); setAddProductModalOpen(true);
+                        }}>Edit selling price</button>}
+                        <button type="button" onClick={() => { openReplenish(); }}><Icon name="truck" size={14} /> Open restock tools</button>
+                        <button type="button" onClick={() => { copySku(product); }}><Icon name="copy" size={14} /> Copy SKU</button>
+                        <button type="button" onClick={() => { setSelectedCategory(product.category); setCurrentPage(1); }}><Icon name="tag" size={14} /> Show {product.category}</button>
+                        <button type="button" onClick={() => window.location.assign('/reports?tab=stock')}><Icon name="fileText" size={14} /> Open stock report</button>
+                      </AdminActionMenu>
                     </div>
                   </div>
                 );
@@ -974,7 +968,7 @@ export default function ProductsPage() {
                   <label htmlFor="product-reorder-level">Reorder level ({productUnit}s)</label>
                   <input id="product-reorder-level" type="number" inputMode="numeric" min="0" max="2147483647" step="1"
                     className={styles.modalInput} value={reorderInput} onChange={(event) => setReorderInput(event.target.value)} />
-                  <small className={styles.fieldHint}>Leave blank to exclude this product from generated replenishment.</small>
+                  <small className={styles.fieldHint}>Leave blank to exclude this product from automatic depot restock suggestions.</small>
                 </div>
                 <small className={styles.fieldHint}>Stock is counted in {productUnit === 'packet' ? 'packets' : 'individual units'}.
                   {newProdHasCartons && ' Carton quantities are converted automatically.'}</small>

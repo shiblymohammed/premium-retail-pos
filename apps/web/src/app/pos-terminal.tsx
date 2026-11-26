@@ -3,6 +3,7 @@
 import { downloadPdf } from '@/lib/report-download';
 
 import { useAccess } from '@/lib/permissions';
+import { AdminModal } from '@/components/admin/admin-modal';
 import { CashDrawer } from './cash-drawer';
 import { InfoHint } from '@/components/ui/info-hint';
 import {
@@ -22,6 +23,7 @@ import {
   SoapDispenserDroplet,
   SprayCan,
   TriangleAlert,
+  Undo2,
   Wheat,
   X,
 } from 'lucide-react';
@@ -292,6 +294,8 @@ export default function PosTerminal() {
   const [storeOptions, setStoreOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [checkoutLocation, setCheckoutLocation] = useState('');
   const { can } = useAccess();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [returnsOpen, setReturnsOpen] = useState(false);
   const [cashDrawerId, setCashDrawerId] = useState<string | null>(null);
   const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
   const [receiptHistory, setReceiptHistory] = useState<SaleReceipt[] | null>(null);
@@ -697,7 +701,7 @@ export default function PosTerminal() {
   useEffect(() => {
     if (!terminal) return;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (customerLookupOpen || clearBasketOpen) return;
+      if (customerLookupOpen || clearBasketOpen || drawerOpen || returnsOpen) return;
       if (event.key === 'Escape') {
         setCheckoutOpen(false);
         setOfflineDrawerOpen(false);
@@ -711,7 +715,7 @@ export default function PosTerminal() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [checkoutDisabled, checkoutDisabledForClear, checkoutOpen, clearBasketOpen, customerLookupOpen, terminal]);
+  }, [checkoutDisabled, checkoutDisabledForClear, checkoutOpen, clearBasketOpen, customerLookupOpen, drawerOpen, returnsOpen, terminal]);
 
   function addToCart(product: Product, variant: Variant) {
     const stock = stockBalances[variant.id];
@@ -1245,17 +1249,20 @@ export default function PosTerminal() {
   );
 
   const canCreateSale = can('sales.checkout', terminal.access?.checkout ?? true);
+  const canOpenDrawer = can('cash.drawer', terminal.access?.drawer ?? true);
 
   return (
     <main className="pos-shell">
       <div className={`pos-content${canCreateSale ? '' : ' pos-utility-only'}`}>
         {!canCreateSale && <header><h1>Register tools</h1><p>{terminal.location.name}</p></header>}
         <div className="pos-history-actions">
-          {can('cash.drawer', terminal.access?.drawer ?? true) && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id} timezone={terminal.location.timezone}
-            onDrawer={setCashDrawerId} formatMoney={formatMoney}
+          {canOpenDrawer && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id} timezone={terminal.location.timezone}
+            onDrawer={setCashDrawerId} formatMoney={formatMoney} isOpen={drawerOpen} onOpenChange={setDrawerOpen}
             canClose={!cart.length && !busy && !saleRetryPending && !syncingSales && !offlineSales.length} />}
         {canCreateSale && <button type="button" ref={customerButton} className="admin-secondary" onClick={() => setCustomerLookupOpen(true)}>Customers</button>}
           {can('sales.receipts', terminal.access?.receipts ?? true) && <button className="admin-secondary" type="button" onClick={() => { setReceiptHistory(null); setReceiptHistoryOpen(true); }}><ReceiptText size={16} /> Receipt history</button>}
+          {(salesPermissions.canCancelSales || salesPermissions.canProcessReturns) &&
+            <button type="button" className="admin-secondary" onClick={() => setReturnsOpen(true)}><Undo2 size={16} /> Returns &amp; cancellations</button>}
           {storeOptions.length > 1 && <button className="admin-secondary" type="button" disabled={cart.length > 0 || busy || saleRetryPending || syncingSales}
             onClick={() => {
               const url = new URL(window.location.href);
@@ -1315,9 +1322,11 @@ export default function PosTerminal() {
                         <span className="product-variant-name">{variant.name}</span>
                         <span className="product-sku">{variant.sku}</span>
                         <strong className="product-price">{formatMoney(product.sellingPrice)} <small>/ {product.baseUnit}</small></strong>
-                        <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-hidden="true"><TriangleAlert size={10} aria-hidden="true" /></b>}{isNegative ? 'Out of stock' : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
                       </div>
-                      <button className="tile-add-button" aria-label={`Add ${product.name} to basket`} disabled={busy || saleRetryPending || Boolean(isNegative)} onClick={() => addToCart(product, variant)}><span><Plus size="1em" className="inline-icon" aria-hidden="true" /></span><span className="tile-add-label">Add</span></button>
+                      <div className="product-tile-actions">
+                        <span className={`stock-chip ${isNegative ? 'negative' : isLow ? 'low' : ''}`}>{stock ? <>{isNegative && <b aria-hidden="true"><TriangleAlert size={10} aria-hidden="true" /></b>}{isNegative ? 'Out of stock' : isLow ? `${stock.formattedQuantity} in stock · Low stock` : `${stock.formattedQuantity} in stock`}</> : isOnline ? 'Checking stock…' : 'Stock unavailable offline'}</span>
+                        <button type="button" className="tile-add-button" aria-label={`Add ${product.name} to basket`} disabled={busy || saleRetryPending || Boolean(isNegative)} onClick={() => addToCart(product, variant)}><span><Plus size="1em" className="inline-icon" aria-hidden="true" /></span><span className="tile-add-label">Add</span></button>
+                      </div>
                     </article>
                   );
                 })}
@@ -1419,9 +1428,29 @@ export default function PosTerminal() {
               </div>;
             })}
           </section></div>}
-          {(salesPermissions.canCancelSales || salesPermissions.canProcessReturns) && <section className="sale-controls">
-            <div className="eyebrow">SALE CONTROLS</div><h3>Returns & cancellations</h3>
-            <p>Enter the original invoice number. Returns have no time limit. Refunds are recorded manually; this app does not send money.</p>
+
+          </div>
+          <div className="basket-footer">
+            <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
+            <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
+            {drawerBlocksCheckout && <div className="checkout-drawer-required">
+              <p role="status">{canOpenDrawer ? 'Enter your opening cash before completing a sale.' : 'Ask a supervisor with drawer access to open the register.'}</p>
+              {canOpenDrawer && <button type="button" className="admin-secondary" onClick={() => setDrawerOpen(true)}>Enter opening cash</button>}
+            </div>}
+            <button className="checkout-button" disabled={checkoutDisabled} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
+            <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
+            {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
+            {auditBlocksCheckout && <p className="basket-stock-warning" role="status">Checkout is paused while this store’s stock count is open.</p>}
+            {stockBlocksCheckout && <p className="basket-stock-warning" role="status">Reduce the flagged quantities or restock to continue.</p>}
+          </div>
+        </aside>
+        </>}
+      </div>
+      {returnsOpen && <AdminModal isOpen title="Returns & cancellations" badgeIcon={<Undo2 size={22} />}
+        subtitle="Find the original invoice to record a return or cancel the sale."
+        onClose={() => { if (!controlBusy) setReturnsOpen(false); }} maxWidth="760px"
+        footer={<button type="button" className="admin-secondary" disabled={controlBusy} onClick={() => setReturnsOpen(false)}>Done</button>}>
+        <section className="sale-controls checkout-returns">
             <div className="invoice-search"><input aria-label="Invoice number" value={invoiceSearch} onChange={(event) => setInvoiceSearch(event.target.value)} placeholder="Invoice number" disabled={saleControlRetryPending} /><button className="small-action-button" disabled={controlBusy || saleControlRetryPending || !invoiceSearch.trim()} onClick={() => void loadSaleControl()}>{controlBusy ? 'Loading…' : 'Find'}</button></div>
             {controlError && <Feedback tone="error">{controlError}</Feedback>}
             {controlNotice && <Feedback tone="success">{controlNotice}</Feedback>}
@@ -1449,21 +1478,8 @@ export default function PosTerminal() {
                 })}<button className="small-action-button" disabled={controlBusy} onClick={() => void processSaleReturn(saleControl)}>{saleControlRetryPending ? 'Retry same return' : 'Record return'}</button></div>}
               </>}
             </div>}
-          </section>}
-          </div>
-          <div className="basket-footer">
-            <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
-            <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
-            <button className="checkout-button" disabled={checkoutDisabled} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
-            <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
-            {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
-            {auditBlocksCheckout && <p className="basket-stock-warning" role="status">Checkout is paused while this store’s stock count is open.</p>}
-            {drawerBlocksCheckout && <p role="status">Open your cash drawer to complete a sale.</p>}
-            {stockBlocksCheckout && <p className="basket-stock-warning" role="status">Reduce the flagged quantities or restock to continue.</p>}
-          </div>
-        </aside>
-        </>}
-      </div>
+        </section>
+      </AdminModal>}
       {customerLookupOpen && <div className="checkout-modal-backdrop">
         <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="lookup-title" onKeyDown={(event) => {
           if (event.key === 'Escape') { event.stopPropagation(); closeCustomerLookup(); }

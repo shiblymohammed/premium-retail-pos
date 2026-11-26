@@ -9,8 +9,8 @@ import styles from './records.module.css';
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 type Contact = { employeeCode: string; firstName: string; lastName: string; hireDate: string; phone: string | null; address?: string | null; designation?: string | null };
 
-export function OutletStaffEditor({ staff, onSaved, onCancel }: {
-  staff?: Contact & { id: string }; onSaved: (id: string) => void; onCancel: () => void;
+export function OutletStaffEditor({ staff, outlet = true, onSaved, onCancel }: {
+  staff?: Contact & { id: string }; outlet?: boolean; onSaved: (id: string) => void; onCancel: () => void;
 }) {
   const [stores, setStores] = useState<Array<{ id: string; name: string }>>([]);
   const [locationId, setLocationId] = useState('');
@@ -43,7 +43,7 @@ export function OutletStaffEditor({ staff, onSaved, onCancel }: {
     const { email, password, role, ...contact } = values;
     const profile = { ...contact, phone: contact.phone.trim() || undefined };
     try {
-      const saved = await staffRequest<{ id: string }>(staff ? `/${staff.id}/outlet-profile` : '/outlet-staff', undefined,
+      const saved = await staffRequest<{ id: string }>(staff ? `/${staff.id}/${outlet ? 'outlet-profile' : 'profile'}` : '/outlet-staff', undefined,
         staff ? profile : { ...profile, email, password, role, locationId }, staff ? 'PATCH' : 'POST');
       onSaved(saved.id);
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not save the staff profile.'); }
@@ -51,7 +51,7 @@ export function OutletStaffEditor({ staff, onSaved, onCancel }: {
   }
 
   return <section className={styles.panel}>
-    <h2>{staff ? 'Edit outlet staff' : 'Add outlet staff'}</h2>
+    <h2>{staff ? 'Edit employee details' : 'Add outlet staff'}</h2>
     {error && <Feedback tone="error">{error}</Feedback>}
     <form className={styles.fields} onSubmit={(e) => void submit(e)}>
       {([['firstName', 'First name', 'text', 80], ['lastName', 'Last name', 'text', 80], ['employeeCode', 'Employee code', 'text', 32],

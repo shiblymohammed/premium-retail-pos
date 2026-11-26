@@ -573,7 +573,7 @@ export default function ReportsPage() {
           <div className={styles.cardHead}>
             <div>
               <h2>Operational alerts</h2>
-              <p>Replenishment requests, transfer discrepancies and audit alerts</p>
+              <p>Restock requests, transfer discrepancies and audit alerts</p>
             </div>
             <div className={styles.cardHeadActions}>
               {Boolean(notifications?.unread) && <button type="button" onClick={markAllRead} className={styles.textButton}>Mark all as read</button>}

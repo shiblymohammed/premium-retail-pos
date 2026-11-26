@@ -2,7 +2,7 @@ import { Permission } from '../../common/decorators/permission.decorator';
 import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
-import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, Matches, MaxLength, IsUUID } from 'class-validator';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -33,6 +33,13 @@ export class PayrollLoanDto {
   @Matches(MONEY) amount: string;
   @Matches(MONEY) monthlyInstallment: string;
   @IsString() @MaxLength(500) terms: string;
+}
+
+export class LoanCollectionDto {
+  @IsUUID() id: string;
+  @IsIn(['MANUAL', 'NEXT_PAYROLL']) method: 'MANUAL' | 'NEXT_PAYROLL';
+  @Matches(MONEY) amount: string;
+  @IsOptional() @IsString() @MaxLength(120) reference?: string;
 }
 
 class PayrollPaymentDto {
@@ -67,6 +74,13 @@ export class StaffRecordsController {
     return { data: await this.staff.updateOutletStaff(id, dto, actor) };
   }
 
+  @Patch(':id/profile')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Permission('staff.manage')
+  async updateProfile(@Param('id') id: string, @Body() dto: UpdateEmployeeDto, @CurrentUser() actor: RequestUser) {
+    return { data: await this.staff.updateStaffProfile(id, dto, actor) };
+  }
+
   @Get('me/payroll')
   async ownPayroll(@CurrentUser() actor: RequestUser) {
     return { data: await this.staff.ownPayroll(actor) };
@@ -85,6 +99,13 @@ export class StaffRecordsController {
   @Permission('payroll.manage')
   async loan(@Param('id') id: string, @Body() dto: PayrollLoanDto, @CurrentUser() actor: RequestUser) {
     return { data: await this.staff.recordLoan(id, dto, actor) };
+  }
+
+  @Post(':id/loans/:loanId/collections')
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Permission('payroll.manage')
+  async collect(@Param('id') id: string, @Param('loanId') loanId: string, @Body() dto: LoanCollectionDto, @CurrentUser() actor: RequestUser) {
+    return { data: await this.staff.collectLoan(id, loanId, dto, actor) };
   }
 
   @Get(':id')

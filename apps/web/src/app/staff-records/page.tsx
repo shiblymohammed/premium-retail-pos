@@ -4,21 +4,23 @@ import { useAccess } from '@/lib/permissions';
 import { useEffect, useState, type FormEvent } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { OutletStaffEditor } from './outlet-staff-editor';
+import { AdminModal } from '@/components/admin/admin-modal';
 import { Feedback } from '@/components/ui/feedback';
-import { money, payFields, staffRequest, type PayrollRow } from './records-api';
+import { money, payFields, staffRequest, deactivateStaff, type PayrollRow } from './records-api';
 import styles from './records.module.css';
 
 type DirectoryEntry = { id: string; firstName: string; lastName: string; employeeCode: string; location: { name: string } };
 type Loan = {
   id: string; kind: string; amount: string; monthlyInstallment: string | null; outstanding: string;
-  terms: string | null; status: string;
+  terms: string | null; status: string; collectible: string; scheduled: string | null;
+  repayments: Array<{ id: string; amount: string; status: string; isPayrollDeduction: boolean; payrollId: string | null; paymentDate: string }>;
 };
 type Comparison = {
   includeSales: boolean; includeCash: boolean;
   rows: Array<{ id: string; firstName: string; lastName: string; location: string; currency: string;
     late: number; sales: string | null; shortages: string | null }>;
 };
-const emptyLoan = { kind: 'LOAN', amount: '', monthlyInstallment: '', terms: '' };
+const emptyLoan = { kind: 'LOAN', amount: '', monthlyInstallment: '0', terms: '' };
 const payrollInputs = { allowances: '0', bonus: '0', deductions: '0', advanceRecovery: '0',
   overtimeHourlyRate: '0', lateDayDeduction: '0', absentDayDeduction: '0' };
 const entryFields = {
@@ -28,7 +30,7 @@ const entryFields = {
 
 type Profile = {
   staff: DirectoryEntry & {
-    designation: string | null; hireDate: string; phone: string | null; address: string | null; isActive: boolean;
+    userId: string; designation: string | null; hireDate: string; phone: string | null; address: string | null; isActive: boolean;
     location: { name: string; company: { currency: string; timezone: string } };
     user: { email: string; role: string; canCancelSales: boolean; canProcessReturns: boolean; canCountStockAudits: boolean; discountLimitPercent: string; permissionOverrides?: Record<string, boolean> };
   };
@@ -49,7 +51,15 @@ type Profile = {
 
 export default function StaffRecordsPage() {
   const { can, loading: accessLoading } = useAccess();
-  const [manager, setManager] = useState(false);
+  const [actor, setActor] = useState<{ id: string; role: string } | null>(null);
+  const manager = actor?.role === 'STORE_MANAGER';
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [view, setView] = useState<'activity' | 'payroll' | 'loans'>('activity');
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [collection, setCollection] = useState<{
+    loan: Loan; id: string; method: 'MANUAL' | 'NEXT_PAYROLL'; amount: string; reference: string;
+  } | null>(null);
   const [editor, setEditor] = useState<'new' | 'edit' | null>(null);
   const [directory, setDirectory] = useState<DirectoryEntry[]>([]);
   const [selected, setSelected] = useState('');
@@ -71,7 +81,7 @@ export default function StaffRecordsPage() {
 
   useEffect(() => {
     const now = new Date();
-    setManager(getStoredSession()?.user.role === 'STORE_MANAGER');
+    setActor(getStoredSession()?.user ?? null);
     setMonth((current) => current || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
     const controller = new AbortController();
     void staffRequest<DirectoryEntry[]>('', controller.signal).then((rows) => {
@@ -93,6 +103,7 @@ export default function StaffRecordsPage() {
     setReference('');
     setSchedule([]);
     setAddingLoan(false);
+    setCollection(null);
     setError('');
     setLoading(true);
     void staffRequest<Profile>(`/${selected}?month=${encodeURIComponent(month)}`, controller.signal)
@@ -148,25 +159,79 @@ export default function StaffRecordsPage() {
     } finally { setBusy(false); }
   }
 
+  async function saveCollection(event: FormEvent) {
+    event.preventDefault();
+    if (!collection || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { loan: record, ...details } = collection;
+      await staffRequest(`/${selected}/loans/${record.id}/collections`, undefined, details);
+      setCollection(null);
+      setNotice(details.method === 'MANUAL' ? 'Repayment recorded.' : 'Repayment queued for the next eligible payroll.');
+      setReload((value) => value + 1);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not collect repayment.');
+    } finally { setBusy(false); }
+  }
+
+  async function archiveEmployee() {
+    if (!profile || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await deactivateStaff(profile.staff.userId);
+      setArchiveOpen(false);
+      setNotice('Staff account archived. Payroll and attendance history remain available.');
+      setReload((value) => value + 1);
+    } catch (caught) {
+      setArchiveOpen(false);
+      setError(caught instanceof Error ? caught.message : 'Could not archive this staff account.');
+    } finally { setBusy(false); }
+  }
+
+  const visibleEmployees = directory.filter((row) =>
+    `${row.firstName} ${row.lastName} ${row.employeeCode} ${row.location.name}`.toLowerCase().includes(employeeSearch.trim().toLowerCase()));
   const canMaintainOutlet = manager && !accessLoading && can('staff.manage', true);
-  const canEditOutlet = canMaintainOutlet && profile?.staff.id === selected &&
-    ['STAFF', 'CASHIER', 'INVENTORY'].includes(profile.staff.user.role);
+  const adminActor = actor?.role === 'SUPER_ADMIN' || actor?.role === 'ADMIN';
+  const targetRole = profile?.staff.user.role;
+  const canEditAdmin = adminActor && targetRole !== 'SUPER_ADMIN' && (actor?.role === 'SUPER_ADMIN' || targetRole !== 'ADMIN')
+    && !accessLoading && can('staff.manage', true);
+  const canEdit = profile?.staff.id === selected && profile.staff.userId !== actor?.id &&
+    (canEditAdmin || (canMaintainOutlet && ['STAFF', 'CASHIER', 'INVENTORY'].includes(profile.staff.user.role)));
+  const activeView = (view === 'payroll' && !profile?.payroll) || (view === 'loans' && !profile?.loans) ? 'activity' : view;
 
   return <main className={`app-page ${styles.page}`}>
     <header className={styles.top}>
       <div><h1>Staff records</h1><p className={styles.muted}>Monthly activity at the employee’s assigned workplace.</p></div>
       {canMaintainOutlet && <button type="button" className="admin-primary" disabled={busy || !!editor} onClick={() => setEditor('new')}>Add outlet staff</button>}
     </header>
-    <div className={styles.fields}>
-      <label>Employee<select value={selected} disabled={busy || !!editor || !directory.length} onChange={(e) => setSelected(e.target.value)}>
-        {directory.map((row) => <option key={row.id} value={row.id}>{row.firstName} {row.lastName} · {row.employeeCode} · {row.location.name}</option>)}
+    <div className={`${styles.panel} ${styles.filters}`}>
+      <label className={styles.search}>Search employees<input type="search" placeholder="Name, employee code or workplace"
+        value={employeeSearch} disabled={busy || !!editor} onChange={(event) => setEmployeeSearch(event.target.value)} /></label>
+      <label>Employee<select aria-label="Employee" value={selected} disabled={busy || !!editor || !directory.length} onChange={(e) => setSelected(e.target.value)}>
+        {!visibleEmployees.some((row) => row.id === selected) && <option value={selected}>{visibleEmployees.length ? 'Select a matching employee' : 'No matching employees'}</option>}
+        {visibleEmployees.map((row) => <option key={row.id} value={row.id}>{row.firstName} {row.lastName} · {row.employeeCode} · {row.location.name}</option>)}
       </select></label>
       <label>Month<input type="month" value={month} disabled={busy || !!editor} onChange={(e) => { if (e.target.value) setMonth(e.target.value); }} /></label>
-      {canEditOutlet && <button type="button" className="admin-secondary" disabled={busy || !!editor} onClick={() => setEditor('edit')}>Edit selected staff</button>}
+      {canEdit && <button type="button" className="admin-secondary" disabled={busy || !!editor} onClick={() => setEditor('edit')}>Edit employee</button>}
+      {canEdit && canEditAdmin && profile?.staff.isActive && <button type="button" className="admin-secondary" disabled={busy || !!editor} onClick={() => setArchiveOpen(true)}>Archive account</button>}
     </div>
-    {canMaintainOutlet && editor && (editor === 'new' || canEditOutlet) && <OutletStaffEditor staff={editor === 'edit' ? profile?.staff : undefined}
+    {editor && (editor === 'new' ? canMaintainOutlet : canEdit) && <OutletStaffEditor outlet={manager} staff={editor === 'edit' ? profile?.staff : undefined}
       onCancel={() => setEditor(null)} onSaved={(id) => { setSelected(id); setEditor(null); setReload((value) => value + 1); }} />}
-    {can('staff.view', true) && <section className={styles.panel}>
+    {notice && <Feedback tone="success">{notice}</Feedback>}
+    {archiveOpen && profile && <AdminModal isOpen title="Archive staff account?" onClose={() => { if (!busy) setArchiveOpen(false); }} footer={<>
+      <button type="button" className="admin-secondary" disabled={busy} onClick={() => setArchiveOpen(false)}>Cancel</button>
+      <button type="button" className="admin-primary" disabled={busy} onClick={() => void archiveEmployee()}>Archive account</button>
+    </>}><p>{profile.staff.firstName} {profile.staff.lastName} will lose login access. Payroll and attendance history stay available.</p></AdminModal>}
+    {profile && <nav className={styles.tabs} aria-label="Staff record sections">
+      {(['activity', ...(profile.payroll ? ['payroll'] : []), ...(profile.loans ? ['loans'] : [])] as typeof view[]).map((section) =>
+        <button className={activeView === section ? 'admin-primary' : 'admin-secondary'} key={section} type="button"
+          aria-pressed={activeView === section} disabled={busy || !!editor} onClick={() => setView(section)}>
+          {section === 'activity' ? 'Activity' : section === 'payroll' ? 'Payroll' : 'Loans & advances'}
+        </button>)}
+    </nav>}
+    {activeView === 'activity' && can('staff.view', true) && <section className={styles.panel}>
       <button className="admin-secondary" type="button" aria-expanded={comparisonOpen} onClick={() => setComparisonOpen(!comparisonOpen)}>
         {comparisonOpen ? 'Hide staff comparison' : 'Compare staff for this month'}
       </button>
@@ -212,7 +277,7 @@ export default function StaffRecordsPage() {
       }
       const localTime = (at: string) => new Date(at).toLocaleString('en-IN', { timeZone: timezone });
       return <>
-        <div className={styles.grid}>
+        {activeView === 'activity' && <div className={styles.grid}>
           <section className={styles.panel}>
             <h2>{staff.firstName} {staff.lastName}</h2>
             <dl className={styles.facts}>{[
@@ -239,8 +304,8 @@ export default function StaffRecordsPage() {
             {drawers.length ? <div className={styles.scroll}><table><thead><tr><th>Closed</th><th>Expected</th><th>Counted</th><th>Difference</th></tr></thead><tbody>{drawers.map((entry, index) =>
               <tr key={index}><td>{localTime(entry.closedAt)}</td><td>{money(entry.expectedCash, currency)}</td><td>{money(entry.countedCash, currency)}</td><td>{money(entry.difference, currency)}</td></tr>)}</tbody></table></div> : <p>No closed drawers for this month.</p>}
           </section>}
-        </div>
-        {profile.payroll && <section className={styles.panel}>
+        </div>}
+        {activeView === 'payroll' && profile.payroll && <section className={styles.panel}>
           <h2>Payroll</h2>
           {payroll ? <>
             <dl className={styles.facts}>{[
@@ -270,7 +335,7 @@ export default function StaffRecordsPage() {
             <button className="admin-primary" disabled={busy}>Create payroll record</button>
           </form> : <p>No payroll record for this month.</p>}
         </section>}
-        {profile.loans && <section className={styles.panel}>
+        {activeView === 'loans' && profile.loans && <section className={styles.panel}>
           <div className={styles.top}><h2>Loans and advances</h2>
             {profile.canManagePayroll && <button type="button" className="admin-secondary" onClick={() => { setAddingLoan(!addingLoan); setLoan(emptyLoan); }}>
               {addingLoan ? 'Close form' : 'Record an issued loan or advance'}
@@ -281,18 +346,40 @@ export default function StaffRecordsPage() {
               <option value="LOAN">Loan</option><option value="ADVANCE">Advance</option></select></label>
             <label>Issued amount<input required type="number" min="0.01" max="9999999999.99" step="0.01" value={loan.amount}
               onChange={(event) => setLoan((current) => ({ ...current, amount: event.target.value }))} /></label>
-            <label>Monthly recovery<input required type="number" min="0.01" max={loan.amount || '9999999999.99'} step="0.01" value={loan.monthlyInstallment}
+            <label>Monthly recovery (0 for manual only)<input required type="number" min="0" max={loan.amount || '9999999999.99'} step="0.01" value={loan.monthlyInstallment}
               onChange={(event) => setLoan((current) => ({ ...current, monthlyInstallment: event.target.value }))} /></label>
             <label>Payment reference or terms<input required maxLength={500} value={loan.terms}
               onChange={(event) => setLoan((current) => ({ ...current, terms: event.target.value }))} /></label>
-            <button className="admin-primary" disabled={busy}>Save recovery schedule</button>
+            <button className="admin-primary" disabled={busy}>Record loan or advance</button>
+          </form>}
+          {collection && <form className={`${styles.fields} ${styles.collection}`} onSubmit={saveCollection}>
+            <div><strong>Collect {collection.loan.kind === 'ADVANCE' ? 'advance' : 'loan'}</strong><p className={styles.muted}>{money(collection.loan.collectible, currency)} available to collect</p></div>
+            <label>Collection method<select value={collection.method} disabled={busy}
+              onChange={(event) => setCollection({ ...collection, id: crypto.randomUUID(), method: event.target.value as typeof collection.method })}>
+              <option value="MANUAL">Record manual payment</option>
+              <option value="NEXT_PAYROLL" disabled={!!collection.loan.scheduled}>Deduct from next payroll</option>
+            </select></label>
+            <label>Amount<input type="number" required min="0.01" step="0.01" max={collection.loan.collectible} disabled={busy} value={collection.amount}
+              onChange={(event) => setCollection({ ...collection, id: crypto.randomUUID(), amount: event.target.value })} /></label>
+            {collection.method === 'MANUAL' && <label>Payment reference<input required maxLength={120} disabled={busy} value={collection.reference}
+              onChange={(event) => setCollection({ ...collection, id: crypto.randomUUID(), reference: event.target.value })} /></label>}
+            {collection.method === 'NEXT_PAYROLL' && <p className={styles.muted}>Applies to the next payroll you create with enough net pay. The balance changes when payroll is marked paid.</p>}
+            <button type="button" className="admin-secondary" disabled={busy} onClick={() => setCollection(null)}>Cancel</button>
+            <button className="admin-primary" disabled={busy}>{collection.method === 'MANUAL' ? 'Record repayment' : 'Queue deduction'}</button>
           </form>}
           {profile.loans.length ? <div className={styles.scroll} role="region" aria-label="Loans and advances ledger" tabIndex={0}>
-            <table><thead><tr><th>Type</th><th>Issued</th><th>Monthly recovery</th><th>Outstanding</th><th>Status</th><th>Reference or terms</th></tr></thead>
+            <table><thead><tr><th>Type</th><th>Issued</th><th>Monthly recovery</th><th>Outstanding</th><th>Status</th><th>Reference or terms</th><th>Collections</th></tr></thead>
               <tbody>{profile.loans.map((record) => <tr key={record.id}>
                 <td>{record.kind === 'ADVANCE' ? 'Advance' : 'Loan'}</td><td>{money(record.amount, currency)}</td>
                 <td>{record.monthlyInstallment ? money(record.monthlyInstallment, currency) : '—'}</td>
                 <td>{money(record.outstanding, currency)}</td><td>{record.status.replaceAll('_', ' ')}</td><td>{record.terms || '—'}</td>
+                <td><div className={styles.collectionActions}>
+                  {record.repayments.length > 0 && <details><summary>{record.repayments.length} collection{record.repayments.length === 1 ? '' : 's'}</summary>
+                    <ul>{record.repayments.map((payment) => <li key={payment.id}>{money(payment.amount, currency)} · {payment.isPayrollDeduction ? payment.payrollId ? 'Payroll' : 'Queued for payroll' : 'Manual'} · {payment.status === 'CONFIRMED' ? localTime(payment.paymentDate) : 'Pending'}</li>)}</ul>
+                  </details>}
+                  {profile.canManagePayroll && record.status === 'ACTIVE' && Number(record.collectible) > 0 &&
+                    <button type="button" className="admin-secondary" disabled={busy} onClick={() => setCollection({ loan: record, id: crypto.randomUUID(), method: 'MANUAL', amount: record.collectible, reference: '' })}>Collect repayment</button>}
+                </div></td>
               </tr>)}</tbody>
             </table></div> : <p>No loans or advances recorded.</p>}
         </section>}

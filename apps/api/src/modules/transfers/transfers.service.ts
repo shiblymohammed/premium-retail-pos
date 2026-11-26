@@ -47,15 +47,33 @@ export class TransfersService {
     private readonly inventory: InventoryService,
   ) {}
 
+  async restockSources(destinationId: string, actor: TransferActor) {
+    this.assertManager(actor, 'transfers.request');
+    this.assertLocationAccess(actor, destinationId);
+    const destination = await this.requireLocation(this.prisma, destinationId);
+    if (!destination.isActive || destination.type !== LocationType.RETAIL_STORE) {
+      throw new BadRequestException('Select an active retail store to request restock');
+    }
+    return this.prisma.location.findMany({
+      where: {
+        companyId: destination.companyId, isActive: true,
+        type: { in: [LocationType.MAIN_WAREHOUSE, LocationType.SUB_WAREHOUSE] },
+      },
+      select: { id: true, name: true, type: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async generateReplenishment(
     destLocationId: string,
     actor: TransferActor,
     rawIdempotencyKey: string | undefined,
+    manual?: CreateTransferDto,
   ) {
     this.assertManager(actor, 'transfers.request');
     this.assertLocationAccess(actor, destLocationId);
     const idempotencyKey = this.requireIdempotencyKey(rawIdempotencyKey);
-    const payloadHash = this.hash({ actorId: actor.userId, destLocationId });
+    const payloadHash = this.hash({ actorId: actor.userId, destLocationId, ...(manual && { sourceLocationId: manual.sourceLocationId, lines: manual.lines }) });
     const prior = await this.findReplenishmentReplay(idempotencyKey, payloadHash);
     if (prior) return prior;
 
@@ -63,16 +81,23 @@ export class TransfersService {
       return await this.prisma.$transaction(async (tx) => {
         const location = await this.requireLocation(tx, destLocationId);
         if (!location.isActive) throw new ConflictException('Cannot generate replenishment for an inactive location');
-        if (!location.parentId) {
-          throw new BadRequestException('A Main Warehouse has no parent warehouse from which to replenish');
-        }
-        const locations = await this.lockLocations(tx, [location.parentId, destLocationId]);
-        const source = locations.get(location.parentId)!;
+        const sourceId = manual?.sourceLocationId ?? location.parentId;
+        if (!sourceId) throw new BadRequestException('Select a supplying warehouse');
+        const locations = await this.lockLocations(tx, [sourceId, destLocationId]);
+        const source = locations.get(sourceId)!;
         const destination = locations.get(destLocationId)!;
+        if (!source || !destination) throw new NotFoundException('Restock location not found');
         this.assertTransferRoute(source, destination);
+        if (manual && (destination.type !== LocationType.RETAIL_STORE ||
+          ![LocationType.MAIN_WAREHOUSE, LocationType.SUB_WAREHOUSE].some((type) => type === source.type))) {
+          throw new BadRequestException('A store restock request must come from a main warehouse or sub-warehouse');
+        }
+        if (!manual && destination.type === LocationType.RETAIL_STORE) {
+          throw new BadRequestException('Choose a warehouse, products and quantities to request store restock');
+        }
         if (!source.isActive || !destination.isActive) throw new ConflictException('Both transfer locations must be active');
 
-        const activeRequest = await tx.replenishmentRequest.findFirst({
+        const activeRequest = manual ? null : await tx.replenishmentRequest.findFirst({
           where: {
             sourceLocationId: source.id,
             destLocationId: destination.id,
@@ -89,13 +114,16 @@ export class TransfersService {
           throw new ConflictException('An active replenishment request already exists for this location pair');
         }
 
-        await tx.$queryRaw(Prisma.sql`
+        const requested = manual && this.uniqueByVariant(manual.lines, 'restock line');
+        if (!requested) await tx.$queryRaw(Prisma.sql`
           SELECT p."id" FROM "products" p
           JOIN "variants" v ON v."product_id" = p."id"
           WHERE p."is_active" = true AND v."is_active" = true AND p."reorder_level" IS NOT NULL
           FOR SHARE OF p, v
         `);
-        const variants = await tx.variant.findMany({
+        const variants = requested
+          ? [...(await this.loadTransferVariants(tx, [...requested.keys()])).values()]
+          : await tx.variant.findMany({
           where: { isActive: true, product: { isActive: true, reorderLevel: { not: null } } },
           select: {
             id: true,
@@ -107,16 +135,20 @@ export class TransfersService {
           SELECT "variant_id" AS "variantId", COALESCE(SUM("quantity_base_units"), 0)::bigint AS "quantity"
           FROM "inventory_movements"
           WHERE "location_id" = ${destLocationId} AND "stock_state" = 'AVAILABLE'::"StockState"
+            ${requested ? Prisma.sql`AND "variant_id" IN (${Prisma.join([...requested.keys()])})` : Prisma.empty}
           GROUP BY "variant_id"
         `);
         const balanceByVariant = new Map(balances.map((row) => [row.variantId, Number(row.quantity)]));
         const lines = variants.flatMap((variant) => {
-          const reorderLevelBase = variant.product.reorderLevel!;
+          const reorderLevelBase = variant.product.reorderLevel ?? 0;
           const availableQtyBase = balanceByVariant.get(variant.id) ?? 0;
           const cartonSize = variant.product.unitsPerCarton ?? 0;
           const shipsInCartons = cartonSize > 1;
           const needed = reorderLevelBase - availableQtyBase;
-          const systemSuggestedQtyBase = shipsInCartons ? Math.ceil(needed / cartonSize) * cartonSize : needed;
+          const selected = requested?.get(variant.id);
+          const systemSuggestedQtyBase = selected
+            ? this.convertLine(selected, variant.product.unitsPerCarton, shipsInCartons)
+            : shipsInCartons ? Math.ceil(needed / cartonSize) * cartonSize : needed;
           if (systemSuggestedQtyBase <= 0) return [];
           if (!Number.isSafeInteger(systemSuggestedQtyBase) || systemSuggestedQtyBase > 2147483647) {
             throw new BadRequestException(`Suggested replenishment for variant ${variant.id} exceeds the supported quantity range`);
@@ -151,7 +183,7 @@ export class TransfersService {
           },
           include: { lines: true, sourceLocation: true, destLocation: true },
         });
-        return { message: 'Replenishment draft generated', data: request, replayed: false };
+        return { message: 'Restock request created', data: request, replayed: false };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
     } catch (error) {
       if (this.isUniqueConflict(error)) {
@@ -323,7 +355,10 @@ export class TransfersService {
       where: actor.role === Role.SUPER_ADMIN
         ? {}
         : { OR: [{ sourceLocationId: { in: actor.locationIds } }, { destLocationId: { in: actor.locationIds } }] },
-      include: { lines: true, sourceLocation: true, destLocation: true, transfer: { select: { id: true, transferNumber: true, status: true } } },
+      include: {
+        lines: { include: { variant: { select: { sku: true, name: true, product: { select: { name: true } } } } } },
+        sourceLocation: true, destLocation: true, transfer: { select: { id: true, transferNumber: true, status: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }

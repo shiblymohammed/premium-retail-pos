@@ -2,6 +2,18 @@ import { getStoredSession } from '@/lib/auth';
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
+export async function deactivateStaff(userId: string) {
+  const token = getStoredSession()?.accessToken;
+  if (!token) throw new Error('Sign in again to archive staff.');
+  const response = await fetch(`${BASE}/users/${userId}/deactivate`, {
+    method: 'PATCH', headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.message || 'Could not archive this staff account.');
+  }
+}
+
 export async function staffRequest<T>(path: string, signal?: AbortSignal, body?: object, method = body ? 'POST' : 'GET'): Promise<T> {
   const token = getStoredSession()?.accessToken;
   if (!token) throw new Error('Sign in again to access staff records.');

@@ -117,7 +117,7 @@ export function SalesView({ currency, sales, matches, rangeLabel }: { currency: 
 
       <section className={styles.rowGrid}>
         <Card title="Daily net sales" subtitle={`Last ${sales.daily.length} trading days · best day ${best ? formatDay(best.date) : '—'}`} action={best && <span className={styles.highlightPill}>Peak {formatCompactMoney(currency, Number(best.netSales))}</span>}>
-          <svg className={styles.areaChart} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Daily net sales trend">
+          {pts.length ? <svg className={styles.areaChart} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Daily net sales trend">
             <defs>
               <linearGradient id="salesArea" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#7f9cc9" stopOpacity="0.35" />
@@ -140,7 +140,7 @@ export function SalesView({ currency, sales, matches, rangeLabel }: { currency: 
                 </g>
               );
             })}
-          </svg>
+          </svg> : <p>No sales for this location and date range.</p>}
         </Card>
 
         <Card title="Store contribution" subtitle="Net revenue, bills and average ticket by store">
@@ -269,7 +269,7 @@ export function StockView({ stock, matches }: { stock: StockReport; matches: Mat
           headers={['Product', 'Location', 'Available', 'Packaging', 'State mix', 'Health']}
           rows={rows.map((r) => {
             const total = Math.max(0, r.available) + r.inTransit + r.reserved + r.quarantined || 1;
-            const tone: Tone = r.negativeStock ? 'bad' : r.lowStock ? 'warn' : 'good';
+            const tone: Tone = r.negativeStock || r.available === 0 ? 'bad' : r.lowStock ? 'warn' : 'good';
             return [
               <span key="p" className={styles.invoiceCell}><span className={`${styles.skuBadge} ${r.negativeStock ? styles.toneRed : r.lowStock ? styles.toneAmber : styles.toneTeal}`}>{initials(r.productName)}</span><span className={styles.cellStack}><strong>{r.productName}</strong><small>{r.variantName} · <span className={styles.monoInline}>{r.sku}</span></small></span></span>,
               r.locationName,
@@ -281,7 +281,7 @@ export function StockView({ stock, matches }: { stock: StockReport; matches: Mat
                 <i style={{ width: `${(r.reserved / total) * 100}%`, background: STATE_COLORS.reserved }} />
                 <i style={{ width: `${(r.quarantined / total) * 100}%`, background: STATE_COLORS.quarantined }} />
               </span>,
-              <Chip key="h" tone={tone}>{r.negativeStock ? 'Negative' : r.lowStock ? 'Low stock' : 'Healthy'}</Chip>,
+              <Chip key="h" tone={tone}>{r.negativeStock ? 'Negative' : r.available === 0 ? 'Out of stock' : r.lowStock ? 'Low stock' : 'Healthy'}</Chip>,
             ];
           })}
         />

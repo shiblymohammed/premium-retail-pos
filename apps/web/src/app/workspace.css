@@ -382,3 +382,31 @@ body { font-family: var(--retail-font); background: var(--retail-canvas); color:
   .pos-shell .basket-footer { position: sticky; bottom: 0; z-index: 1; }
   .pos-shell #pos-basket { scroll-margin-top: 12px; }
 }
+
+.pos-shell .product-tile {
+  grid-template-columns: clamp(44px, 22%, 68px) minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  gap: 7px 9px;
+}
+.pos-shell .product-tile .product-tile-art { width: 100%; }
+.pos-shell .product-tile-info { padding-right: 0; min-width: 0; }
+.pos-shell .product-tile-info .product-sku { max-width: 100%; overflow-wrap: anywhere; }
+.pos-shell .product-tile-info > strong:not(.product-price) { white-space: normal; overflow-wrap: anywhere; }
+.product-tile-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.pos-shell .product-tile-actions .stock-chip { margin: 0; white-space: normal; overflow-wrap: anywhere; }
+.pos-shell .product-tile-actions .tile-add-button { position: static; flex: 0 0 auto; margin: 0; transform: none; }
+.checkout-drawer-required { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--retail-accent-line); border-radius: 10px; background: var(--retail-accent-soft); color: var(--retail-ink); }
+.checkout-drawer-required p { margin: 0; font-weight: 600; flex: 1 1 150px; }
+.pos-shell .checkout-returns { margin: 0; padding: 0; border: 0; background: transparent; }
+.drawer-body, .drawer-body form { display: grid; gap: 14px; min-width: 0; }
+.drawer-summary, .drawer-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 125px), 1fr)); gap: 8px; margin: 0; }
+.drawer-summary > div { padding: 10px 12px; background: var(--retail-raised); border: 1px solid var(--retail-edge); border-radius: 10px; }
+.drawer-summary dt, .drawer-body small { color: var(--retail-muted); font-size: 12px; }
+.drawer-summary dd { margin: 4px 0 0; font-size: 17px; font-weight: 750; overflow-wrap: anywhere; }
+.drawer-fields label { display: grid; gap: 6px; align-content: start; min-width: 0; font-size: 13px; font-weight: 650; }
+.drawer-fields label > span, .drawer-history summary { display: flex; align-items: center; gap: 7px; }
+.drawer-fields input { width: 100%; min-width: 0; min-height: 42px; padding: 6px 10px; border: 1px solid var(--retail-edge-strong); border-radius: 8px; background: var(--retail-card); color: var(--retail-ink); font: inherit; }
+.drawer-fields--opening { grid-template-columns: 1fr; padding: 14px; border-radius: 10px; background: var(--retail-raised); }
+.drawer-history summary { cursor: pointer; font-weight: 650; }
+.drawer-history-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 155px), 1fr)); gap: 8px; margin-top: 8px; padding: 10px 0; border-top: 1px solid var(--retail-edge); }
+.drawer-history-row small { display: block; }

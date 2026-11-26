@@ -1,5 +1,5 @@
 import { Permission } from '../../common/decorators/permission.decorator';
-import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Role } from '@prisma/client';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
@@ -39,6 +39,22 @@ export class TransfersController {
     @CurrentUser() actor: RequestUser,
   ) {
     return this.transfers.generateReplenishment(dto.destLocationId, actor, idempotencyKey);
+  }
+
+  @Get('replenishment/sources/:destination')
+  @Permission('transfers.request')
+  async restockSources(@Param('destination', ParseUUIDPipe) destination: string, @CurrentUser() actor: RequestUser) {
+    return { data: await this.transfers.restockSources(destination, actor) };
+  }
+
+  @Post('replenishment/request')
+  @Permission('transfers.request')
+  async requestRestock(
+    @Body() dto: CreateTransferDto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @CurrentUser() actor: RequestUser,
+  ) {
+    return this.transfers.generateReplenishment(dto.destLocationId, actor, idempotencyKey, dto);
   }
 
   @Get('replenishment')

@@ -93,12 +93,30 @@ interface ReplenishmentRequest {
   depotAuthorizedByUserId?: string | null;
   sourceLocation: { id: string; name: string; type: string };
   destLocation: { id: string; name: string; type: string };
-  lines: Array<{ variantId: string; systemSuggestedQtyBase: number; managerApprovedQtyBase?: number | null; unitsPerCarton: number; variant?: { sku: string; name: string; product?: { name: string } } }>;
+  lines: Array<{ variantId: string; systemSuggestedQtyBase: number; managerApprovedQtyBase?: number | null; unitsPerCarton: number | null; baseUnitSnapshot?: string | null; variant?: { sku: string; name: string; product?: { name: string } } }>;
 }
 
 type LocationOption = { id: string; name: string; type: string; parentId: string | null };
 type CatalogOption = { variantId: string; sku: string; name: string; baseUnit: string; unitsPerCarton: number };
 
+
+function Stepper({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
+  return (
+    <span className={styles.stepper}>
+      <button type="button" onClick={() => onChange(value - 1)} disabled={value <= 0} aria-label={`Less ${label}`}><Icon name="minus" size={13} /></button>
+      <input type="number" min="0" value={value} onChange={(e) => onChange(Math.floor(Number(e.target.value) || 0))} aria-label={label} />
+      <button type="button" onClick={() => onChange(value + 1)} aria-label={`More ${label}`}><Icon name="plus" size={13} /></button>
+    </span>
+  );
+}
+
+function shipmentQuantity(quantity: number, baseUnit: string, unitsPerCarton: number) {
+  const packets = `${quantity} ${baseUnit}${quantity === 1 ? '' : 's'}`;
+  if (unitsPerCarton <= 1 || quantity < unitsPerCarton) return packets;
+  const cartons = Math.floor(quantity / unitsPerCarton);
+  const loose = quantity % unitsPerCarton;
+  return `${packets} · ${cartons} carton${cartons === 1 ? '' : 's'}${loose ? ` + ${loose} loose` : ''}`;
+}
 
 const isReceiver = (role?: string) => role === 'STAFF' || role === 'CASHIER';
 const outstandingQuantity = (item: TransferItem) => Math.max(0, item.dispatchedQtyBase - item.receivedQtyBase - item.shortQtyBase);
@@ -199,6 +217,7 @@ export default function OperationsPage() {
   const [apiUserId, setApiUserId] = useState('');
   const [apiRole, setApiRole] = useState('');
   const [packing, setPacking] = useState<StockTransfer | null>(null);
+  const [packingStockError, setPackingStockError] = useState(false);
   const [packingBalances, setPackingBalances] = useState<Record<string, number> | null>(null);
   const [replenishing, setReplenishing] = useState<ReplenishmentRequest | null>(null);
   const [lineQuantities, setLineQuantities] = useState<Record<string, number>>({});
@@ -238,6 +257,9 @@ export default function OperationsPage() {
 
   // Create modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [warehouseChoices, setWarehouseChoices] = useState<Array<Pick<LocationOption, 'id' | 'name' | 'type'>> | null>(null);
+  const [openingRestock, setOpeningRestock] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
   const [newOrigin, setNewOrigin] = useState('');
   const [newDest, setNewDest] = useState('');
   const [draft, setDraft] = useState<Record<string, DraftQty>>({});
@@ -327,7 +349,7 @@ export default function OperationsPage() {
       .map((request: any, index: number) => ({
         ...request,
         id: typeof request.id === 'string' ? request.id : `replenishment-${index}`,
-        requestNumber: typeof request.requestNumber === 'string' ? request.requestNumber : 'Replenishment request',
+        requestNumber: typeof request.requestNumber === 'string' ? request.requestNumber : 'Restock request',
         status: typeof request.status === 'string' ? request.status : 'DRAFT',
         generatedByUserId: typeof request.generatedByUserId === 'string' ? request.generatedByUserId : '',
         sourceLocation: {
@@ -390,7 +412,7 @@ export default function OperationsPage() {
       if (e.key !== 'Escape') return;
       if (!isReceivingBusy) setReceivingTransfer(null);
       if (!isSavingLines) { setPacking(null); setReplenishing(null); }
-      setCreateModalOpen(false);
+      if (!isCreatingBusy) setCreateModalOpen(false);
       setMenuFor(null);
     };
     const onClick = (e: MouseEvent) => {
@@ -399,7 +421,7 @@ export default function OperationsPage() {
     window.addEventListener('keydown', onKey);
     window.addEventListener('mousedown', onClick);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onClick); };
-  }, [isReceivingBusy, isSavingLines]);
+  }, [isReceivingBusy, isSavingLines, isCreatingBusy]);
 
   useEffect(() => {
     if (!packing || !apiToken) return;
@@ -424,8 +446,7 @@ export default function OperationsPage() {
       if (!controller.signal.aborted) setPackingBalances(balances);
     }
 
-    setPackingBalances(null);
-    void readStock().catch(() => { /* Dispatch still checks current stock on the server. */ });
+    void readStock().catch(() => { if (!controller.signal.aborted) setPackingStockError(true); });
     return () => controller.abort();
   }, [packing, apiToken]);
 
@@ -542,6 +563,8 @@ export default function OperationsPage() {
     setMenuFor(null);
     setLineError('');
     setLineQuantities({});
+    setPackingBalances(null);
+    setPackingStockError(false);
     setPacking(transfer);
   }
 
@@ -592,12 +615,34 @@ export default function OperationsPage() {
     catch (error) { setNotice(error instanceof Error ? error.message : 'Could not cancel this transfer.'); }
   }
 
-  async function generateReplenishment() {
+  const restockDestination = locations.find((location) => location.id === locationFilter);
+  const manualRestock = warehouseChoices !== null;
+
+  async function requestRestock() {
+    if (openingRestock || !restockDestination || !apiToken) return;
+    setOpeningRestock(true);
+    try {
+      if (restockDestination.type === 'RETAIL_STORE') {
+        const response = await fetch(`${API_BASE}/transfers/replenishment/sources/${restockDestination.id}`, {
+          headers: { Authorization: `Bearer ${apiToken}` }, cache: 'no-store',
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Could not load supplying warehouses.');
+        openCreate();
+        setWarehouseChoices(result.data);
+        setNewOrigin('');
+        setNewDest(restockDestination.id);
+      } else await generateDepotRestock();
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not start restock.'); }
+    finally { setOpeningRestock(false); }
+  }
+
+  async function generateDepotRestock() {
     if (locationFilter === 'ALL') { setNotice('Choose a destination in the location selector first.'); return; }
     try {
       const request = await mutate('/transfers/replenishment/generate', 'POST', { destLocationId: locationFilter });
-      setNotice(request?.id ? `Replenishment request ${request.requestNumber} created for manager review.` : 'No replenishment is needed for the selected location.');
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not generate replenishment.'); }
+      setNotice(request?.id ? `Restock request ${request.requestNumber} created for manager review.` : 'No restock is needed for the selected depot.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not create the depot restock request.'); }
   }
 
   function openReplenishment(request: ReplenishmentRequest) {
@@ -625,10 +670,10 @@ export default function OperationsPage() {
       await mutate(`/transfers/replenishment/${replenishing.id}/${signOff ? 'depot-sign-off' : 'approve'}`, 'POST', { lines });
       setReplenishing(null);
       setNotice(signOff ? `Depot authorized ${replenishing.requestNumber} for main warehouse release.`
-        : depotRequest(replenishing) ? `Replenishment ${replenishing.requestNumber} released for packing.`
-        : `Replenishment ${replenishing.requestNumber} approved and transfer draft created.`);
+        : depotRequest(replenishing) ? `Restock request ${replenishing.requestNumber} released for packing.`
+        : `Restock request ${replenishing.requestNumber} approved and transfer draft created.`);
     } catch (error) {
-      setLineError(error instanceof Error ? error.message : 'Could not approve replenishment.');
+      setLineError(error instanceof Error ? error.message : 'Could not approve the restock request.');
     } finally {
       setIsSavingLines(false);
     }
@@ -638,11 +683,13 @@ export default function OperationsPage() {
     try {
       await mutate(`/transfers/replenishment/${request.id}/reject`, 'POST', { reason });
       setNotice(`Replenishment ${request.requestNumber} rejected.`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reject replenishment.'); }
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reject the restock request.'); }
   }
 
   function openCreate() {
     // Start from the route filters if set, otherwise warehouse → the store chosen in the top bar
+    setWarehouseChoices(null);
+    setProductSearch('');
     const origin = fromFilter !== 'ALL' ? fromFilter : '';
     const fallbackDest = locationFilter !== 'ALL' && locationFilter !== origin ? locationFilter : '';
     setNewOrigin(origin);
@@ -670,19 +717,23 @@ export default function OperationsPage() {
 
   async function handleCreateTransfer(e: FormEvent) {
     e.preventDefault();
+    if (isCreatingBusy) return;
+    if (!newOrigin || !newDest) { setCreateError('Choose the transfer locations.'); return; }
     if (newOrigin === newDest) { setCreateError('Pick a different destination.'); return; }
     if (!draftItems.length) { setCreateError('Choose at least one product to send.'); return; }
     if (draftItems.some((i) => i.totalUnits <= 0)) { setCreateError('Each product needs at least one carton or loose unit.'); return; }
 
     setIsCreatingBusy(true);
     try {
-      const created = await mutate('/transfers', 'POST', {
+      const created = await mutate(manualRestock ? '/transfers/replenishment/request' : '/transfers', 'POST', {
         sourceLocationId: newOrigin,
         destLocationId: newDest,
         notes: newNotes.trim() || undefined,
         lines: draftItems.map((item) => ({ variantId: item.variantId, cartons: item.cartons, looseBaseUnits: item.looseUnits })),
       });
-      if (dispatchNow && created?.id) {
+      if (manualRestock) {
+        setNotice(`Restock request ${created?.requestNumber ?? ''} sent for warehouse approval.`);
+      } else if (dispatchNow && created?.id) {
         await mutate(`/transfers/${created.id}/submit`, 'POST');
         setNotice('Transfer created and submitted for approval.');
       } else setNotice('Transfer draft saved. Submit it when ready for approval.');
@@ -720,14 +771,6 @@ export default function OperationsPage() {
 
 
 
-  const Stepper = ({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) => (
-    <span className={styles.stepper}>
-      <button type="button" onClick={() => onChange(value - 1)} disabled={value <= 0} aria-label={`Less ${label}`}><Icon name="minus" size={13} /></button>
-      <input type="number" min="0" value={value} onChange={(e) => onChange(Math.floor(Number(e.target.value) || 0))} aria-label={label} />
-      <button type="button" onClick={() => onChange(value + 1)} aria-label={`More ${label}`}><Icon name="plus" size={13} /></button>
-    </span>
-  );
-
   return (
     <div className={`${styles.page} app-page`}>
       {/* ---------- Header (same pattern as Products / Reports) ---------- */}
@@ -737,7 +780,7 @@ export default function OperationsPage() {
           <p>{receiveOnly ? 'Check and receive stock at your assigned store.' : 'Send stock between locations, follow it on the road and receive it into inventory.'}</p>
         </div>
         {!receiveOnly && <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={generateReplenishment} disabled={!canRequestTransfers || !apiToken || locationFilter === 'ALL'}>Generate replenishment</button>
+          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={!canRequestTransfers || !apiToken || openingRestock || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE'}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
           <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={!canRequestTransfers || !apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
         </div>}
       </header>
@@ -884,9 +927,13 @@ export default function OperationsPage() {
                   </span>
 
                   <span className={`${styles.items} ${styles.right}`}>
-                    <strong>{t.status === 'RECEIVED' ? `${t.receipt?.good ?? 0} received good` : `${unitsInTransit(t)} in transit`}</strong>
-                    {pendingUnits(t) > 0 && <small>{pendingUnits(t)} {awaitingPacking ? 'to pack' : 'to approve'}</small>}
-                    <small>{t.items.length} product{t.items.length === 1 ? '' : 's'} · {t.items.reduce((sum, item) => sum + item.cartons, 0)} cartons requested</small>
+                    <strong>{t.items.length === 1
+                      ? shipmentQuantity(t.status === 'RECEIVED' ? t.receipt?.good ?? 0 : unitsInTransit(t), t.items[0].baseUnit, t.items[0].unitsPerCarton)
+                      : `${t.status === 'RECEIVED' ? t.receipt?.good ?? 0 : unitsInTransit(t)} units`} {t.status === 'RECEIVED' ? 'received good' : 'in transit'}</strong>
+                    {pendingUnits(t) > 0 && <small>{t.items.length === 1 ? shipmentQuantity(pendingUnits(t), t.items[0].baseUnit, t.items[0].unitsPerCarton) : `${pendingUnits(t)} units`} {awaitingPacking ? 'to pack' : 'to approve'}</small>}
+                    <small>{t.items.length === 1
+                      ? shipmentQuantity(t.items[0].requestedQtyBase, t.items[0].baseUnit, t.items[0].unitsPerCarton) + ' requested'
+                      : `${t.items.length} products · view quantities`}</small>
                   </span>
 
                   <span><span className={`${styles.status} ${styles[issues ? 'issue' : meta.tone]}`}><i />{issues ? `${meta.label} · issues` : meta.label}</span>{nextSteps.map((step) => <small className={styles.nextStep} key={step}>{step}</small>)}</span>
@@ -933,7 +980,7 @@ export default function OperationsPage() {
                                 Packed: item.dispatchedQtyBase, 'In transit': activeTransfer(t) ? outstandingQuantity(item) : 0,
                                 'Received good': item.receivedQtyBase - item.damagedQtyBase,
                                 Damaged: item.damagedQtyBase, Missing: item.shortQtyBase,
-                              }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+                              }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{shipmentQuantity(value, item.baseUnit, item.unitsPerCarton)}</dd></div>)}
                             </dl>
                           </div>
                         ))}
@@ -979,8 +1026,8 @@ export default function OperationsPage() {
       </section>
 
       {!receiveOnly && <section className={styles.tableCard} aria-labelledby="replenishment-heading">
-        <div className={styles.tableTop}><div><div className="heading-with-info"><h2 id="replenishment-heading">Replenishment requests</h2><InfoHint label="About replenishment requests">Review suggested transfers to restock low inventory. A different manager must approve the request.</InfoHint></div><p>Server generated suggestions require approval by a different manager.</p></div></div>
-        {!replenishments.length ? <div className={styles.empty}><strong>No replenishment requests</strong><p>Generate a request after the locations have reorder levels and stock records.</p><a href="/products">Open products and reorder levels</a></div> : (
+        <div className={styles.tableTop}><div><div className="heading-with-info"><h2 id="replenishment-heading">Restock requests</h2></div><p>The supplying warehouse reviews each request before it can be packed.</p></div></div>
+        {!replenishments.length ? <div className={styles.empty}><strong>No restock requests</strong><p>Choose your store in the location selector, then select Request restock.</p></div> : (
           <ul className={styles.rows}>{replenishments.map((request) => {
             const isDepot = depotRequest(request);
             const needsDepot = isDepot && !request.depotAuthorizedAt;
@@ -988,10 +1035,13 @@ export default function OperationsPage() {
             const canRelease = canApproveTransfers && canActAt(request.sourceLocation.id) &&
               request.generatedByUserId !== apiUserId && request.depotAuthorizedByUserId !== apiUserId;
             const isDraft = request.status === 'DRAFT';
-            return <li className={styles.row} key={request.id} id={`replenishment-${request.id}`}>
+            return <li className={styles.restockRow} key={request.id} id={`replenishment-${request.id}`}>
               <span className={styles.rowTitle}><strong>{request.requestNumber}</strong><small>{request.sourceLocation.name} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {request.destLocation.name}</small></span>
-              <span className={styles.items}><strong>{request.lines.length} products</strong><small>{request.lines.reduce((sum, line) => sum + (request.depotAuthorizedAt ? line.managerApprovedQtyBase ?? 0 : line.systemSuggestedQtyBase), 0)} {request.depotAuthorizedAt ? 'authorized' : 'suggested'} units</small></span>
-              <span className={`${styles.status} ${isDraft ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{isDraft && isDepot ? needsDepot ? 'Awaiting depot authorization' : 'Awaiting main warehouse release' : request.status.replaceAll('_', ' ')}</span>
+              <details className={styles.restockItems}><summary>{request.lines.length} product{request.lines.length === 1 ? '' : 's'}</summary>
+                <ul>{request.lines.map((line) => <li key={line.variantId}><strong>{line.variant?.product?.name ?? line.variant?.sku ?? 'Product'}</strong>
+                  <small>{shipmentQuantity(line.managerApprovedQtyBase ?? line.systemSuggestedQtyBase, line.baseUnitSnapshot ?? 'unit', line.unitsPerCarton ?? 0)}</small></li>)}</ul>
+              </details>
+              <span className={`${styles.status} ${isDraft ? styles.pending : request.status === 'REJECTED' ? styles.rejected : styles.received}`}><i />{isDraft && isDepot ? needsDepot ? 'Awaiting depot authorization' : 'Awaiting main warehouse release' : isDraft ? 'Awaiting approval' : request.status === 'TRANSFER_CREATED' ? 'Transfer created' : 'Rejected'}</span>
               {isDraft && <span className={styles.rowActions}>
                 <button type="button" className={styles.actionButton} onClick={() => openReplenishment(request)} disabled={needsDepot ? !canSignOff : !canRelease}>{needsDepot ? 'Review and authorize' : isDepot ? 'Review and release' : 'Review quantities'}</button>
                 {!needsDepot && <button type="button" className={styles.ghostButton} onClick={() => setReasonAction({ title: `Reject ${request.requestNumber}?`, submit: (reason) => rejectReplenishment(request, reason) })} disabled={!canRelease}>Reject</button>}
@@ -1005,21 +1055,30 @@ export default function OperationsPage() {
         <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="transfer-quantities-title">
           <header className={styles.modalHead}>
             <div><h2 id="transfer-quantities-title">{packing ? `Confirm packing for ${packing.transferCode}` : `Review ${replenishing?.requestNumber}`}</h2>
-              <p>{packing ? 'Enter what was actually packed. The remaining quantities stay open.' : replenishing?.depotAuthorizedAt ? 'Review the depot’s authorized quantities before releasing the transfer for packing.' : 'Adjust the suggested quantities or add products before approving.'}</p></div>
+              <p>{packing ? 'Enter what was actually packed. The remaining quantities stay open.' : replenishing?.depotAuthorizedAt ? 'Review the depot’s authorized quantities before releasing the transfer for packing.' : 'Review the requested quantities and make any adjustments before approving.'}</p></div>
           </header>
           <form onSubmit={packing ? confirmPacking : approveReplenishment}>
             <div className={styles.modalBody}>
               {packing ? packing.items.map((item) => {
                 const ratio = item.cartonRequired ? item.unitsPerCarton : 1;
                 const remaining = Math.floor((item.approvedQtyBase - item.dispatchedQtyBase) / ratio);
-                const unit = item.cartonRequired ? 'cartons' : 'units';
-                const available = packingBalances ? Math.floor(Math.max(0, packingBalances[item.variantId] ?? 0) / ratio) : null;
+                const unit = item.cartonRequired ? 'cartons' : `${item.baseUnit}s`;
+                const availableBase = packingBalances ? Math.max(0, packingBalances[item.variantId] ?? 0) : null;
+                const available = availableBase === null ? null : Math.floor(availableBase / ratio);
                 if (remaining <= 0 || (item.cartonRequired && ratio <= 1)) return null;
-                return <label className={styles.field} key={item.variantId}>
-                  <span>{item.name} · {remaining} {unit} remaining</span>
-                  {available !== null && <small>{available} {unit} available</small>}
-                  <input type="number" inputMode="numeric" min="0" max={remaining} step="1" disabled={isSavingLines} value={lineQuantities[item.variantId] ?? ''} onChange={(event) => setLineQuantities((current) => ({ ...current, [item.variantId]: Number(event.target.value) }))} />
-                </label>;
+                const quantity = lineQuantities[item.variantId] ?? 0;
+                return <section className={styles.packingLine} key={item.variantId}>
+                  <header><strong>{item.name}</strong><small>{item.sku}{item.cartonRequired ? ` · ${ratio} ${item.baseUnit}s per carton` : ''}</small></header>
+                  <dl><div><dt>Left to pack</dt><dd>{shipmentQuantity(remaining * ratio, item.baseUnit, ratio)}</dd></div>
+                    <div><dt>Available to pack</dt><dd>{available === null ? packingStockError ? 'Checked on dispatch' : 'Checking stock…' : shipmentQuantity(availableBase ?? 0, item.baseUnit, ratio)}</dd></div></dl>
+                  {availableBase !== null && availableBase > 0 && available === 0 && <small>No full carton available.</small>}
+                  <label className={styles.field}><span>Packed {unit}</span>
+                    <input type="number" inputMode="numeric" min="0" max={available === null ? remaining : Math.min(available, remaining)} step="1"
+                      disabled={isSavingLines || (available === null && !packingStockError) || available === 0} value={quantity || ''} placeholder="0"
+                      onChange={(event) => setLineQuantities((current) => ({ ...current, [item.variantId]: Number(event.target.value) }))} />
+                  </label>
+                  {quantity > 0 && item.cartonRequired && <small>Dispatching {shipmentQuantity(quantity * ratio, item.baseUnit, ratio)}</small>}
+                </section>;
               }) : replenishing && (() => {
                 const choices = catalog.filter((variant) => !(variant.variantId in lineQuantities));
                 return <>
@@ -1047,7 +1106,7 @@ export default function OperationsPage() {
             </div>
             <footer className={styles.modalFoot}>
               <button type="button" className={styles.ghostButton} disabled={isSavingLines} onClick={() => { setPacking(null); setReplenishing(null); }}>Cancel</button>
-              <button type="submit" className={styles.primaryButton} disabled={isSavingLines}>{isSavingLines ? 'Saving…' : packing ? 'Confirm and dispatch' : replenishing?.depotAuthorizedAt ? 'Release for packing' : replenishing && depotRequest(replenishing) ? 'Authorize and send upstream' : 'Approve request'}</button>
+              <button type="submit" className={styles.primaryButton} disabled={isSavingLines || (!!packing && !Object.values(lineQuantities).some((quantity) => quantity > 0))}>{isSavingLines ? 'Saving…' : packing ? 'Confirm and dispatch' : replenishing?.depotAuthorizedAt ? 'Release for packing' : replenishing && depotRequest(replenishing) ? 'Authorize and send upstream' : 'Approve request'}</button>
             </footer>
           </form>
         </section>
@@ -1073,8 +1132,7 @@ export default function OperationsPage() {
                     const issues = receiptIssues[item.variantId] ?? { damaged: 0, missing: 0 };
                     return <fieldset key={item.variantId} className={styles.receiptLine}>
                       <legend>{item.name} · {item.sku}</legend>
-                      <span>Expected <strong>{expected} {item.baseUnit}{expected === 1 ? '' : 's'}</strong>
-                        {item.unitsPerCarton > 1 && <small> · {item.unitsPerCarton} per carton</small>}
+                      <span>Expected <strong>{shipmentQuantity(expected, item.baseUnit, item.unitsPerCarton)}</strong>
                       </span>
                       <label>Damaged<input type="number" min="0" step="1" max={expected} value={issues.damaged} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, damaged: Number(event.target.value) } }))} /></label>
                       <label>Missing<input type="number" min="0" step="1" max={expected} value={issues.missing} onChange={(event) => setReceiptIssues((current) => ({ ...current, [item.variantId]: { ...issues, missing: Number(event.target.value) } }))} /></label>
@@ -1097,20 +1155,29 @@ export default function OperationsPage() {
 
       {/* ---------- Create modal: option cards instead of dropdowns ---------- */}
       {createModalOpen && (
-        <div className={styles.backdrop} onClick={() => setCreateModalOpen(false)}>
+        <div className={styles.backdrop} onClick={() => { if (!isCreatingBusy) setCreateModalOpen(false); }}>
           <div className={`${styles.modal} ${styles.modalWide}`} role="dialog" aria-modal="true" aria-labelledby="create-title" onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHead}>
               <span className={`${styles.modalIcon} ${styles.icon_transit}`}><Icon name="truck" size={18} /></span>
               <div>
-                <h2 id="create-title">New transfer</h2>
-                <p>Pick the route, the products and how it travels.</p>
+                <h2 id="create-title">{manualRestock ? 'Request restock' : 'New transfer'}</h2>
+                <p>{manualRestock ? 'Choose a supplying warehouse and enter the quantities your store needs.' : 'Pick the route, the products and how it travels.'}</p>
               </div>
-              <button type="button" className={styles.modalClose} onClick={() => setCreateModalOpen(false)} aria-label="Close"><Icon name="x" size={16} /></button>
+              <button type="button" className={styles.modalClose} disabled={isCreatingBusy} onClick={() => setCreateModalOpen(false)} aria-label="Close"><Icon name="x" size={16} /></button>
             </div>
             <form onSubmit={handleCreateTransfer}>
               <div className={styles.modalBody}>
                 {/* 1. Route */}
-                <section className={styles.formSection}>
+                {warehouseChoices ? <section className={styles.restockRoute}>
+                  <label className={styles.field}><span>Supplying warehouse</span>
+                    <select required value={newOrigin} onChange={(event) => setNewOrigin(event.target.value)}>
+                      <option value="">Choose a warehouse</option>
+                      {warehouseChoices.map((location) => <option key={location.id} value={location.id}>{location.name} · {location.type === 'MAIN_WAREHOUSE' ? 'Main warehouse' : 'Sub-warehouse'}</option>)}
+                    </select>
+                  </label>
+                  <div><small>Deliver to</small><strong>{locationName(newDest)}</strong></div>
+                  {!warehouseChoices.length && <p>No active supplying warehouses are available for this store.</p>}
+                </section> : <section className={styles.formSection}>
                   <h3><span>1</span> Route <em>Tap where stock leaves from, then where it goes. Any warehouse or store works.</em></h3>
                   <div className={styles.routeGrid}>
                     <div>
@@ -1135,13 +1202,14 @@ export default function OperationsPage() {
                       </div>
                     </div>
                   </div>
-                </section>
+                </section>}
 
                 {/* 2. Products */}
                 <section className={styles.formSection}>
-                  <h3><span>2</span> Products <em>{draftItems.length ? `${draftItems.length} selected · ${draftTotal} units` : 'Tap to add'}</em></h3>
+                  <h3>{!manualRestock && <span>2</span>} Products {draftItems.length > 0 && <em>{draftItems.length} selected</em>}</h3>
+                  <label className={styles.field}><span>Find a product</span><input type="search" placeholder="Search name or SKU" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} /></label>
                   <div className={styles.productGrid}>
-                    {catalog.map((p) => {
+                    {catalog.filter((product) => draft[product.sku] || `${product.name} ${product.sku}`.toLowerCase().includes(productSearch.trim().toLowerCase())).map((p) => {
                       const q = draft[p.sku];
                       return (
                         <div key={p.sku} className={`${styles.productCard} ${q ? styles.productOn : ''}`}>
@@ -1153,7 +1221,7 @@ export default function OperationsPage() {
                             <div className={styles.productQty}>
                               {p.unitsPerCarton > 1 && <label><small>Cartons</small><Stepper value={q.cartons} onChange={(v) => setQty(p.sku, 'cartons', v)} label={`cartons of ${p.name}`} /></label>}
                               {p.unitsPerCarton <= 1 && <label><small>Loose</small><Stepper value={q.loose} onChange={(v) => setQty(p.sku, 'loose', v)} label={`loose units of ${p.name}`} /></label>}
-                              <span className={styles.qtyTotal}><small>Units</small><b>{q.cartons * p.unitsPerCarton + (p.unitsPerCarton > 1 ? 0 : q.loose)}</b></span>
+                              <span className={styles.qtyTotal}><small>Total</small><b>{shipmentQuantity(q.cartons * p.unitsPerCarton + (p.unitsPerCarton > 1 ? 0 : q.loose), p.baseUnit, p.unitsPerCarton)}</b></span>
                             </div>
                           )}
                         </div>
@@ -1163,7 +1231,7 @@ export default function OperationsPage() {
                 </section>
 
                 {/* 3. Delivery */}
-                <section className={styles.formSection}>
+                {!manualRestock && <section className={styles.formSection}>
                   <h3><span>3</span> Delivery</h3>
                   <p>Carrier and tracking details can be recorded after the transfer is created.</p>
                   <div className={styles.whenRow}>
@@ -1173,13 +1241,13 @@ export default function OperationsPage() {
                     </div>
                     <input className={styles.noteInput} value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="Reason (optional), e.g. weekend restock" aria-label="Reason" />
                   </div>
-                </section>
+                </section>}
                 {createError && <p className={styles.formError}><Icon name="alert" size={14} /> {createError}</p>}
               </div>
               <div className={styles.modalFoot}>
-                <span className={styles.footSummary}>{draftTotal} units · {locationName(newOrigin)} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {locationName(newDest)}</span>
-                <button type="button" className={styles.ghostButton} onClick={() => setCreateModalOpen(false)}>Cancel</button>
-                <button type="submit" disabled={isCreatingBusy} className={styles.primaryButton}><Icon name={dispatchNow ? 'send' : 'check'} size={15} /> {isCreatingBusy ? 'Saving…' : dispatchNow ? 'Create & submit' : 'Save draft'}</button>
+                <span className={styles.footSummary}>{draftTotal} units · {warehouseChoices?.find((location) => location.id === newOrigin)?.name ?? (newOrigin ? locationName(newOrigin) : 'Select source')} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {locationName(newDest)}</span>
+                <button type="button" className={styles.ghostButton} disabled={isCreatingBusy} onClick={() => setCreateModalOpen(false)}>Cancel</button>
+                <button type="submit" disabled={isCreatingBusy || (manualRestock && (!newOrigin || !draftItems.length))} className={styles.primaryButton}><Icon name={dispatchNow ? 'send' : 'check'} size={15} /> {isCreatingBusy ? 'Saving…' : manualRestock ? 'Send restock request' : dispatchNow ? 'Create & submit' : 'Save draft'}</button>
               </div>
             </form>
           </div>
