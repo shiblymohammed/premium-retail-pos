@@ -64,11 +64,13 @@ describe('AuditsService count, recount, and approval workflow', () => {
     };
     const tx = {
       $queryRaw: jest.fn()
-        .mockResolvedValueOnce([{ id: 'location-id', isAuditLocked: true }])
+        .mockResolvedValueOnce([{ id: 'location-id', isAuditLocked: true, timezone: 'America/New_York' }])
         .mockResolvedValueOnce([{ id: 'audit-id', status: AuditSessionStatus.SUBMITTED }]),
       auditSession: {
         findUnique: jest.fn().mockResolvedValue({ id: 'audit-id', locationId: 'location-id', status: AuditSessionStatus.SUBMITTED, countItems: [item] }),
-        update: jest.fn().mockResolvedValue({ id: 'audit-id', status: AuditSessionStatus.APPROVED }),
+        update: jest.fn().mockResolvedValue({
+          id: 'audit-id', status: AuditSessionStatus.APPROVED, startedAt: new Date('2026-11-30T00:15:00Z'),
+        }),
       },
       auditCountItem: { update: jest.fn().mockResolvedValue({}) },
       location: { update: jest.fn().mockResolvedValue({}) },
@@ -94,7 +96,9 @@ describe('AuditsService count, recount, and approval workflow', () => {
       where: { id: 'audit-id' },
       data: expect.objectContaining({ status: AuditSessionStatus.APPROVED, approvedByUserId: actor.userId, resolutionReason: 'Physical recount reviewed and approved' }),
     });
-    expect(tx.location.update).toHaveBeenCalledWith({ where: { id: 'location-id' }, data: { isAuditLocked: false } });
+    expect(tx.location.update).toHaveBeenCalledWith({
+      where: { id: 'location-id' }, data: { isAuditLocked: false, dailyAuditLastRunDate: '2026-11-29' },
+    });
   });
 
   it('does not change a stock balance when first count equals expected stock', async () => {

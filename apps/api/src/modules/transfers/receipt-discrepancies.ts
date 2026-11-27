@@ -16,10 +16,10 @@ type ReceiptDiscrepancy = {
   note: string | null;
 };
 
-export function receiptDiscrepancies(db: Prisma.TransactionClient, filter: Prisma.Sql, limit?: number) {
+function receiptDiscrepancyRows(filter: Prisma.Sql) {
   // Old ledger rows lack a receipt ID. Keep their original timestamp grouping
   // so separate legacy receipts cannot be merged based on timing or note text.
-  return db.$queryRaw<ReceiptDiscrepancy[]>(Prisma.sql`
+  return Prisma.sql`
     SELECT t.id AS "transferId", t.transfer_number AS "transferNumber", m.receipt_id AS "receiptId",
       v.id AS "variantId", v.sku, source.name AS "sourceName", dest.name AS "destinationName",
       MIN(m.created_at) AS "receivedAt", c.timezone,
@@ -41,7 +41,26 @@ export function receiptDiscrepancies(db: Prisma.TransactionClient, filter: Prism
       AND (${filter})
     GROUP BY t.id, v.id, source.name, dest.name, c.timezone, m.receipt_id, m.actor_id,
       CASE WHEN m.receipt_id IS NULL THEN m.created_at END
-    ORDER BY "receivedAt" DESC, t.id, v.id, m.actor_id, m.receipt_id
+  `;
+}
+
+export function receiptDiscrepancies(db: Prisma.TransactionClient, filter: Prisma.Sql, limit?: number) {
+  return db.$queryRaw<ReceiptDiscrepancy[]>(Prisma.sql`
+    SELECT * FROM (${receiptDiscrepancyRows(filter)}) receipt
+    ORDER BY "receivedAt" DESC, "transferId", "variantId", "receiptId", short, damaged, excess, note
     ${limit === undefined ? Prisma.empty : Prisma.sql`LIMIT ${limit}`}
+  `);
+}
+
+type ReceiptAlert = Pick<ReceiptDiscrepancy, 'transferId' | 'transferNumber' | 'receiptId' | 'sourceName' | 'destinationName'
+  | 'receivedAt' | 'timezone' | 'short' | 'damaged' | 'excess'>;
+
+export function receiptDiscrepancyAlerts(db: Prisma.TransactionClient, filter: Prisma.Sql) {
+  return db.$queryRaw<ReceiptAlert[]>(Prisma.sql`
+    SELECT "transferId", "transferNumber", "receiptId", "sourceName", "destinationName", timezone,
+      MAX("receivedAt") AS "receivedAt", SUM(short) AS short, SUM(damaged) AS damaged, SUM(excess) AS excess
+    FROM (${receiptDiscrepancyRows(filter)}) receipt
+    GROUP BY "transferId", "transferNumber", "receiptId", "sourceName", "destinationName", timezone
+    ORDER BY "receivedAt" DESC, "transferId", "receiptId" LIMIT 100
   `);
 }

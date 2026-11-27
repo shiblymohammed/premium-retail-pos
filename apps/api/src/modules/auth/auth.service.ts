@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { UsersService } from '../users/users.service';
 import { AuthRateLimitService } from './auth-rate-limit.service';
+import type { RequestUser } from '../../common/decorators/current-user.decorator';
 
 export interface JwtPayload {
   sub: string;      // userId
@@ -77,6 +78,18 @@ export class AuthService {
     await this.usersService.revokeSessions(userId);
   }
 
+  async changePassword(actor: RequestUser, currentPassword: string, newPassword: string, clientIp: string) {
+    if (Buffer.byteLength(currentPassword, 'utf8') > 72) throw new UnauthorizedException('Current password is incorrect');
+    await this.authRateLimit.checkLoginAttempt(clientIp, actor.email);
+    const user = await this.usersService.findById(actor.userId);
+    if (!user?.isActive || !await bcrypt.compare(currentPassword, user.passwordHash)) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+    if (currentPassword === newPassword) throw new BadRequestException('Choose a different password');
+    await this.usersService.setLoginPassword(user.id, newPassword, actor, user.sessionVersion);
+    await this.authRateLimit.clearLoginCombination(clientIp, actor.email);
+  }
+
   /**
    * Generate access + refresh token pair from JWT payload.
    */
@@ -99,7 +112,8 @@ export class AuthService {
       );
       if (result.count !== 1) throw new UnauthorizedException('Refresh token already used');
     } else {
-      await this.usersService.setRefreshTokenHash(payload.sub, refreshTokenHash);
+      const result = await this.usersService.setRefreshTokenHash(payload.sub, refreshTokenHash, payload.sessionVersion);
+      if (result.count !== 1) throw new UnauthorizedException('The account changed. Sign in again.');
     }
     return { accessToken, refreshToken };
   }
@@ -115,7 +129,7 @@ export class AuthService {
       });
 
       const user = await this.usersService.findById(decoded.sub);
-      if (!user || !user.isActive) {
+      if (!user || !user.isActive || user.sessionVersion !== decoded.sessionVersion) {
         throw new UnauthorizedException('User account is deactivated');
       }
 

@@ -118,6 +118,13 @@ export class TransfersController {
     return { data: await this.transfers.findTransfers(actor) };
   }
 
+  @Get('route-locations')
+  @Roles(...MANAGER_ROLES, Role.INVENTORY)
+  @Permission('transfers.request')
+  async routeLocations(@CurrentUser() actor: RequestUser) {
+    return { data: await this.transfers.routeLocations(actor) };
+  }
+
   @Get(':id')
   @Roles(...MANAGER_ROLES, Role.INVENTORY, Role.STAFF, Role.CASHIER)
   @Permission('transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive')

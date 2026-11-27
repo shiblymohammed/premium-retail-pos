@@ -7,7 +7,8 @@ import { DEVICE_LOCK_CHANGED, hasDevicePin, REQUEST_DEVICE_LOCK } from '@/lib/de
 import { Feedback } from '@/components/ui/feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { getStoredSession, AuthSession } from '@/lib/auth';
+import { clearStoredSession, getStoredSession, AuthSession } from '@/lib/auth';
+import { PasswordDialog } from '@/components/admin/password-dialog';
 import {
   UserPreferences,
   DEFAULT_PREFERENCES,
@@ -39,6 +40,7 @@ export default function SettingsPage() {
   const [toast, setToast] = useState('');
   const [pinSet, setPinSet] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   useEffect(() => {
     const current = getStoredSession();
@@ -136,6 +138,9 @@ export default function SettingsPage() {
           {pinSet && <button type="button" className={styles.primaryButton} onClick={lockNow}>
             <Icon name="lock" size={16} /> Lock screen now
           </button>}
+          {session?.accessToken && <button type="button" className={styles.ghostButton} onClick={() => setPasswordOpen(true)}>
+            <Icon name="lock" size={16} /> Change password
+          </button>}
           <button type="button" className={styles.ghostButton} onClick={() => setResetOpen(true)}>
             <Icon name="reset" size={16} /> Reset to defaults
           </button>
@@ -193,6 +198,8 @@ export default function SettingsPage() {
         <button type="button" className="admin-secondary" onClick={() => setResetOpen(false)}>Cancel</button>
         <button type="button" className="admin-primary" onClick={() => { save(DEFAULT_PREFERENCES, 'Settings reset to defaults'); setResetOpen(false); }}>Reset preferences</button>
       </>}><p>Restore the default settings for this role on this device. Your unlock PIN stays saved.</p></AdminModal>}
+      {passwordOpen && session?.accessToken && <PasswordDialog token={session.accessToken} onClose={() => setPasswordOpen(false)}
+        onSaved={() => { void clearStoredSession().then(() => window.location.assign('/login')); }} />}
       {toast && <Feedback toast tone="success">{toast}</Feedback>}
     </div>
   );

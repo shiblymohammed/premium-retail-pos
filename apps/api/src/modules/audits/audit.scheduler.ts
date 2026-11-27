@@ -34,7 +34,7 @@ export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
     try {
       const locations = await this.prisma.location.findMany({
         where: { isActive: true, dailyAuditEnabled: true },
-        select: { id: true, name: true, type: true, dailyAuditTime: true, company: { select: { timezone: true } } },
+        select: { id: true, name: true, type: true, dailyAuditTime: true, dailyAuditLastRunDate: true, company: { select: { timezone: true } } },
       });
       const globalAdmins = await this.prisma.user.findMany({
         where: { role: Role.SUPER_ADMIN, isActive: true },
@@ -43,6 +43,7 @@ export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
 
       for (const location of locations) {
         const local = this.localClock(new Date(), location.company.timezone);
+        if (location.dailyAuditLastRunDate === local.date) continue;
         if (local.time < location.dailyAuditTime || local.time < '19:00') continue;
         if (location.type !== LocationType.RETAIL_STORE && local.weekday !== 'Sun') continue;
 

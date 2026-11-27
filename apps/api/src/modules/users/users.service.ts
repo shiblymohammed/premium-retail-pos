@@ -151,10 +151,36 @@ export class UsersService {
     });
   }
 
-  async setRefreshTokenHash(userId: string, refreshTokenHash: string | null) {
-    return this.prisma.user.update({
-      where: { id: userId },
+  async setRefreshTokenHash(userId: string, refreshTokenHash: string, sessionVersion: number) {
+    return this.prisma.user.updateMany({
+      where: { id: userId, isActive: true, sessionVersion },
       data: { refreshTokenHash },
+    });
+  }
+
+  async setLoginPassword(id: string, newPassword: string, actor: UserActor, sessionVersion?: number) {
+    const staffReset = actor.userId !== id;
+    if (staffReset && actor.role !== Role.SUPER_ADMIN) throw new ForbiddenException('Only a Super Admin can reset a staff password');
+    if (!staffReset && sessionVersion === undefined) throw new ForbiddenException('Verify your current password before changing it');
+    if (newPassword.length < 12 || Buffer.byteLength(newPassword, 'utf8') > 72) {
+      throw new BadRequestException('Use at least 12 characters and no more than 72 UTF-8 bytes');
+    }
+    const passwordHash = await bcrypt.hash(newPassword, this.BCRYPT_ROUNDS);
+    await this.prisma.$transaction(async (tx) => {
+      const result = await tx.user.updateMany({
+        where: {
+          id, isActive: true,
+          ...(staffReset ? { role: { not: Role.SUPER_ADMIN } } : { sessionVersion }),
+        },
+        data: { passwordHash, refreshTokenHash: null, sessionVersion: { increment: 1 } },
+      });
+      if (!result.count) {
+        if (staffReset) throw new NotFoundException('Active staff account not found');
+        throw new ConflictException('Your account changed. Sign in again before retrying');
+      }
+      await tx.auditEvent.create({
+        data: { actorId: actor.userId, targetEntity: 'User', targetId: id, action: staffReset ? 'STAFF_PASSWORD_RESET' : 'PASSWORD_CHANGED' },
+      });
     });
   }
 

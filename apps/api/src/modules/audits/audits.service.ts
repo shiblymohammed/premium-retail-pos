@@ -131,7 +131,6 @@ export class AuditsService {
       data: {
         dailyAuditEnabled: true,
         dailyAuditTime: dto.startTime,
-        dailyAuditLastRunDate: null,
       },
       include: { company: { select: { timezone: true } } },
     });
@@ -161,11 +160,11 @@ export class AuditsService {
       const updates = await Promise.all([
         tx.location.updateMany({
           where: { id: { in: stores.map((location) => location.id) } },
-          data: { dailyAuditEnabled: true, dailyAuditTime: dto.storeStartTime, dailyAuditLastRunDate: null },
+          data: { dailyAuditEnabled: true, dailyAuditTime: dto.storeStartTime },
         }),
         tx.location.updateMany({
           where: { id: { in: warehouses.map((location) => location.id) } },
-          data: { dailyAuditEnabled: true, dailyAuditTime: dto.warehouseStartTime, dailyAuditLastRunDate: null },
+          data: { dailyAuditEnabled: true, dailyAuditTime: dto.warehouseStartTime },
         }),
       ]);
 
@@ -385,7 +384,7 @@ export class AuditsService {
     if (current.status !== AuditSessionStatus.SUBMITTED) throw new ConflictException('Only a submitted audit can be approved');
     if (!reason.trim()) throw new BadRequestException('Approval reason is required');
     return this.prisma.$transaction(async (tx) => {
-      await this.lockSessionLocation(tx, current.locationId);
+      const { timezone } = await this.lockSessionLocation(tx, current.locationId);
       const session = await tx.auditSession.findUnique({ where: { id: sessionId }, include: { countItems: true } });
       if (!session || session.status !== AuditSessionStatus.SUBMITTED) throw new ConflictException('Audit status changed; refresh and try again');
       for (const item of session.countItems) {
@@ -415,7 +414,10 @@ export class AuditsService {
         where: { id: session.id },
         data: { status: AuditSessionStatus.APPROVED, approvedByUserId: actor.userId, completedAt: new Date(), resolutionReason: reason },
       });
-      await tx.location.update({ where: { id: session.locationId }, data: { isAuditLocked: false } });
+      await tx.location.update({
+        where: { id: session.locationId },
+        data: { isAuditLocked: false, dailyAuditLastRunDate: this.localAuditClock(approved.startedAt, timezone).date },
+      });
       return approved;
     });
   }
@@ -434,11 +436,14 @@ export class AuditsService {
   }
 
   private async lockSessionLocation(tx: Prisma.TransactionClient, locationId: string) {
-    const rows = await tx.$queryRaw<Array<{ id: string; isAuditLocked: boolean }>>(Prisma.sql`
-      SELECT "id", "is_audit_locked" AS "isAuditLocked" FROM "locations" WHERE "id" = ${locationId} FOR UPDATE
+    const rows = await tx.$queryRaw<Array<{ id: string; isAuditLocked: boolean; timezone: string }>>(Prisma.sql`
+      SELECT l.id, l.is_audit_locked AS "isAuditLocked", c.timezone
+      FROM locations l JOIN companies c ON c.id = l.company_id
+      WHERE l.id = ${locationId} FOR UPDATE OF l
     `);
     if (!rows[0]) throw new NotFoundException('Location not found');
     if (!rows[0].isAuditLocked) throw new ConflictException('Audit lock is no longer active');
+    return rows[0];
   }
 
   private async lockSession(tx: Prisma.TransactionClient, sessionId: string) {

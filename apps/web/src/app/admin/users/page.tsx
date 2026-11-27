@@ -20,6 +20,7 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { AdminModal } from '@/components/admin';
+import { PasswordDialog } from '@/components/admin/password-dialog';
 import { AdminActionMenu } from '@/components/admin/admin-action-menu';
 import { PermissionMatrix } from '@/components/ui/permission-matrix';
 import { Feedback } from '@/components/ui/feedback';
@@ -114,6 +115,7 @@ export default function UserManagementPage() {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<ManagedUser | null>(null);
+  const [passwordResetTarget, setPasswordResetTarget] = useState<ManagedUser | null>(null);
 
   // Form Fields
   const [formName, setFormName] = useState('');
@@ -1113,6 +1115,13 @@ export default function UserManagementPage() {
       </AdminModal>}
 
       {/* CREATE / EDIT USER MODAL */}
+      {passwordResetTarget && <PasswordDialog token={getStoredSession()?.accessToken ?? ''} staff={passwordResetTarget}
+        onClose={() => setPasswordResetTarget(null)}
+        onSaved={() => {
+          setPasswordResetTarget(null);
+          setNotice('Staff password reset. Their existing sessions have ended.');
+        }} />}
+
       {isModalOpen && (
         <div
           style={{
@@ -1160,6 +1169,12 @@ export default function UserManagementPage() {
 
             <form onSubmit={handleSaveUser}>
               {formError && <Feedback tone="error">{formError}</Feedback>}
+              {currentUserRole === 'SUPER_ADMIN' && editingUser?.isActive && editingUser.role !== 'SUPER_ADMIN' && (
+                <button type="button" className="admin-secondary" disabled={savingUser} onClick={() => {
+                  setIsModalOpen(false);
+                  setPasswordResetTarget(editingUser);
+                }}>Reset staff password</button>
+              )}
               {formRole !== 'SUPER_ADMIN' && (
               <div className="admin-form-grid">
                 <div>

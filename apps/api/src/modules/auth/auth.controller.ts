@@ -5,6 +5,7 @@ import { CurrentUser, RequestUser } from '../../common/decorators/current-user.d
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -37,5 +38,13 @@ export class AuthController {
   async logout(@CurrentUser() actor: RequestUser) {
     await this.authService.logout(actor.userId);
     return { message: 'Logged out successfully' };
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(AuthGuard('jwt'))
+  async changePassword(@CurrentUser() actor: RequestUser, @Body() dto: ChangePasswordDto, @Req() request: Request) {
+    await this.authService.changePassword(actor, dto.currentPassword, dto.newPassword, request.ip || request.socket.remoteAddress || 'unknown');
+    return { message: 'Password changed. Sign in with your new password.' };
   }
 }

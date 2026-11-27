@@ -109,6 +109,7 @@ interface ReplenishmentRequest {
 }
 
 type LocationOption = { id: string; name: string; type: string; parentId: string | null };
+type TransferRouteLocation = { id: string; name: string; type: string; companyId: string };
 type CatalogOption = { variantId: string; sku: string; name: string; baseUnit: string; unitsPerCarton: number };
 
 
@@ -233,6 +234,8 @@ export default function OperationsPage() {
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [replenishments, setReplenishments] = useState<ReplenishmentRequest[]>([]);
   const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [routeLocations, setRouteLocations] = useState<TransferRouteLocation[]>([]);
+  const [openingTransfer, setOpeningTransfer] = useState(false);
   const [catalog, setCatalog] = useState<CatalogOption[]>([]);
   const [apiToken, setApiToken] = useState('');
   const [apiUserId, setApiUserId] = useState('');
@@ -290,7 +293,8 @@ export default function OperationsPage() {
   const [dispatchNow, setDispatchNow] = useState(true);
   const [createError, setCreateError] = useState('');
 
-  const locationName = (id: string) => locations.find((location) => location.id === id)?.name ?? id;
+  const locationName = (id: string) => locations.find((location) => location.id === id)?.name
+    ?? routeLocations.find((location) => location.id === id)?.name ?? id;
 
   const normalizeTransfer = (row: any): StockTransfer => {
     const items: TransferItem[] = (row.lines || []).map((line: any) => {
@@ -775,6 +779,38 @@ export default function OperationsPage() {
     setCreateModalOpen(true);
   }
 
+  function isTransferRoute(origin: TransferRouteLocation, destination: TransferRouteLocation) {
+    return origin.id !== destination.id && origin.companyId === destination.companyId &&
+      (apiRole === 'SUPER_ADMIN' || locations.some(({ id }) => id === origin.id || id === destination.id));
+  }
+
+  const selectedOrigin = routeLocations.find((location) => location.id === newOrigin);
+  const routeDestinations = selectedOrigin ? routeLocations.filter((location) => isTransferRoute(selectedOrigin, location)) : [];
+
+  async function openTransferDraft() {
+    if (openingTransfer) return;
+    setOpeningTransfer(true);
+    try {
+      const response = await fetch(`${API_BASE}/transfers/route-locations`, {
+        headers: { Authorization: `Bearer ${apiToken}` }, cache: 'no-store',
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Could not load the transfer routes.');
+      const choices: TransferRouteLocation[] = result.data;
+      const originId = fromFilter !== 'ALL' ? fromFilter : locationFilter;
+      const origin = choices.find(({ id }) => id === originId);
+      const destination = choices.find(({ id }) => id === toFilter);
+      setRouteLocations(choices.filter((source) => choices.some((target) => isTransferRoute(source, target))));
+      openCreate();
+      setNewOrigin(origin && choices.some((target) => isTransferRoute(origin, target)) ? origin.id : '');
+      setNewDest(origin && destination && isTransferRoute(origin, destination) ? destination.id : '');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not load the transfer routes.');
+    } finally {
+      setOpeningTransfer(false);
+    }
+  }
+
   const draftItems: TransferItem[] = catalog.filter((p) => draft[p.sku]).map((p) => {
     const q = draft[p.sku];
     const loose = p.unitsPerCarton > 1 ? 0 : q.loose;
@@ -858,8 +894,8 @@ export default function OperationsPage() {
           <p>{receiveOnly ? 'Check and receive stock at your assigned store.' : 'Send stock between locations, follow it on the road and receive it into inventory.'}</p>
         </div>
         {!receiveOnly && <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || openingRestock || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE' || (restockDestination.type === 'SUB_WAREHOUSE' && !canGenerateDepotRestock)}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
-          <button type="button" className={styles.primaryButton} onClick={openCreate} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || locations.length < 2 || !catalog.length}><Icon name="plus" size={16} /> New transfer</button>
+          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || openingRestock || openingTransfer || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE' || (restockDestination.type === 'SUB_WAREHOUSE' && !canGenerateDepotRestock)}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
+          <button type="button" className={styles.primaryButton} onClick={openTransferDraft} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || openingTransfer || openingRestock || !locations.length || !catalog.length}><Icon name="plus" size={16} /> {openingTransfer ? 'Loading transfer routes…' : 'New transfer'}</button>
         </div>}
       </header>
 
@@ -1305,24 +1341,29 @@ export default function OperationsPage() {
                   <div><small>Deliver to</small><strong>{locationName(newDest)}</strong></div>
                   {!warehouseChoices.length && <p>No active supplying warehouses are available for this store.</p>}
                 </section> : <section className={styles.formSection}>
-                  <h3><span>1</span> Route <em>Tap where stock leaves from, then where it goes. Any warehouse or store works.</em></h3>
+                  <h3><span>1</span> Route <em>Choose where stock leaves from, then its destination.</em></h3>
+                  {!routeLocations.length && <p>No active transfer routes are available for your locations.</p>}
                   <div className={styles.routeGrid}>
                     <div>
                       <small className={styles.groupLabel}>From</small>
                       <div className={styles.options}>
-                        {locations.map((l) => (
-                          <button key={l.id} type="button" className={`${styles.option} ${newOrigin === l.id ? styles.optionOn : ''}`} onClick={() => { setNewOrigin(l.id); if (newDest === l.id) setNewDest(locations.find((x) => x.id !== l.id)?.id ?? ''); }} aria-pressed={newOrigin === l.id}>
+                        {routeLocations.map((l) => (
+                          <button key={l.id} type="button" className={`${styles.option} ${newOrigin === l.id ? styles.optionOn : ''}`} onClick={() => {
+                            setNewOrigin(l.id);
+                            if (!routeLocations.some((destination) => destination.id === newDest && isTransferRoute(l, destination))) setNewDest('');
+                          }} aria-pressed={newOrigin === l.id}>
                             <Icon name={isWarehouse(l.name) ? 'warehouse' : 'store'} size={15} />{l.name}
                           </button>
                         ))}
                       </div>
                     </div>
-                    <button type="button" className={styles.routeArrow} onClick={() => { setNewOrigin(newDest); setNewDest(newOrigin); }} title="Swap From and To" aria-label="Swap From and To"><Icon name="swap" size={16} /></button>
+                    <button type="button" className={styles.routeArrow} onClick={() => { setNewOrigin(newDest); setNewDest(newOrigin); }} disabled={!newOrigin || !newDest} title="Swap From and To" aria-label="Swap From and To"><Icon name="swap" size={16} /></button>
                     <div>
                       <small className={styles.groupLabel}>To</small>
                       <div className={styles.options}>
-                        {locations.map((l) => (
-                          <button key={l.id} type="button" className={`${styles.option} ${newDest === l.id ? styles.optionOn : ''}`} onClick={() => setNewDest(l.id)} disabled={l.id === newOrigin} aria-pressed={newDest === l.id}>
+                        {!selectedOrigin && <small>Choose an origin first.</small>}
+                        {routeDestinations.map((l) => (
+                          <button key={l.id} type="button" className={`${styles.option} ${newDest === l.id ? styles.optionOn : ''}`} onClick={() => setNewDest(l.id)} aria-pressed={newDest === l.id}>
                             <Icon name={isWarehouse(l.name) ? 'warehouse' : 'store'} size={15} />{l.name}
                           </button>
                         ))}
@@ -1374,7 +1415,7 @@ export default function OperationsPage() {
               <div className={styles.modalFoot}>
                 <span className={styles.footSummary}>{draftTotal} units · {warehouseChoices?.find((location) => location.id === newOrigin)?.name ?? (newOrigin ? locationName(newOrigin) : 'Select source')} <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /> {locationName(newDest)}</span>
                 <button type="button" className={styles.ghostButton} disabled={isCreatingBusy} onClick={() => setCreateModalOpen(false)}>Cancel</button>
-                <button type="submit" disabled={isCreatingBusy || (manualRestock && (!newOrigin || !draftItems.length))} className={styles.primaryButton}><Icon name={dispatchNow ? 'send' : 'check'} size={15} /> {isCreatingBusy ? 'Saving…' : manualRestock ? 'Send restock request' : dispatchNow ? 'Create & submit' : 'Save draft'}</button>
+                <button type="submit" disabled={isCreatingBusy || !newOrigin || !newDest || !draftItems.length} className={styles.primaryButton}><Icon name={dispatchNow ? 'send' : 'check'} size={15} /> {isCreatingBusy ? 'Saving…' : manualRestock ? 'Send restock request' : dispatchNow ? 'Create & submit' : 'Save draft'}</button>
               </div>
             </form>
           </div>

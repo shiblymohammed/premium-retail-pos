@@ -5,7 +5,7 @@ import { RequestUser } from '../../common/decorators/current-user.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { formatMixedUnitQuantity } from '../products/unit-conversion';
-import { receiptDiscrepancies } from '../transfers/receipt-discrepancies';
+import { receiptDiscrepancies, receiptDiscrepancyAlerts } from '../transfers/receipt-discrepancies';
 import { ReportQuery } from './reports.controller';
 
 function invoiceStatusAt(invoice: { status: string; cancelledAt: Date | null }, cutoff: Date) {
@@ -413,7 +413,12 @@ export class ReportsService {
         replenishmentWhere.push({ destLocationId: { in: locations }, destLocation: { type: 'SUB_WAREHOUSE' }, depotAuthorizedAt: null });
       }
     }
-    const [replenishments, recounts, highCounts, transfers] = await Promise.all([
+    const locationList = Prisma.join(locations);
+    const receiptScopes = [
+      ...(approve || dispatch ? [Prisma.sql`t.source_location_id IN (${locationList})`] : []),
+      ...(receive ? [Prisma.sql`t.dest_location_id IN (${locationList})`] : []),
+    ];
+    const [replenishments, recounts, highCounts, receipts, completedCounts] = await Promise.all([
       this.prisma.replenishmentRequest.findMany({
         where: { status: 'DRAFT', OR: replenishmentWhere },
         select: { id: true, requestNumber: true, depotAuthorizedAt: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true, type: true } }, createdAt: true },
@@ -429,12 +434,18 @@ export class ReportsService {
         select: { id: true, variant: { select: { sku: true, name: true, product: { select: { name: true } } } }, auditSession: { select: { id: true, location: { select: { id: true, name: true } } } } },
         take: 200,
       }) : [],
-      this.prisma.transfer.findMany({
-        where: { OR: [...(approve || dispatch ? [{ sourceLocationId: { in: locations } }] : []), ...(receive ? [{ destLocationId: { in: locations } }] : [])], lines: { some: { OR: [{ shortQtyBase: { gt: 0 } }, { damagedQtyBase: { gt: 0 } }, { excessQtyBase: { gt: 0 } }] } } },
-        select: { id: true, transferNumber: true, updatedAt: true, sourceLocation: { select: { name: true } }, destLocation: { select: { name: true } }, lines: { where: { OR: [{ shortQtyBase: { gt: 0 } }, { damagedQtyBase: { gt: 0 } }, { excessQtyBase: { gt: 0 } }] }, select: { shortQtyBase: true, damagedQtyBase: true, excessQtyBase: true } } },
-        orderBy: { updatedAt: 'desc' }, take: 100,
-      }),
+      receiptScopes.length ? receiptDiscrepancyAlerts(this.prisma, Prisma.sql`(${Prisma.join(receiptScopes, ' OR ')})`) : [],
+      audits || counter ? this.prisma.location.findMany({
+        where: { id: { in: locations }, dailyAuditLastRunDate: { not: null } },
+        select: { id: true, dailyAuditLastRunDate: true },
+      }) : [],
     ]);
+    const legacyTransferKeys = [...new Set(receipts.filter((row) => row.receiptId).map((row) => `transfer:${row.transferId}`))];
+    const legacyReads = legacyTransferKeys.length ? await this.prisma.inAppNotification.findMany({
+      where: { userId: actor.userId, dedupeKey: { in: legacyTransferKeys }, readAt: { not: null } },
+      select: { dedupeKey: true, readAt: true },
+    }) : [];
+    const readByTransfer = new Map(legacyReads.map((row) => [row.dedupeKey, row.readAt] as const));
     const items = [
       ...replenishments.map((row) => {
         const stage = row.destLocation.type === 'SUB_WAREHOUSE' ? (row.depotAuthorizedAt ? 'release' : 'depot') : 'approve';
@@ -445,20 +456,32 @@ export class ReportsService {
       }),
       ...recounts.map((row) => ({ id: `recount:${row.id}`, type: 'AUDIT_RECOUNT', severity: 'warning', title: `Recount required · ${row.variant.product.name}`, message: `${row.variant.name} (${row.variant.sku}) · ${row.auditSession.location.name}`, createdAt: null, href: `/audits?locationId=${encodeURIComponent(row.auditSession.location.id)}&sessionId=${encodeURIComponent(row.auditSession.id)}` })),
       ...highCounts.map((row) => ({ id: `audit-high-count:${row.id}`, type: 'AUDIT_HIGH_COUNT', severity: 'warning', title: `High count alert · ${row.variant.product.name}`, message: `${row.variant.name} (${row.variant.sku}) · ${row.auditSession.location.name}`, createdAt: null, href: `/audits?locationId=${encodeURIComponent(row.auditSession.location.id)}&sessionId=${encodeURIComponent(row.auditSession.id)}` })),
-      ...transfers.map((row) => {
-        const short = row.lines.reduce((sum, line) => sum + line.shortQtyBase, 0);
-        const damaged = row.lines.reduce((sum, line) => sum + line.damagedQtyBase, 0);
-        const excess = row.lines.reduce((sum, line) => sum + line.excessQtyBase, 0);
-        return { id: `transfer:${row.id}`, type: 'TRANSFER_DISCREPANCY', severity: 'warning', title: `Receipt discrepancy · ${row.transferNumber}`, message: `${row.sourceLocation.name} → ${row.destLocation.name} · short ${short}, damaged ${damaged}, excess ${excess}`, createdAt: row.updatedAt, href: '/operations' };
+      ...receipts.map((row) => {
+        const legacyKey = `transfer:${row.transferId}`;
+        const legacyReadAt = row.receiptId ? readByTransfer.get(legacyKey) : null;
+        const id = row.receiptId ? `${legacyKey}:${row.receiptId}` : legacyKey;
+        const receivedTime = new Intl.DateTimeFormat('en-GB', {
+          timeZone: row.timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit',
+        }).format(row.receivedAt);
+        return { id, type: 'TRANSFER_DISCREPANCY', severity: 'warning', title: `Receipt discrepancy · ${row.transferNumber} · ${receivedTime}`,
+          message: `${row.sourceName} → ${row.destinationName} · short ${row.short}, damaged ${row.damaged}, excess ${row.excess}`,
+          createdAt: row.receivedAt, href: '/operations',
+          readAt: legacyReadAt && legacyReadAt >= row.receivedAt ? legacyReadAt : null };
       }),
     ].sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
     const notifications = await Promise.all(items.map((item) => this.prisma.inAppNotification.upsert({
       where: { userId_dedupeKey: { userId: actor.userId, dedupeKey: item.id } },
-      create: { userId: actor.userId, dedupeKey: item.id, type: item.type, title: item.title, message: item.message, href: item.href },
+      create: { userId: actor.userId, dedupeKey: item.id, type: item.type, title: item.title, message: item.message, href: item.href,
+        createdAt: item.createdAt ?? undefined, readAt: 'readAt' in item && item.readAt instanceof Date ? item.readAt : null },
       update: { title: item.title, message: item.message, href: item.href },
     })));
     const auditDue = audits || counter ? await this.prisma.inAppNotification.findMany({
-      where: { userId: actor.userId, type: 'AUDIT_DUE', href: { in: locations.map((id) => `/audits?locationId=${encodeURIComponent(id)}`) } },
+      where: {
+        userId: actor.userId, type: 'AUDIT_DUE', href: { in: locations.map((id) => `/audits?locationId=${encodeURIComponent(id)}`) },
+        NOT: completedCounts.map(({ id, dailyAuditLastRunDate }) => ({
+          dedupeKey: { startsWith: `audit-due:${id}:`, lte: `audit-due:${id}:${dailyAuditLastRunDate}` },
+        })),
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
     }) : [];

@@ -372,6 +372,19 @@ export class TransfersService {
     });
   }
 
+  async routeLocations(actor: TransferActor) {
+    return this.prisma.location.findMany({
+      where: {
+        isActive: true,
+        ...(actor.role === Role.SUPER_ADMIN ? {} : {
+          company: { locations: { some: { id: { in: actor.locationIds }, isActive: true } } },
+        }),
+      },
+      select: { id: true, name: true, type: true, companyId: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async createTransfer(dto: CreateTransferDto, actor: TransferActor, idempotencyKey: string | undefined) {
     if (actor.role !== Role.INVENTORY) this.assertManager(actor, 'transfers.request');
     this.assertCanViewTransfer(actor, dto.sourceLocationId, dto.destLocationId);

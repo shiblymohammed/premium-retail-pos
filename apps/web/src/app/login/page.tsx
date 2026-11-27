@@ -221,7 +221,7 @@ function LoginForm() {
               <input type="checkbox" checked={rememberEmail} onChange={(event) => setRememberEmail(event.target.checked)} />
               <span>Remember my email on this device</span>
             </label>
-            <p className={styles.helpNote}>Need help signing in? Contact your administrator.</p>
+            <p className={styles.helpNote}>Forgot your password? Ask your Super Admin to reset it.</p>
           </div>
 
           <footer className={styles.cardFooter}>© {new Date().getFullYear()} Premium Retail</footer>

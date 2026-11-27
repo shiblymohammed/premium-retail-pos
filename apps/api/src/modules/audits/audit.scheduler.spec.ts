@@ -4,7 +4,7 @@ import { AuditScheduler } from './audit.scheduler';
 describe('AuditScheduler reminders', () => {
   afterEach(() => jest.useRealTimers());
 
-  async function runAt(instant: string, locations: Array<{ id: string; name: string; type: LocationType; dailyAuditTime: string; company: { timezone: string } }>) {
+  async function runAt(instant: string, locations: Array<{ id: string; name: string; type: LocationType; dailyAuditTime: string; dailyAuditLastRunDate?: string; company: { timezone: string } }>) {
     jest.useFakeTimers().setSystemTime(new Date(instant));
     const prisma = {
       location: { findMany: jest.fn().mockResolvedValue(locations) },
@@ -64,6 +64,13 @@ describe('AuditScheduler reminders', () => {
     };
     const scheduler = new AuditScheduler(prisma as any);
     await (scheduler as any).tick();
+
+    expect(prisma.inAppNotification.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not issue another reminder for a count already approved on the local business date', async () => {
+    const approved = { ...warehouse, dailyAuditLastRunDate: '2026-11-29', company: { timezone: 'America/New_York' } };
+    const prisma = await runAt('2026-11-30T00:05:00.000Z', [approved]);
 
     expect(prisma.inAppNotification.upsert).not.toHaveBeenCalled();
   });

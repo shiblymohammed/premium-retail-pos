@@ -23,6 +23,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { AssignDiscountLimitDto } from './dto/assign-discount-limit.dto';
 import { AssignSalesPermissionsDto } from './dto/assign-sales-permissions.dto';
 import { IsBoolean, IsString, MaxLength, MinLength } from 'class-validator';
+import { SetPasswordDto } from '../auth/dto/change-password.dto';
 
 class AssignStockAuditPermissionDto {
   @IsBoolean() canCountStockAudits: boolean;
@@ -132,6 +133,13 @@ export class UsersController {
   async deactivate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     const user = await this.usersService.deactivateUser(id, actor);
     return { message: 'User deactivated', data: { id: user.id } };
+  }
+
+  @Post(':id/reset-password')
+  @Roles(Role.SUPER_ADMIN)
+  async resetPassword(@Param('id') id: string, @Body() dto: SetPasswordDto, @CurrentUser() actor: RequestUser) {
+    await this.usersService.setLoginPassword(id, dto.newPassword, actor);
+    return { message: 'Staff password reset and existing sessions revoked' };
   }
 
   @Patch(':id/reactivate')
