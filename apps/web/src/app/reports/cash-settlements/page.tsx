@@ -11,6 +11,8 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/
 
 const drawerColumns = ['Opening float', 'Expected cash', 'Counted cash', 'Cash difference', 'Expected card', 'Counted card', 'Card difference', 'Cash to remove'];
 
+type Store = { id: string; name: string; company?: { timezone?: string } };
+
 type Settlement = {
   id: string;
   location: string;
@@ -32,11 +34,11 @@ type Settlement = {
 export default function CashSettlementsPage() {
   const [token, setToken] = useState('');
   const [canConsolidate, setCanConsolidate] = useState(false);
-  const [locations, setLocations] = useState<Array<{ id: string; name: string }>>([]);
+  const [locations, setLocations] = useState<Store[]>([]);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [locationId, setLocationId] = useState('');
-  const [rows, setRows] = useState<Settlement[]>([]);
+  const [loaded, setLoaded] = useState<{ query: string; rows: Settlement[] }>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [locationError, setLocationError] = useState('');
@@ -55,13 +57,17 @@ export default function CashSettlementsPage() {
     void fetch(`${API_BASE}/locations`, { headers, signal: controller.signal, cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error('Could not load authorized stores.');
-        const payload = await response.json();
-        const stores = payload.data.filter((entry: { type: string }) => entry.type === 'RETAIL_STORE');
+        const payload: { data: Array<Store & { type: string }> } = await response.json();
+        if (controller.signal.aborted) return;
+        const stores = payload.data.filter((entry) => entry.type === 'RETAIL_STORE');
+        const workspace = window.localStorage.getItem('premium-retail-location-scope');
+        const selected = stores.find((store) => store.name === workspace)
+          ?? (consolidated ? undefined : stores[0]);
         setLocations(stores);
-        const today = businessDate(new Date(), stores[0]?.company?.timezone ?? 'UTC');
+        setLocationId(selected?.id ?? '');
+        const today = businessDate(new Date(), selected?.company?.timezone ?? stores[0]?.company?.timezone ?? 'UTC');
         setFrom(addCalendarDays(today, -29));
         setTo(today);
-        if (!consolidated) setLocationId(stores[0]?.id ?? '');
         setToken(session.accessToken);
         if (!consolidated && !stores.length) setLoading(false);
       })
@@ -74,9 +80,21 @@ export default function CashSettlementsPage() {
   }, []);
 
   useEffect(() => {
+    function syncLocation(event: Event) {
+      const name = (event as CustomEvent<string>).detail;
+      const selected = locations.find((store) => store.name === name);
+      setLocationId(selected?.id ?? (canConsolidate ? '' : locations[0]?.id ?? ''));
+    }
+    window.addEventListener('premium-retail-location-change', syncLocation);
+    return () => window.removeEventListener('premium-retail-location-change', syncLocation);
+  }, [canConsolidate, locations]);
+
+  const query = new URLSearchParams({ from, to, ...(locationId ? { locationId } : {}) }).toString();
+  const rows = loaded?.query === query ? loaded.rows : [];
+
+  useEffect(() => {
     if (!token || !from || !to || (!canConsolidate && !locationId)) return;
     const controller = new AbortController();
-    setRows([]);
     if (from > to) {
       setError('End date must be on or after the start date.');
       setLoading(false);
@@ -84,20 +102,19 @@ export default function CashSettlementsPage() {
     }
     setLoading(true);
     setError('');
-    const params = new URLSearchParams({ from, to, ...(locationId ? { locationId } : {}) });
-    void fetch(`${API_BASE}/reports/cash-settlements?${params}`, {
+    void fetch(`${API_BASE}/reports/cash-settlements?${query}`, {
       headers: { Authorization: `Bearer ${token}` }, signal: controller.signal, cache: 'no-store',
     }).then(async (response) => {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || 'Could not load settlements.');
-      setRows(payload.data);
+      if (!controller.signal.aborted) setLoaded({ query, rows: payload.data });
     }).catch((error) => {
       if (!controller.signal.aborted) setError(error.message);
     }).finally(() => {
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [token, from, to, locationId, canConsolidate]);
+  }, [token, from, to, locationId, canConsolidate, query]);
 
   const cashToRemove = (row: Settlement) => Math.max(0, Number(row.countedCash) - Number(row.openingCash));
   const exportSettlement = (format: 'csv' | 'pdf') => {
