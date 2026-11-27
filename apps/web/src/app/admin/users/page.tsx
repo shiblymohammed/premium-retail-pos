@@ -17,7 +17,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { AdminModal } from '@/components/admin';
 import { PasswordDialog } from '@/components/admin/password-dialog';
@@ -25,6 +25,7 @@ import { AdminActionMenu } from '@/components/admin/admin-action-menu';
 import { PermissionMatrix } from '@/components/ui/permission-matrix';
 import { Feedback } from '@/components/ui/feedback';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -86,10 +87,19 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function UserManagementPage() {
+  return (
+    <Suspense fallback={<main className="app-page" role="status">Loading accounts…</main>}>
+      <UserDirectory />
+    </Suspense>
+  );
+}
+
+function UserDirectory() {
+  const linkedSearch = useSearchParams().get('q') ?? '';
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [directoryState, setDirectoryState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [availableLocations, setAvailableLocations] = useState<ManagedLocation[]>([]);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(linkedSearch);
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [locationFilter, setLocationFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -156,11 +166,6 @@ export default function UserManagementPage() {
     const handleOpen = () => openCreateModal();
     window.addEventListener('open-user-modal', handleOpen);
 
-    // Support search query parameter from global topbar search pill
-    const params = new URLSearchParams(window.location.search);
-    const q = params.get('q');
-    if (q) setSearch(q);
-
     // Close open menus on outside click
     const handleGlobalClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -175,6 +180,15 @@ export default function UserManagementPage() {
       window.removeEventListener('open-user-modal', handleOpen);
     };
   }, []);
+
+  useEffect(() => {
+    setSearch(linkedSearch);
+    if (linkedSearch) {
+      setRoleFilter('ALL');
+      setLocationFilter('ALL');
+      setStatusFilter('ALL');
+    }
+  }, [linkedSearch]);
 
   useEffect(() => {
     const session = getStoredSession();
@@ -872,6 +886,11 @@ export default function UserManagementPage() {
                   setRoleFilter('ALL');
                   setLocationFilter('ALL');
                   setStatusFilter('ALL');
+                  const url = new URL(window.location.href);
+                  if (url.searchParams.has('q')) {
+                    url.searchParams.delete('q');
+                    window.history.replaceState(null, '', url);
+                  }
                 }}
                 style={{
                   background: 'none',
