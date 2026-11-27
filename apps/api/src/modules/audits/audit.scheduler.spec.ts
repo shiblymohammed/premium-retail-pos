@@ -4,7 +4,7 @@ import { AuditScheduler } from './audit.scheduler';
 describe('AuditScheduler reminders', () => {
   afterEach(() => jest.useRealTimers());
 
-  async function runAt(instant: string, locations: Array<{ id: string; name: string; type: LocationType; dailyAuditTime: string; dailyAuditLastRunDate?: string; company: { timezone: string } }>) {
+  async function runAt(instant: string, locations: Array<{ id: string; name: string; type: LocationType; dailyAuditTime: string; dailyAuditLastRunDate?: string; company: { timezone: string }; auditSessions: { startedAt: Date }[] }>) {
     jest.useFakeTimers().setSystemTime(new Date(instant));
     const prisma = {
       location: { findMany: jest.fn().mockResolvedValue(locations) },
@@ -18,8 +18,8 @@ describe('AuditScheduler reminders', () => {
     return prisma;
   }
 
-  const store = { id: 'store-id', name: 'Store', type: LocationType.RETAIL_STORE, dailyAuditTime: '19:00', company: { timezone: 'Asia/Kolkata' } };
-  const warehouse = { id: 'warehouse-id', name: 'Warehouse', type: LocationType.MAIN_WAREHOUSE, dailyAuditTime: '19:00', company: { timezone: 'Asia/Kolkata' } };
+  const store = { id: 'store-id', name: 'Store', type: LocationType.RETAIL_STORE, dailyAuditTime: '19:00', company: { timezone: 'Asia/Kolkata' }, auditSessions: [] };
+  const warehouse = { id: 'warehouse-id', name: 'Warehouse', type: LocationType.MAIN_WAREHOUSE, dailyAuditTime: '19:00', company: { timezone: 'Asia/Kolkata' }, auditSessions: [] };
 
   it('notifies the store team daily after 7 PM without auto-locking the store', async () => {
     const prisma = await runAt('2026-11-13T14:00:00.000Z', [store, warehouse]);
@@ -73,5 +73,14 @@ describe('AuditScheduler reminders', () => {
     const prisma = await runAt('2026-11-30T00:05:00.000Z', [approved]);
 
     expect(prisma.inAppNotification.upsert).not.toHaveBeenCalled();
+  });
+
+  it('uses approval history if an older count did not populate the completion date', async () => {
+    const approved = { ...warehouse, company: { timezone: 'America/New_York' }, auditSessions: [{ startedAt: new Date('2026-11-30T00:00:00.000Z') }] };
+    const sameBusinessDay = await runAt('2026-11-30T00:05:00.000Z', [approved]);
+    const followingWeek = await runAt('2026-12-07T00:05:00.000Z', [approved]);
+
+    expect(sameBusinessDay.inAppNotification.upsert).not.toHaveBeenCalled();
+    expect(followingWeek.inAppNotification.upsert).toHaveBeenCalledTimes(3);
   });
 });

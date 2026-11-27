@@ -50,6 +50,10 @@ export class CreateTransferDto {
   @IsString()
   @MaxLength(1000)
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  submitForApproval?: boolean;
 }
 
 export class ApprovedTransferLineDto {

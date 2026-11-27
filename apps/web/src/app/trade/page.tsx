@@ -23,9 +23,11 @@ export default function TradePage() {
   const [receiving, setReceiving] = useState<Order | null>(null);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState('');
+  const [catalogueError, setCatalogueError] = useState('');
+  const [retryCatalogue, setRetryCatalogue] = useState(0);
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
-  const { can } = useAccess(token);
+  const { can, loading: accessLoading } = useAccess(token);
   const canCredit = can('customers.credit', ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER'].includes(role));
   const canOrder = can('purchasing.orders', ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'SUB_WAREHOUSE_MANAGER', 'INVENTORY'].includes(role));
   const canPay = can('purchasing.payments', ['SUPER_ADMIN', 'ADMIN'].includes(role));
@@ -40,23 +42,25 @@ export default function TradePage() {
       return;
     }
     const controller = new AbortController();
-    type Catalogue = { name: string; baseUnit: string; unitsPerCarton: number | null; variants: Array<{ id: string; sku: string; name: string; isActive: boolean }> };
-    void Promise.all([
-      tradeRequest<StockLocation[]>('/locations', session.accessToken, controller.signal),
-      tradeRequest<Catalogue[]>('/products?isActive=true', session.accessToken, controller.signal),
-    ]).then(([locations, products]) => {
+    void tradeRequest<StockLocation[]>('/locations', session.accessToken, controller.signal).then((locations) => {
       setLocations(locations);
       setLocationId(locations[0]?.id ?? '');
-      setCatalogue(products.flatMap((product) => product.variants.filter((variant) => variant.isActive).map((variant) => ({
-        variantId: variant.id, sku: variant.sku, name: product.name, variant: variant.name,
-        baseUnit: product.baseUnit, unitsPerCarton: product.unitsPerCarton ?? 1,
-      }))));
       setToken(session.accessToken);
       setRole(session.user.role);
     }).catch((error) => { if (!controller.signal.aborted) setError(error.message); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (!token || accessLoading || !canOrder) return;
+    const controller = new AbortController();
+    setCatalogueError('');
+    void tradeRequest<StockVariant[]>('/trade/catalog', token, controller.signal)
+      .then((products) => { if (!controller.signal.aborted) setCatalogue(products); })
+      .catch(() => { if (!controller.signal.aborted) setCatalogueError('Purchase order products could not be loaded.'); });
+    return () => controller.abort();
+  }, [token, accessLoading, canOrder, retryCatalogue]);
 
   useEffect(() => {
     if (role && canCredit && !canOrder && !canPay && tab !== 'credit') setMode('credit');
@@ -85,7 +89,10 @@ export default function TradePage() {
     </div>
     {notice && <Feedback tone="success">{notice}</Feedback>}
     {error && <Feedback tone="error">{error}</Feedback>}
-    {loading && <p role="status">Loading locations and products…</p>}
+    {loading && <p role="status">Loading purchasing locations…</p>}
+    {tab === 'orders' && canOrder && catalogueError && <Feedback tone="error" action={
+      <button type="button" className="admin-secondary" onClick={() => setRetryCatalogue((value) => value + 1)}>Retry</button>
+    }>{catalogueError}</Feedback>}
     {token && location && tab === 'orders' && (canOrder || canPay) && <PurchaseOrders key={locationId} token={token} locationId={locationId} catalogue={catalogue}
       canPay={canPay} canOrder={canOrder} reload={reload} onReceive={setReceiving} />}
     {token && location?.type === 'RETAIL_STORE' && canCredit && tab === 'credit' && <CustomerCredit key={locationId} token={token} locationId={locationId} />}

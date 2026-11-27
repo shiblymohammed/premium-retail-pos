@@ -60,8 +60,7 @@ export class TransfersController {
   }
 
   @Get('replenishment')
-  @Roles(...MANAGER_ROLES, Role.INVENTORY)
-  @Permission('transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive')
+  @Roles()
   async listReplenishments(@CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findReplenishments(actor) };
   }
@@ -108,12 +107,12 @@ export class TransfersController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @CurrentUser() actor: RequestUser,
   ) {
-    return { message: 'Transfer draft created', data: await this.transfers.createTransfer(dto, actor, idempotencyKey) };
+    const data = await this.transfers.createTransfer(dto, actor, idempotencyKey);
+    return { message: dto.submitForApproval ? 'Transfer submitted for approval' : 'Transfer draft created', data };
   }
 
   @Get()
-  @Roles(...MANAGER_ROLES, Role.INVENTORY, Role.STAFF, Role.CASHIER)
-  @Permission('transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive')
+  @Roles()
   async findAll(@CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findTransfers(actor) };
   }
@@ -125,9 +124,14 @@ export class TransfersController {
     return { data: await this.transfers.routeLocations(actor) };
   }
 
+  @Get('catalog')
+  @Roles()
+  async listTransferCatalog(@CurrentUser() actor: RequestUser) {
+    return { data: await this.transfers.listTransferCatalog(actor) };
+  }
+
   @Get(':id')
-  @Roles(...MANAGER_ROLES, Role.INVENTORY, Role.STAFF, Role.CASHIER)
-  @Permission('transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive')
+  @Roles()
   async findOne(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.transfers.findTransfer(id, actor) };
   }

@@ -6,9 +6,8 @@ import { CurrentUser, RequestUser } from '../../common/decorators/current-user.d
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { OrderDto, PaymentDto, CreditAccountDto, CreditEntryDto } from './trade.dto';
-import { TradeService } from './trade.service';
+import { PURCHASE_ORDER_ROLES, SUPPLIER_PAYMENT_ROLES, TradeService } from './trade.service';
 
-const BUYING = [Role.SUPER_ADMIN, Role.ADMIN, Role.STORE_MANAGER, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.INVENTORY];
 const CREDIT = [Role.SUPER_ADMIN, Role.ADMIN, Role.STORE_MANAGER];
 
 @Controller('trade')
@@ -17,21 +16,26 @@ export class TradeController {
   constructor(private readonly trade: TradeService) {}
 
   @Get('orders')
-  @Roles(...BUYING)
-  @Permission('purchasing.orders', 'purchasing.payments')
   async orders(@CurrentUser() actor: RequestUser, @Query('locationId') locationId: string) {
     return { data: await this.trade.orders(locationId, actor) };
   }
 
+  @Get('catalog')
+  @Roles(...PURCHASE_ORDER_ROLES)
+  @Permission('purchasing.orders')
+  async orderCatalog() {
+    return { data: await this.trade.orderCatalog() };
+  }
+
   @Post('orders')
-  @Roles(...BUYING)
+  @Roles(...PURCHASE_ORDER_ROLES)
   @Permission('purchasing.orders')
   async createOrder(@CurrentUser() actor: RequestUser, @Body() dto: OrderDto) {
     return { data: await this.trade.createOrder(dto, actor) };
   }
 
   @Post('orders/:id/payments')
-  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Roles(...SUPPLIER_PAYMENT_ROLES)
   @Permission('purchasing.payments')
   async pay(@CurrentUser() actor: RequestUser, @Param('id') id: string, @Body() dto: PaymentDto) {
     return { data: await this.trade.payOrder(id, dto, actor) };

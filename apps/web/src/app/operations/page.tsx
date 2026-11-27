@@ -1,6 +1,6 @@
 'use client';
 
-import { useAccess } from '@/lib/permissions';
+import type { AccessOverrides } from '@/lib/permissions';
 import { ReasonDialog, type ReasonAction } from '@/components/admin/reason-dialog';
 import { InfoHint } from '@/components/ui/info-hint';
 import { Feedback } from '@/components/ui/feedback';
@@ -249,7 +249,8 @@ export default function OperationsPage() {
   const [isSavingLines, setIsSavingLines] = useState(false);
   const [lineError, setLineError] = useState('');
   const pendingKeys = useRef(new Map<string, string>());
-  const { can } = useAccess(apiToken);
+  const [overrides, setOverrides] = useState<AccessOverrides>({});
+  const can = (permission: string, roleDefault: boolean) => apiRole === 'SUPER_ADMIN' || (overrides[permission] ?? roleDefault);
   const defaultManager = !isReceiver(apiRole) && apiRole !== 'INVENTORY';
   const canRequestTransfers = can('transfers.request', defaultManager || apiRole === 'INVENTORY');
   const canGenerateDepotRestock = can('transfers.request', defaultManager);
@@ -262,6 +263,8 @@ export default function OperationsPage() {
     apiRole === 'SUPER_ADMIN' || locations.some((location) => location.id === id), [apiRole, locations]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState('');
+  const [catalogUnavailable, setCatalogUnavailable] = useState(false);
+  const [restockUnavailable, setRestockUnavailable] = useState(false);
   const [isCreatingBusy, setIsCreatingBusy] = useState(false);
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('ALL');
   const [locationFilter, setLocationFilter] = useState('ALL'); // selected location ID from the top bar
@@ -353,29 +356,37 @@ export default function OperationsPage() {
   const reloadOperations = async (token = apiToken, role = apiRole) => {
     if (!token) { setLoading(false); return; }
     const headers = { Authorization: `Bearer ${token}` };
-    const load = (path: string) => fetch(`${API_BASE}${path}`, { headers, cache: 'no-store' });
-    const empty = () => Promise.resolve(new Response('{"data":[]}'));
-    const [transferRes, locationRes, productRes, replenishmentRes] = await Promise.all([
-      load('/transfers'), load('/locations?isActive=true'),
-      isReceiver(role) ? empty() : load('/products?isActive=true'),
-      isReceiver(role) ? empty() : load('/transfers/replenishment'),
+    const load = async (path: string) => {
+      const response = await fetch(`${API_BASE}${path}`, { headers, cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.data == null) throw new Error(payload.message || 'Could not load transfer data from the API.');
+      return payload.data;
+    };
+    const [transferData, locationData, permissions] = await Promise.all([
+      load('/transfers'), load('/locations?isActive=true'), load('/users/me/permissions'),
     ]);
-    const [transferBody, locationBody, productBody, replenishmentBody] = await Promise.all([
-      transferRes.json().catch(() => ({})), locationRes.json().catch(() => ({})), productRes.json().catch(() => ({})), replenishmentRes.json().catch(() => ({})),
+    setOverrides(permissions);
+    const manager = !isReceiver(role) && role !== 'INVENTORY';
+    const request = role === 'SUPER_ADMIN' || (permissions['transfers.request'] ?? (manager || role === 'INVENTORY'));
+    const approve = role === 'SUPER_ADMIN' || (permissions['transfers.approve'] ?? manager);
+    const dispatch = role === 'SUPER_ADMIN' || (permissions['transfers.dispatch'] ?? manager);
+    const [products, restocks] = await Promise.all([
+      request || approve ? load('/transfers/catalog').catch(() => null) : [],
+      request || approve || dispatch ? load('/transfers/replenishment').catch(() => null) : [],
     ]);
-    const failed = [transferRes, locationRes, productRes, replenishmentRes].find((response) => !response.ok);
-    if (failed) throw new Error([transferBody, locationBody, productBody, replenishmentBody][[transferRes, locationRes, productRes, replenishmentRes].indexOf(failed)]?.message || 'Could not load transfer data from the API.');
-    const nextLocations: LocationOption[] = Array.isArray(locationBody.data)
-      ? locationBody.data.filter((item: any) => item && typeof item.id === 'string' && typeof item.name === 'string')
+    setCatalogUnavailable(products === null);
+    setRestockUnavailable(restocks === null);
+    const nextLocations: LocationOption[] = Array.isArray(locationData)
+      ? locationData.filter((item: any) => item && typeof item.id === 'string' && typeof item.name === 'string')
       : [];
     setLocations(nextLocations);
-    setTransfers((Array.isArray(transferBody.data) ? transferBody.data : []).filter(Boolean).map(normalizeTransfer));
+    setTransfers((Array.isArray(transferData) ? transferData : []).filter(Boolean).map(normalizeTransfer));
     const locationLabel = (relation: any, id: unknown) => {
       if (typeof relation?.name === 'string' && relation.name.trim()) return relation.name;
       const locationId = typeof id === 'string' ? id : typeof relation?.id === 'string' ? relation.id : '';
       return nextLocations.find((location) => location.id === locationId)?.name || (locationId ? `Location ${locationId.slice(0, 8)}` : 'Unknown location');
     };
-    setReplenishments((Array.isArray(replenishmentBody.data) ? replenishmentBody.data : [])
+    setReplenishments((Array.isArray(restocks) ? restocks : [])
       .filter((request: any) => request && typeof request === 'object')
       .map((request: any, index: number) => ({
         ...request,
@@ -395,13 +406,7 @@ export default function OperationsPage() {
         },
         lines: Array.isArray(request.lines) ? request.lines : [],
       })));
-    setCatalog((Array.isArray(productBody.data) ? productBody.data : []).filter(Boolean).flatMap((product: any) => (Array.isArray(product.variants) ? product.variants : []).filter((variant: any) => variant?.isActive).map((variant: any) => ({
-      variantId: variant.id,
-      sku: variant.sku,
-      name: typeof product.name === 'string' && product.name.trim() ? product.name : variant.name || variant.sku || 'Product',
-      baseUnit: product.baseUnit ?? 'unit',
-      unitsPerCarton: Number(product.unitsPerCarton || 1),
-    }))));
+    setCatalog(Array.isArray(products) ? products : []);
   };
 
   async function retryOperations() {
@@ -580,6 +585,7 @@ export default function OperationsPage() {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.message || `Request failed (${response.status})`);
+    if (payload.data == null) throw new Error('The server did not confirm the change. Retry to check the result.');
     pendingKeys.current.delete(signature);
     await reloadOperations().catch(() => setApiError('The change was saved. Retry to refresh the transfer list.'));
     return payload.data;
@@ -840,11 +846,11 @@ export default function OperationsPage() {
         destLocationId: newDest,
         notes: newNotes.trim() || undefined,
         lines: draftItems.map((item) => ({ variantId: item.variantId, cartons: item.cartons, looseBaseUnits: item.looseUnits })),
+        ...(manualRestock ? {} : { submitForApproval: dispatchNow }),
       });
       if (manualRestock) {
         setNotice(`Restock request ${created?.requestNumber ?? ''} sent for warehouse approval.`);
-      } else if (dispatchNow && created?.id) {
-        await mutate(`/transfers/${created.id}/submit`, 'POST');
+      } else if (created.status === 'PENDING_APPROVAL') {
         setNotice('Transfer created and submitted for approval.');
       } else setNotice('Transfer draft saved. Submit it when ready for approval.');
       setCreateModalOpen(false);
@@ -894,12 +900,13 @@ export default function OperationsPage() {
           <p>{receiveOnly ? 'Check and receive stock at your assigned store.' : 'Send stock between locations, follow it on the road and receive it into inventory.'}</p>
         </div>
         {!receiveOnly && <div className={styles.headerActions}>
-          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || openingRestock || openingTransfer || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE' || (restockDestination.type === 'SUB_WAREHOUSE' && !canGenerateDepotRestock)}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
+          <button type="button" className={styles.ghostButton} onClick={requestRestock} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || openingRestock || openingTransfer || !restockDestination || restockDestination.type === 'MAIN_WAREHOUSE' || (restockDestination.type === 'RETAIL_STORE' && !catalog.length) || (restockDestination.type === 'SUB_WAREHOUSE' && !canGenerateDepotRestock)}>{openingRestock ? 'Loading warehouses…' : 'Request restock'}</button>
           <button type="button" className={styles.primaryButton} onClick={openTransferDraft} disabled={loading || !!apiError || !canRequestTransfers || !apiToken || openingTransfer || openingRestock || !locations.length || !catalog.length}><Icon name="plus" size={16} /> {openingTransfer ? 'Loading transfer routes…' : 'New transfer'}</button>
         </div>}
       </header>
 
       {notice && <Feedback tone="info" onDismiss={() => setNotice('')}>{notice}</Feedback>}
+      {!loading && !apiError && catalogUnavailable && <Feedback tone="error">Transfer products could not be loaded. <button type="button" className={styles.ghostButton} onClick={() => void retryOperations()}>Retry</button></Feedback>}
 
       {loading ? (
         <section className={styles.tableCard}><div className={styles.empty} role="status">Loading transfers…</div></section>
@@ -1158,7 +1165,7 @@ export default function OperationsPage() {
 
       {!receiveOnly && <section className={styles.tableCard} aria-labelledby="replenishment-heading">
         <div className={styles.tableTop}><div><div className="heading-with-info"><h2 id="replenishment-heading">Restock requests</h2></div><p>The supplying warehouse reviews each request before it can be packed.</p></div></div>
-        {!replenishments.length ? <div className={styles.empty}><strong>No restock requests</strong><p>Choose your store in the location selector, then select Request restock.</p></div> : (
+        {restockUnavailable ? <div className={styles.empty} role="alert"><strong>Could not load restock requests</strong><button type="button" className={styles.ghostButton} onClick={() => void retryOperations()}>Retry</button></div> : !replenishments.length ? <div className={styles.empty}><strong>No restock requests</strong><p>Choose your store in the location selector, then select Request restock.</p></div> : (
           <ul className={styles.rows}>{replenishments.map((request) => {
             const isDepot = depotRequest(request);
             const needsDepot = isDepot && !request.depotAuthorizedAt;

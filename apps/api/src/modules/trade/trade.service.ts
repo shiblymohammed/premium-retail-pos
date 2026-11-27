@@ -1,8 +1,12 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import type { RequestUser } from '../../common/decorators/current-user.decorator';
+import { can } from '../../common/decorators/permission.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { CreditAccountDto, CreditEntryDto, OrderDto, PaymentDto } from './trade.dto';
+
+export const PURCHASE_ORDER_ROLES: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.STORE_MANAGER, Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER, Role.INVENTORY];
+export const SUPPLIER_PAYMENT_ROLES: Role[] = [Role.SUPER_ADMIN, Role.ADMIN];
 
 const orderInclude = {
   lines: { include: { variant: { select: { sku: true, product: { select: { name: true, baseUnit: true } } } } } },
@@ -36,11 +40,26 @@ export class TradeService {
   }
 
   async orders(locationId: string, actor: RequestUser) {
+    if (!can(actor, 'purchasing.orders', PURCHASE_ORDER_ROLES.includes(actor.role as Role)) &&
+      !can(actor, 'purchasing.payments', SUPPLIER_PAYMENT_ROLES.includes(actor.role as Role))) {
+      throw new ForbiddenException('Purchase order or supplier payment access is required');
+    }
     this.scope(locationId, actor);
     return this.prisma.purchaseOrder.findMany({
       where: { locationId }, include: orderInclude,
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async orderCatalog() {
+    const variants = await this.prisma.variant.findMany({
+      where: { isActive: true, product: { isActive: true } },
+      select: { id: true, sku: true, name: true, product: { select: { name: true, baseUnit: true, unitsPerCarton: true } } },
+      orderBy: [{ product: { name: 'asc' } }, { sku: 'asc' }],
+    });
+    return variants.map(({ id, sku, name, product }) => ({
+      variantId: id, sku, variant: name, name: product.name, baseUnit: product.baseUnit, unitsPerCarton: product.unitsPerCarton ?? 1,
+    }));
   }
 
   async createOrder(dto: OrderDto, actor: RequestUser) {

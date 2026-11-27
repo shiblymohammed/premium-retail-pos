@@ -34,7 +34,11 @@ export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
     try {
       const locations = await this.prisma.location.findMany({
         where: { isActive: true, dailyAuditEnabled: true },
-        select: { id: true, name: true, type: true, dailyAuditTime: true, dailyAuditLastRunDate: true, company: { select: { timezone: true } } },
+        select: {
+          id: true, name: true, type: true, dailyAuditTime: true, dailyAuditLastRunDate: true,
+          company: { select: { timezone: true } },
+          auditSessions: { where: { status: 'APPROVED' }, orderBy: { startedAt: 'desc' }, take: 1, select: { startedAt: true } },
+        },
       });
       const globalAdmins = await this.prisma.user.findMany({
         where: { role: Role.SUPER_ADMIN, isActive: true },
@@ -43,9 +47,11 @@ export class AuditScheduler implements OnModuleInit, OnModuleDestroy {
 
       for (const location of locations) {
         const local = this.localClock(new Date(), location.company.timezone);
-        if (location.dailyAuditLastRunDate === local.date) continue;
         if (local.time < location.dailyAuditTime || local.time < '19:00') continue;
         if (location.type !== LocationType.RETAIL_STORE && local.weekday !== 'Sun') continue;
+        if (location.dailyAuditLastRunDate === local.date) continue;
+        const latestApproved = location.auditSessions[0];
+        if (latestApproved && this.localClock(latestApproved.startedAt, location.company.timezone).date === local.date) continue;
 
         const activeSession = await this.prisma.auditSession.findFirst({
           where: { locationId: location.id, status: { in: ['ACTIVE', 'SUBMITTED'] } },

@@ -436,8 +436,13 @@ export class ReportsService {
       }) : [],
       receiptScopes.length ? receiptDiscrepancyAlerts(this.prisma, Prisma.sql`(${Prisma.join(receiptScopes, ' OR ')})`) : [],
       audits || counter ? this.prisma.location.findMany({
-        where: { id: { in: locations }, dailyAuditLastRunDate: { not: null } },
-        select: { id: true, dailyAuditLastRunDate: true },
+        where: { id: { in: locations } },
+        select: {
+          id: true,
+          dailyAuditLastRunDate: true,
+          company: { select: { timezone: true } },
+          auditSessions: { where: { status: 'APPROVED' }, orderBy: { startedAt: 'desc' }, take: 1, select: { startedAt: true } },
+        },
       }) : [],
     ]);
     const legacyTransferKeys = [...new Set(receipts.filter((row) => row.receiptId).map((row) => `transfer:${row.transferId}`))];
@@ -478,9 +483,14 @@ export class ReportsService {
     const auditDue = audits || counter ? await this.prisma.inAppNotification.findMany({
       where: {
         userId: actor.userId, type: 'AUDIT_DUE', href: { in: locations.map((id) => `/audits?locationId=${encodeURIComponent(id)}`) },
-        NOT: completedCounts.map(({ id, dailyAuditLastRunDate }) => ({
-          dedupeKey: { startsWith: `audit-due:${id}:`, lte: `audit-due:${id}:${dailyAuditLastRunDate}` },
-        })),
+        NOT: completedCounts.flatMap(({ id, dailyAuditLastRunDate, auditSessions, company }) => {
+          const latest = auditSessions[0];
+          const approvedDate = latest ? new Intl.DateTimeFormat('en-CA', {
+            timeZone: company.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+          }).format(latest.startedAt) : '';
+          const completionDate = approvedDate > (dailyAuditLastRunDate ?? '') ? approvedDate : dailyAuditLastRunDate;
+          return completionDate ? [{ dedupeKey: { startsWith: `audit-due:${id}:`, lte: `audit-due:${id}:${completionDate}` } }] : [];
+        }),
       },
       orderBy: { createdAt: 'desc' },
       take: 50,

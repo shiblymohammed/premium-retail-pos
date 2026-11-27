@@ -303,7 +303,8 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
           || canOverride('transfers.receive', roleDefault && rawRole !== 'INVENTORY')
           || canOverride('transfers.approve', manager) || canOverride('transfers.dispatch', manager);
       }
-      case '/trade': return canOverride('purchasing.orders', roleDefault) || overrides['customers.credit'] === true || overrides['purchasing.payments'] === true;
+      case '/trade': return canOverride('purchasing.orders', roleDefault) || canOverride('customers.credit', ['ADMIN', 'STORE_MANAGER'].includes(rawRole))
+        || canOverride('purchasing.payments', rawRole === 'ADMIN');
       case '/attendance/manage': return canOverride('staff.view', roleDefault) || overrides['attendance.manage'] === true;
       case '/staff-records': return canOverride('staff.view', roleDefault) || canOverride('staff.manage', roleDefault)
         || canOverride('payroll.view', canOverride('payroll.manage', rawRole === 'ADMIN') || rawRole === 'ADMIN');

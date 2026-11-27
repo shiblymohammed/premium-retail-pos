@@ -359,7 +359,7 @@ export class TransfersService {
   }
 
   async findReplenishments(actor: TransferActor) {
-    if (actor.role !== Role.INVENTORY) this.assertTransferAccess(actor);
+    this.assertTransferAccess(actor, false);
     return this.prisma.replenishmentRequest.findMany({
       where: actor.role === Role.SUPER_ADMIN
         ? {}
@@ -385,8 +385,29 @@ export class TransfersService {
     });
   }
 
+  async listTransferCatalog(actor: TransferActor) {
+    const manager = MANAGER_ROLES.includes(actor.role as Role);
+    if (!can(actor, 'transfers.request', manager || actor.role === Role.INVENTORY) && !can(actor, 'transfers.approve', manager)) {
+      throw new ForbiddenException('Transfer requests or approval access is required to view transfer products');
+    }
+    const variants = await this.prisma.variant.findMany({
+      where: { isActive: true, product: { isActive: true } },
+      select: { id: true, sku: true, product: { select: { name: true, baseUnit: true, unitsPerCarton: true } } },
+      orderBy: [{ product: { name: 'asc' } }, { sku: 'asc' }],
+    });
+    return variants.map(({ id, sku, product }) => ({
+      variantId: id,
+      sku,
+      name: product.name,
+      baseUnit: product.baseUnit,
+      unitsPerCarton: product.unitsPerCarton ?? 1,
+    }));
+  }
+
   async createTransfer(dto: CreateTransferDto, actor: TransferActor, idempotencyKey: string | undefined) {
-    if (actor.role !== Role.INVENTORY) this.assertManager(actor, 'transfers.request');
+    if (!can(actor, 'transfers.request', actor.role === Role.INVENTORY || MANAGER_ROLES.includes(actor.role as Role))) {
+      throw new ForbiddenException('Transfer request access has not been assigned');
+    }
     this.assertCanViewTransfer(actor, dto.sourceLocationId, dto.destLocationId);
     const linesByVariant = this.uniqueByVariant(dto.lines, 'transfer line');
     return this.runIdempotentMutation(idempotencyKey, 'POST', '/transfers', actor, dto, async (tx) => {
@@ -406,7 +427,7 @@ export class TransfersService {
           requestedQtyBase,
           cartonRequired,
           unitsPerCarton: variant.product.unitsPerCarton,
-            baseUnitSnapshot: variant.product.baseUnit,
+          baseUnitSnapshot: variant.product.baseUnit,
         };
       });
       return tx.transfer.create({
@@ -416,6 +437,7 @@ export class TransfersService {
           destLocationId: destination.id,
           requestedByUserId: actor.userId,
           notes: dto.notes?.trim() || null,
+          status: dto.submitForApproval ? TransferStatus.PENDING_APPROVAL : TransferStatus.DRAFT,
           lines: { create: lines.map((line) => ({
             variant: { connect: { id: line.variantId } },
             requestedQtyBase: line.requestedQtyBase,
@@ -430,9 +452,9 @@ export class TransfersService {
   }
 
   async findTransfers(actor: TransferActor) {
+    this.assertTransferAccess(actor);
     const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role) &&
       !actor.permissionOverrides?.['transfers.request'] && !actor.permissionOverrides?.['transfers.approve'] && !actor.permissionOverrides?.['transfers.dispatch'];
-    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertTransferAccess(actor);
     const where: Prisma.TransferWhereInput = storeReceiver
       ? {
         destLocationId: { in: actor.locationIds },
@@ -447,9 +469,9 @@ export class TransfersService {
   }
 
   async findTransfer(id: string, actor: TransferActor) {
+    this.assertTransferAccess(actor);
     const storeReceiver = STORE_RECEIPT_ROLES.includes(actor.role as Role) &&
       !actor.permissionOverrides?.['transfers.request'] && !actor.permissionOverrides?.['transfers.approve'] && !actor.permissionOverrides?.['transfers.dispatch'];
-    if (!storeReceiver && actor.role !== Role.INVENTORY) this.assertTransferAccess(actor);
     const transfer = await this.prisma.transfer.findUnique({ where: { id }, include: transferInclude });
     if (!transfer) throw new NotFoundException('Transfer not found');
     if (storeReceiver) {
@@ -1015,9 +1037,11 @@ export class TransfersService {
     return { message: 'Replenishment request already generated', data: request, replayed: true };
   }
 
-  private assertTransferAccess(actor: TransferActor): void {
-    if (!(['transfers.request', 'transfers.approve', 'transfers.dispatch', 'transfers.receive'] as const)
-      .some((permission) => can(actor, permission, MANAGER_ROLES.includes(actor.role as Role)))) {
+  private assertTransferAccess(actor: TransferActor, includeReceiving = true): void {
+    const manager = MANAGER_ROLES.includes(actor.role as Role);
+    const canReceive = includeReceiving && can(actor, 'transfers.receive', manager || STORE_RECEIPT_ROLES.includes(actor.role as Role));
+    if (!canReceive && !can(actor, 'transfers.request', manager || actor.role === Role.INVENTORY) &&
+      !can(actor, 'transfers.approve', manager) && !can(actor, 'transfers.dispatch', manager)) {
       throw new ForbiddenException('Transfer access has not been assigned');
     }
   }
