@@ -35,6 +35,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData>(emptyData);
   const [setup, setSetup] = useState<SetupCounts | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mixedCurrencies, setMixedCurrencies] = useState(false);
   const [retry, setRetry] = useState(0);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -52,17 +53,20 @@ export default function DashboardPage() {
     const token = session.accessToken;
     const superAdmin = session.user.role === 'SUPER_ADMIN';
     setLoading(true);
+    setMixedCurrencies(false);
     setSetup(null);
     setData(emptyData);
 
     async function load() {
       const [companies, locations, users, products] = await Promise.all([
         superAdmin ? read<unknown[]>('/companies', token, signal) : Promise.resolve(null),
-        read<Array<{ type: string }>>('/locations?isActive=true', token, signal),
+        read<Array<{ type: string; company?: { currency: string } }>>('/locations?isActive=true', token, signal),
         read<Array<{ role: string }>>('/users?isActive=true', token, signal),
         read<unknown[]>('/products?isActive=true', token, signal),
       ]);
       if (signal.aborted) return;
+      const mixed = new Set(locations?.map((location) => location.company?.currency).filter(Boolean)).size > 1;
+      setMixedCurrencies(mixed);
       setSetup({
         companies: count(companies), locations: count(locations), products: count(products),
         hubs: count(locations?.filter((item) => ['MAIN_WAREHOUSE', 'CENTRAL_WAREHOUSE'].includes(item.type)) ?? null),
@@ -70,7 +74,7 @@ export default function DashboardPage() {
         users: count(users?.filter((item) => item.role !== 'SUPER_ADMIN') ?? null),
       });
       const [sales, stock, lowStock, transfers] = await Promise.all([
-        read<SalesSummary>('/reports/sales-summary', token, signal),
+        mixed ? Promise.resolve(null) : read<SalesSummary>('/reports/sales-summary', token, signal),
         read<Stock>('/reports/stock', token, signal),
         read<LowStock>('/reports/low-stock', token, signal),
         read<Transfer[]>('/transfers', token, signal),
@@ -123,7 +127,7 @@ export default function DashboardPage() {
     { label: 'Review permissions', href: '/admin/sales-permissions', value: undefined, review: true },
   ];
   const openSetup = setupSteps.filter((step) => !step.review && step.value === 0).length;
-  const unavailable = Object.values(data).some((result) => result === null) || (setup !== null && [setup.locations, setup.products, setup.users, ...(role === 'SUPER_ADMIN' ? [setup.companies] : [])].includes(null));
+  const unavailable = (!mixedCurrencies && data.sales === null) || [data.stock, data.lowStock, data.transfers].includes(null) || (setup !== null && [setup.locations, setup.products, setup.users, ...(role === 'SUPER_ADMIN' ? [setup.companies] : [])].includes(null));
   const cards = [
     { label: 'Net sales · last 30 days', icon: Banknote, value: totals ? formatMoney(asNumber(totals.netSales)) : '—', detail: 'After refunds in your authorized scope', href: '/reports' },
     { label: 'Completed invoices', icon: ReceiptText, value: totals?.completedInvoices ?? '—', detail: `${totals ? totals.cancelledInvoices : '—'} cancelled in the same period`, href: '/reports' },
@@ -138,6 +142,7 @@ export default function DashboardPage() {
     </header>
 
     {unavailable && <div className={styles.error} role="alert"><span>Some dashboard data is unavailable. Figures from connected sections are shown below.</span><button type="button" onClick={() => setRetry((attempt) => attempt + 1)}>Retry</button></div>}
+    {mixedCurrencies && <div className={styles.panelMessage}><Link href="/reports?tab=sales">Choose a location in Sales reports to view totals in its currency.</Link></div>}
 
     <div className={styles.adminOverviewLead}>
       {openSetup > 0 && <section className={styles.deskPanel} aria-labelledby="setup-title">

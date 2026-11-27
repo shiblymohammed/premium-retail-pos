@@ -10,6 +10,8 @@ export interface NavGroup {
   links: NavLink[];
 }
 
+export const ATTENDANCE_MANAGER_ROLES = ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER', 'CENTRAL_MANAGER', 'SUB_WAREHOUSE_MANAGER'];
+
 export const ALL_NAV_GROUPS: NavGroup[] = [
   {
     title: 'Home',
@@ -85,7 +87,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'Attendance',
         href: '/attendance/manage',
         icon: 'oversight',
-        roles: ['SUPER_ADMIN', 'ADMIN', 'STORE_MANAGER'],
+        roles: ATTENDANCE_MANAGER_ROLES,
       },
       {
         label: 'My Attendance',

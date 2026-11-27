@@ -83,7 +83,7 @@ export class ReportsService {
   }
 
   async salesSummary(query: ReportQuery, actor: RequestUser) {
-    const scope = await this.resolveScope(query, actor);
+    const scope = await this.resolveScope(query, actor, true);
     const from = utcTimestamp(scope.from);
     const cutoff = utcTimestamp(scope.to);
     const where = { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } };
@@ -156,7 +156,7 @@ export class ReportsService {
   }
 
   async salesDetails(query: ReportQuery, actor: RequestUser, page: number, pageSize: number) {
-    const scope = await this.resolveScope(query, actor);
+    const scope = await this.resolveScope(query, actor, true);
     const where: Prisma.InvoiceWhereInput = { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } };
     const [total, rows] = await Promise.all([
       this.prisma.invoice.count({ where }),
@@ -175,7 +175,7 @@ export class ReportsService {
   }
 
   async exportInvoices(query: ReportQuery, actor: RequestUser) {
-    const scope = await this.resolveScope(query, actor);
+    const scope = await this.resolveScope(query, actor, true);
     const limit = 10000;
     const rows = await this.prisma.invoice.findMany({
       where: { locationId: { in: scope.locationIds }, createdAt: { gte: scope.from, lt: scope.to } },
@@ -196,7 +196,7 @@ export class ReportsService {
   }
 
   async productPerformance(query: ReportQuery, actor: RequestUser) {
-    const { locationIds, from, to } = await this.resolveScope(query, actor);
+    const { locationIds, from, to } = await this.resolveScope(query, actor, true);
     const start = utcTimestamp(from);
     const cutoff = utcTimestamp(to);
     return this.prisma.$queryRaw<Array<{
@@ -374,7 +374,7 @@ export class ReportsService {
   }
 
   async cancellations(query: ReportQuery, actor: RequestUser) {
-    const scope = await this.resolveScope(query, actor);
+    const scope = await this.resolveScope(query, actor, true);
     return this.prisma.invoice.findMany({ where: { locationId: { in: scope.locationIds }, status: 'CANCELLED', cancelledAt: { gte: scope.from, lt: scope.to } }, include: { location: { select: { name: true } }, lines: { include: { variant: { select: { sku: true, name: true } } } }, refunds: true }, orderBy: { cancelledAt: 'desc' }, take: 5000 });
   }
 
@@ -504,7 +504,7 @@ export class ReportsService {
     if (!result.count) throw new NotFoundException('Notification not found');
   }
 
-  private async resolveScope(query: ReportQuery, actor: RequestUser): Promise<DateScope> {
+  private async resolveScope(query: ReportQuery, actor: RequestUser, singleCurrency = false): Promise<DateScope> {
     const now = new Date();
     const to = this.parseDate(query.to, now, 'to');
     const from = this.parseDate(query.from, new Date(to.getTime() - 30 * 86400000), 'from');
@@ -521,6 +521,13 @@ export class ReportsService {
       select: { id: true },
     })).map((location) => location.id);
     if (locationIds.length === 0) throw new ForbiddenException('No authorized location is available for reporting');
+    if (singleCurrency && locationIds.length > 1) {
+      const currencies = await this.prisma.company.findMany({
+        where: { locations: { some: { id: { in: locationIds } } } },
+        select: { currency: true }, distinct: ['currency'], take: 2,
+      });
+      if (currencies.length > 1) throw new BadRequestException('Choose a location to report sales in its currency.');
+    }
     return { locationIds, from, to };
   }
 

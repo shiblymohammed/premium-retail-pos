@@ -3,7 +3,7 @@
 import React, { FormEvent, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
 import { saveDevicePin } from '@/lib/device-lock';
-import { UserPreferences } from './types';
+import { quickCashAmounts, UserPreferences } from './types';
 import { ChoiceList, Icon, NumberField, ToggleRow } from './setting-controls';
 import styles from './settings.module.css';
 
@@ -60,6 +60,9 @@ const CARRIERS = [
 const labelOf = <T,>(list: { value: T; label: string }[], v: T) => list.find((o) => o.value === v)?.label ?? String(v);
 const short = (s: string, n = 34) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
+const cashCurrency = (prefs: UserPreferences) => prefs.currencySymbol.split(' ')[0];
+const cashLabel = (currency: string, amount: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+
 // ---------- Groups shown on the page, by role ----------
 export function getSettingGroups(role: string): SettingGroup[] {
   const isCashier = role === 'CASHIER';
@@ -97,7 +100,7 @@ export function getSettingGroups(role: string): SettingGroup[] {
       items: [
         { id: 'printer', icon: 'printer', title: 'Receipt printer & cash drawer', description: 'Paper width, auto-print and drawer opening', summary: (p) => `${p.printerWidth} · Auto-print ${onOff(p.autoPrintReceipt).toLowerCase()}` },
         { id: 'scanner', icon: 'scan', title: 'Scanner & receipt logo', description: 'Scanner type and what happens when you scan an item twice', summary: (p) => `${p.scannerMode === 'hardware' ? 'Handheld scanner' : 'Camera'} · ${p.incrementOnRescan ? 'Rescan adds +1' : 'Rescan adds a line'}` },
-        { id: 'fastcash', icon: 'grid', title: 'Quick cash buttons', description: 'The note amounts shown when a customer pays in cash', summary: (p) => p.fastCashButtons.map((v) => `₹${v}`).join(' · ') },
+        { id: 'fastcash', icon: 'grid', title: 'Quick cash buttons', description: 'Cash shortcuts on this device for the selected currency', summary: (p) => quickCashAmounts(cashCurrency(p), p).map((value) => cashLabel(cashCurrency(p), value)).join(' · ') },
       ],
     });
   }
@@ -128,9 +131,8 @@ export function getSettingGroups(role: string): SettingGroup[] {
   // Admin: company-wide rules and the admin pages
   if (isAdmin) {
     groups.push({
-      id: 'company', title: 'Company rules', description: 'Rules that apply to every store and user.',
+      id: 'company', title: 'Company administration', description: 'Manage company settings, locations and user access.',
       items: [
-        { id: 'governance', icon: 'shield', title: 'Security & audit rules', description: 'Store binding, audit lock, reasons for voids and password expiry', summary: (p) => `${countOn(p.enforceDualAxisBinding, p.strictAuditFreezeCheck, p.requireCancellationReason)} · ${p.passwordExpiryDays ? `${p.passwordExpiryDays}-day passwords` : 'No expiry'}` },
         { id: 'users', icon: 'user', title: 'User directory', description: 'Add people and set their roles', summary: () => 'Open', href: '/admin/users' },
         { id: 'company', icon: 'store', title: 'Company & locations', description: 'Company details, stores and warehouses', summary: () => 'Open', href: '/admin/company' },
         ...(role === 'SUPER_ADMIN' ? [{ id: 'discounts', icon: 'receipt', title: 'Discount limits', description: 'Highest discount each role can give', summary: () => 'Open', href: '/admin/discount-limits' } as SettingItem] : []),
@@ -215,8 +217,10 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
           </div>
         </>
       );
-    case 'fastcash':
-      return <FastCashPanel values={prefs.fastCashButtons} onChange={(v) => onUpdate('fastCashButtons', v)} />;
+    case 'fastcash': {
+      const currency = cashCurrency(prefs);
+      return <FastCashPanel currency={currency} values={quickCashAmounts(currency, prefs)} onChange={(values) => onUpdate('fastCashByCurrency', { ...prefs.fastCashByCurrency, [currency]: values })} />;
+    }
     case 'attendance':
       return (
         <>
@@ -288,20 +292,6 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
         <div className={styles.section}>
           <ToggleRow title="Quarantine damaged goods" detail="Damaged units are set aside straight away so they can't be sold or sent." checked={prefs.damageAutoQuarantine} onChange={(v) => onUpdate('damageAutoQuarantine', v)} />
           <ToggleRow title="Confirm the truck seal" detail="The driver's seal number must be recorded before a dispatch leaves." checked={prefs.requireDriverSealConfirmation} onChange={(v) => onUpdate('requireDriverSealConfirmation', v)} />
-        </div>
-      );
-
-    case 'governance':
-      return (
-        <div className={styles.section}>
-          <ToggleRow title="Keep users at their assigned store" detail="People can only sign in and sell at the location they are assigned to." checked={prefs.enforceDualAxisBinding} onChange={(v) => onUpdate('enforceDualAxisBinding', v)} />
-          <ToggleRow title="Pause sales during a stock count" detail="Checkout is locked at a store while its stock audit is running." checked={prefs.strictAuditFreezeCheck} onChange={(v) => onUpdate('strictAuditFreezeCheck', v)} />
-          <ToggleRow title="Ask for a reason on voids and refunds" detail="A supervisor must type a reason, and it is saved in the audit log." checked={prefs.requireCancellationReason} onChange={(v) => onUpdate('requireCancellationReason', v)} />
-          <ChoiceList
-            name="expiry" label="Ask users to change their password every"
-            options={[{ value: 30, label: '30 days' }, { value: 60, label: '60 days' }, { value: 90, label: '90 days', detail: 'Standard' }, { value: 180, label: '180 days' }, { value: 0, label: 'Never' }]}
-            value={prefs.passwordExpiryDays} onChange={(v) => onUpdate('passwordExpiryDays', v)} columns={2}
-          />
         </div>
       );
 
@@ -401,8 +391,9 @@ function PinPanel({ onSaved }: { onSaved: (msg: string) => void }) {
 }
 
 // ---------- Quick cash buttons ----------
-const NOTE_PRESETS = [10, 20, 50, 100, 200, 500, 2000];
-function FastCashPanel({ values, onChange }: { values: number[]; onChange: (v: number[]) => void }) {
+function FastCashPanel({ currency, values, onChange }: { currency: string; values: number[]; onChange: (v: number[]) => void }) {
+  const notes = currency === 'INR' ? [10, 20, 50, 100, 200, 500, 2000] : [5, 10, 20, 50, 100, 200];
+  const options = [...new Set([...notes, ...values])].sort((a, b) => a - b);
   const toggle = (note: number) => {
     const has = values.includes(note);
     if (has && values.length <= 1) return; // keep at least one button
@@ -415,9 +406,9 @@ function FastCashPanel({ values, onChange }: { values: number[]; onChange: (v: n
         <p className={styles.sectionLabel}>Notes to show</p>
         <p className={styles.sectionHint}>Pick 1 to 6 amounts. Tapping one fills in the cash received in one go.</p>
         <div className={styles.noteGrid}>
-          {NOTE_PRESETS.map((n) => (
+          {options.map((n) => (
             <button key={n} type="button" aria-pressed={values.includes(n)} className={`${styles.note} ${values.includes(n) ? styles.noteOn : ''}`} onClick={() => toggle(n)}>
-              ₹{n.toLocaleString('en-IN')}
+              {cashLabel(currency, n)}
             </button>
           ))}
         </div>
@@ -426,7 +417,7 @@ function FastCashPanel({ values, onChange }: { values: number[]; onChange: (v: n
         <p className={styles.sectionLabel}>How it looks at checkout</p>
         <div className={styles.cashPreview}>
           <small>Cash received</small>
-          <div>{values.map((v) => <span key={v}>₹{v.toLocaleString('en-IN')}</span>)}</div>
+          <div>{values.map((v) => <span key={v}>{cashLabel(currency, v)}</span>)}</div>
         </div>
       </div>
     </>

@@ -486,8 +486,10 @@ export class AttendanceService {
   }
 
   private assertManager(actor: RequestUser, key: PermissionKey = 'staff.view') {
-    if (!can(actor, key, MANAGERS.includes(actor.role as Role)) &&
-      (key !== 'staff.view' || actor.permissionOverrides?.['attendance.manage'] !== true)) throw new ForbiddenException('Manager access is required for attendance management');
+    const manager = MANAGERS.includes(actor.role as Role);
+    if (!can(actor, key, manager) && (key !== 'staff.view' || !can(actor, 'attendance.manage', manager))) {
+      throw new ForbiddenException('Manager access is required for attendance management');
+    }
   }
 
   private assertLocationScope(locationId: string, actor: RequestUser) {

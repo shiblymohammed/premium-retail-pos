@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
-import { LOCATION_KEY } from '@/components/layout/nav-data';
+import { ATTENDANCE_MANAGER_ROLES, LOCATION_KEY } from '@/components/layout/nav-data';
 
 const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -213,6 +213,8 @@ export default function AttendanceManagerPage() {
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
   const { can } = useAccess();
+  const [role, setRole] = useState('');
+  const canManage = can('attendance.manage', ATTENDANCE_MANAGER_ROLES.includes(role));
   const [targetEndTime, setTargetEndTime] = useState('');
   const [targetStartTime, setTargetStartTime] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -226,6 +228,7 @@ export default function AttendanceManagerPage() {
 
   useEffect(() => {
     const controller = new AbortController();
+    setRole(getStoredSession()?.user.role ?? '');
     setLoadingLocations(true);
     void attendanceRequest<Location[]>('/locations?isActive=true', controller.signal).then((available) => {
       setLocations(available);
@@ -499,7 +502,7 @@ export default function AttendanceManagerPage() {
             disabled={saving}
             onChange={(id) => setLocationId(id)}
           />
-          <button type="button" className={styles.ghostButton} onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}><Icon name="settings" size={15} /> Shift settings</button>
+          {canManage && <button type="button" className={styles.ghostButton} onClick={() => setSettingsOpen((o) => !o)} aria-expanded={settingsOpen}><Icon name="settings" size={15} /> Shift settings</button>}
           <button type="button" className={styles.primaryButton} onClick={exportReport} disabled={!report || day.location.id !== locationId}><Icon name="download" size={15} /> Export report</button>
         </div>
       </header>
@@ -537,7 +540,7 @@ export default function AttendanceManagerPage() {
       </section>
 
       {/* ---------- Shift settings (collapsible) ---------- */}
-      {settingsOpen && can('attendance.manage', true) && (
+      {settingsOpen && canManage && (
         <section className={styles.settings}>
           <div className={styles.settingBlock}>
             <h3><Icon name="clock" size={15} /> Shift hours</h3>
@@ -604,7 +607,7 @@ export default function AttendanceManagerPage() {
 
                 <span className={styles.rowActions}>
                   <button type="button" className={styles.viewButton} onClick={() => setViewing(emp)}><Icon name="eye" size={14} /> View</button>
-                  {can('attendance.manage', true) && live && live.clockInAt && (
+                  {canManage && live && live.clockInAt && (
                     <span className={styles.menuWrap} data-row-menu>
                       <button type="button" className={styles.moreButton} onClick={() => setMenuFor(menuFor === emp.id ? null : emp.id)} aria-label={`Correct punches for ${emp.name}`} aria-expanded={menuFor === emp.id}><Icon name="edit" size={14} /></button>
                       {menuFor === emp.id && (

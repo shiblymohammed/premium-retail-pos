@@ -45,8 +45,6 @@ export class AttendanceController {
 
   @Get('locations/:locationId/target-time')
   @UseGuards(LocationScopeGuard)
-  @Roles(...MANAGERS)
-  @Permission('staff.view', 'attendance.manage')
   async targetTime(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.attendance.getLocationTargetStartTime(locationId, actor) };
   }
@@ -61,8 +59,6 @@ export class AttendanceController {
 
   @Get('locations/:locationId/today')
   @UseGuards(LocationScopeGuard)
-  @Roles(...MANAGERS)
-  @Permission('staff.view', 'attendance.manage')
   async locationToday(@Param('locationId') locationId: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.attendance.getLocationAttendanceToday(locationId, actor) };
   }
@@ -76,8 +72,6 @@ export class AttendanceController {
 
   @Get('locations/:locationId/reports')
   @UseGuards(LocationScopeGuard)
-  @Roles(...MANAGERS)
-  @Permission('staff.view', 'attendance.manage')
   async report(@Param('locationId') locationId: string, @Query('period') period: string, @Query('date') date: string | undefined, @CurrentUser() actor: RequestUser) {
     return { data: await this.attendance.getReport(locationId, period, date, actor) };
   }

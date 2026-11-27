@@ -287,8 +287,6 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
   };
 
   const matchingLink = findMatchingLink();
-  // Loans & advances were deferred by the client; keep the old route hidden as well as unlinked.
-  const isDeferredRoute = pathname === '/attendance/loans' || pathname.startsWith('/attendance/loans/');
   const hasDefaultRole = (roles: string[]) => roles.includes(rawRole) || roles.includes(userRole) || isSuperUser;
   function routeAccess(href: string, roleDefault: boolean) {
     if (isSuperUser) return true;
@@ -305,7 +303,7 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
       }
       case '/trade': return canOverride('purchasing.orders', roleDefault) || canOverride('customers.credit', ['ADMIN', 'STORE_MANAGER'].includes(rawRole))
         || canOverride('purchasing.payments', rawRole === 'ADMIN');
-      case '/attendance/manage': return canOverride('staff.view', roleDefault) || overrides['attendance.manage'] === true;
+      case '/attendance/manage': return canOverride('staff.view', roleDefault) || canOverride('attendance.manage', roleDefault);
       case '/staff-records': return canOverride('staff.view', roleDefault) || canOverride('staff.manage', roleDefault)
         || canOverride('payroll.view', canOverride('payroll.manage', rawRole === 'ADMIN') || rawRole === 'ADMIN');
       case '/audits': return canOverride('stock.auditManagement', roleDefault) || (auditCapabilityLoaded && canCountStockAudits);
@@ -323,9 +321,9 @@ export function AppFrameLayout({ children }: AppFrameLayoutProps) {
     (matchingLink?.href === '/audits' && requiresStockCountPermission && !auditCapabilityLoaded) ||
     (matchingLink?.href === '/sales-controls' && !saleCapabilityLoaded)
   ));
-  const isAuthorized = !isDeferredRoute && (session
+  const isAuthorized = session
     ? matchingLink ? isFeatureRouteAuthorized : true
-    : sessionLoaded && (pathname === '/operations' || pathname === '/'));
+    : sessionLoaded && (pathname === '/operations' || pathname === '/');
 
   // Filter links visible strictly to current role
   const visibleGroups = sessionLoaded && session

@@ -62,6 +62,21 @@ describe('ReportsService movement quantities', () => {
 });
 
 describe('ReportsService financial summaries', () => {
+  it('rejects consolidated monetary reports across different currencies before summing invoices', async () => {
+    const prisma = {
+      location: { findMany: jest.fn().mockResolvedValue([{ id: 'usd-store' }, { id: 'inr-store' }]) },
+      company: { findMany: jest.fn().mockResolvedValue([{ currency: 'USD' }, { currency: 'INR' }]) },
+      invoice: { count: jest.fn(), findMany: jest.fn() },
+    };
+    const service = new ReportsService(prisma as any, {} as any);
+    const owner = { userId: 'admin-1', email: 'admin@example.test', role: Role.SUPER_ADMIN, locationIds: [] };
+
+    await expect(service.salesSummary({}, owner)).rejects.toThrow('Choose a location to report sales in its currency.');
+    await expect(service.exportInvoices({}, owner)).rejects.toThrow('Choose a location to report sales in its currency.');
+    expect(prisma.invoice.count).not.toHaveBeenCalled();
+    expect(prisma.invoice.findMany).not.toHaveBeenCalled();
+  });
+
   it('exports the original charge, refunds and remaining net with the return status', async () => {
     const total = new Prisma.Decimal('57.20');
     const base = { netTotal: total, cancelledAt: null, lines: [{ quantityBaseUnits: 23 }] };

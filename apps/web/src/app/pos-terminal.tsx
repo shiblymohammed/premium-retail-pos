@@ -32,6 +32,7 @@ import {
 import { Feedback } from '@/components/ui/feedback';
 import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearStoredSession, getStoredSession } from '@/lib/auth';
+import { quickCashAmounts, SETTINGS_STORAGE_PREFIX, type UserPreferences } from '@/components/settings/types';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -425,6 +426,7 @@ export default function PosTerminal() {
   const auditBlocksCheckout = Boolean(terminal?.location.isAuditLocked && !saleRetryPending);
   const checkoutDisabled = auditBlocksCheckout || busy || !!removingVariantId || drawerBlocksCheckout || cart.length === 0 || cart.some((line) => !baseQuantity(line))
     || stockBlocksCheckout || (!saleRetryPending && saleTotals.percent > discountLimit + 0.000001);
+  const [cashPreferences, setCashPreferences] = useState<Partial<UserPreferences>>({});
   const cashAmount = Number(cashTendered);
   const validateCashTender = paymentMethod === 'CASH' && !saleRetryPending;
   let cashTenderError = '';
@@ -814,6 +816,19 @@ export default function PosTerminal() {
     setTerminal(contextPayload.data as TerminalContext);
     void refreshOfflineCatalog(accessToken, contextPayload.data.location.id).catch(() => undefined);
   }
+
+  useEffect(() => {
+    if (!checkoutRole) return;
+    const key = SETTINGS_STORAGE_PREFIX + checkoutRole;
+    const update = () => {
+      try { setCashPreferences(JSON.parse(window.localStorage.getItem(key) ?? '{}') ?? {}); }
+      catch { setCashPreferences({}); }
+    };
+    const sync = (event: StorageEvent) => { if (event.key === key || event.key === null) update(); };
+    update();
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, [checkoutRole]);
 
   useEffect(() => {
     const existing = getStoredSession();
@@ -1630,7 +1645,7 @@ export default function PosTerminal() {
             {cashTenderError && <Feedback tone="error"><span id="checkout-cash-error">{cashTenderError}</span></Feedback>}
             <div className="cash-chips" aria-label="Quick cash amounts">
               <button disabled={saleRetryPending} onClick={() => setCashTendered(saleTotals.net.toFixed(2))}>Exact</button>
-              {(terminal.location.currency === 'INR' ? [100, 200, 500, 2000] : [5, 10, 20, 50]).map((amount) => (
+              {quickCashAmounts(terminal.location.currency, cashPreferences).map((amount) => (
                 <button key={amount} disabled={saleRetryPending} onClick={() => setCashTendered(String(amount))}>{formatMoney(amount)}</button>
               ))}
             </div>

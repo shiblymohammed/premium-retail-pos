@@ -16,6 +16,7 @@ export interface UserPreferences {
   printStoreLogo: boolean;
   cashDrawerAutoKick: boolean;
   fastCashButtons: number[];
+  fastCashByCurrency: Record<string, number[]>;
   scannerMode: 'hardware' | 'camera';
   incrementOnRescan: boolean;
 
@@ -38,12 +39,6 @@ export interface UserPreferences {
   // Staff Preferences
   shiftReminderAdvanceMinutes: number;
 
-  // Admin Enterprise Policies
-  passwordExpiryDays: number;
-  enforceDualAxisBinding: boolean;
-  strictAuditFreezeCheck: boolean;
-  requireCancellationReason: boolean;
-
   // Notifications
   notifyLowStockEmail: boolean;
   notifyShipmentDiscrepancies: boolean;
@@ -65,6 +60,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   printStoreLogo: true,
   cashDrawerAutoKick: true,
   fastCashButtons: [100, 200, 500, 2000],
+  fastCashByCurrency: {},
   scannerMode: 'hardware',
   incrementOnRescan: true,
 
@@ -84,11 +80,6 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
 
   shiftReminderAdvanceMinutes: 30,
 
-  passwordExpiryDays: 90,
-  enforceDualAxisBinding: true,
-  strictAuditFreezeCheck: true,
-  requireCancellationReason: true,
-
   notifyLowStockEmail: true,
   notifyShipmentDiscrepancies: true,
   notifyShiftStart: true,
@@ -96,3 +87,10 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
 };
 
 export const SETTINGS_STORAGE_PREFIX = 'premium-retail-settings-';
+
+export function quickCashAmounts(currency: string, prefs: Partial<UserPreferences> = {}) {
+  const configured = prefs.fastCashByCurrency?.[currency] ?? (currency === 'INR' ? prefs.fastCashButtons : undefined);
+  const amounts = Array.isArray(configured) ? [...new Set(configured.filter((amount) => Number.isSafeInteger(amount) && amount > 0))] : [];
+  return amounts.length ? amounts.sort((a, b) => a - b).slice(0, 6)
+    : currency === 'INR' ? DEFAULT_PREFERENCES.fastCashButtons : [5, 10, 20, 50];
+}

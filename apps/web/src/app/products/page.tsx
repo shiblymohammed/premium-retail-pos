@@ -2,6 +2,7 @@
 
 import { AdminActionMenu } from '@/components/admin/admin-action-menu';
 import { useAccess } from '@/lib/permissions';
+import { downloadCsv } from '@/lib/report-download';
 import { CameraScanner } from '@/components/ui/camera-scanner';
 import { Feedback } from '@/components/ui/feedback';
 import {
@@ -212,6 +213,7 @@ export default function ProductsPage() {
     setOperator({ token, role: session?.user?.role ?? '' });
     const headers = { Authorization: `Bearer ${token}` };
     const currencyController = new AbortController();
+    setLoading(true);
     setCurrency(null);
     Promise.all([
       fetch(`${API_BASE}/products?isActive=true`, { headers, cache: 'no-store' }),
@@ -231,7 +233,7 @@ export default function ProductsPage() {
         : availableLocations.filter((location: { name: string }) => location.name === selectedLocation);
       const companyIds = [...new Set<string>(selectedLocations.flatMap((location: { companyId?: string }) => location.companyId ? [location.companyId] : []))];
       if (companyIds.length === 1 && !currencyController.signal.aborted) {
-        void fetch(`${API_BASE}/companies/${encodeURIComponent(companyIds[0])}`, { headers, cache: 'no-store', signal: currencyController.signal })
+        await fetch(`${API_BASE}/companies/${encodeURIComponent(companyIds[0])}`, { headers, cache: 'no-store', signal: currencyController.signal })
           .then(async (response) => response.ok ? response.json() : null)
           .then((payload) => { if (!currencyController.signal.aborted) setCurrency(payload?.data?.currency ?? null); })
           .catch(() => { /* Prices can still display without a currency symbol. */ });
@@ -282,7 +284,12 @@ export default function ProductsPage() {
         })),
       );
       if (!currencyController.signal.aborted) setProducts(rows);
-    }).catch((error) => showToast(error instanceof Error ? error.message : 'Could not load product data.', 'info')).finally(() => setLoading(false));
+    }).catch((error) => {
+      if (!currencyController.signal.aborted) {
+        setProducts([]);
+        showToast(error instanceof Error ? error.message : 'Could not load product data.', 'info');
+      }
+    }).finally(() => { if (!currencyController.signal.aborted) setLoading(false); });
     return () => currencyController.abort();
   }, [reloadKey, selectedLocation]);
 
@@ -419,10 +426,10 @@ export default function ProductsPage() {
 
   // Export to CSV
   const handleExportCSV = () => {
-    const headers = ['Product Name', 'Variant', 'SKU', 'Barcode', 'Category', 'Location', 'Price (INR)', 'Total Units', 'Cartons', 'Loose', 'In-Transit', 'Reserved', 'Status'];
+    const headers = ['Product Name', 'Variant', 'SKU', 'Barcode', 'Category', 'Location', currency ? `Price (${currency})` : 'Price', 'Total Units', 'Cartons', 'Loose', 'In-Transit', 'Reserved', 'Status'];
     const rows = filteredProducts.map((p) => [
-      `"${p.name.replace(/"/g, '""')}"`,
-      `"${p.variant.replace(/"/g, '""')}"`,
+      p.name,
+      p.variant,
       p.sku,
       p.barcode,
       p.category,
@@ -433,17 +440,10 @@ export default function ProductsPage() {
       p.availableStock.loose,
       p.inTransit,
       p.reserved,
-      p.status
+      p.status,
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Inventory-Export-${selectedLocation.replace(/\s+/g, '_')}-${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsv(headers, rows, `Inventory-Export-${selectedLocation.replace(/\s+/g, '_')}-${new Date().toISOString().split('T')[0]}.csv`);
     showToast(`Inventory catalogue exported for ${filteredProducts.length} items.`, 'success');
   };
 
@@ -649,7 +649,7 @@ export default function ProductsPage() {
               )}
             </div>
 
-            <button type="button" onClick={handleExportCSV} className={styles.ghostButton} title="Download CSV inventory export">
+            <button type="button" onClick={handleExportCSV} disabled={loading} className={styles.ghostButton} title="Download CSV inventory export">
               <Icon name="upload" size={15} /> Export
             </button>
             {canImport && <button type="button" className={styles.ghostButton} disabled={!products.length || !stockLocations.length} onClick={() => setIntakeMode('opening')}>Import opening stock</button>}
