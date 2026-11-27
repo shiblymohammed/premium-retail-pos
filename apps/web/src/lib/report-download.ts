@@ -1,53 +1,109 @@
-function pdfSafe(value: string) {
-  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/₹/g, 'INR ').replace(/×/g, 'x').replace(/−/g, '-').replace(/[→➜]/g, '->').replace(/[•·]/g, '-').replace(/[^\x20-\x7E]/g, '?');
+const FONT_SIZE = 8;
+const LEADING = 11;
+const TEXT_WIDTH = 770;
+const FIRST_BASELINE = 555;
+const LINES_PER_PAGE = 46;
+
+function pdfLiteral(value: string) {
+  return value.replace(/[\\()]/g, '\\$&').replace(/[\xA0-\xFF]/g, (character) =>
+    '\\' + character.charCodeAt(0).toString(8).padStart(3, '0'));
+}
+
+function utf16Hex(value: string) {
+  let encoded = 'FEFF';
+  for (let index = 0; index < value.length; index++) {
+    encoded += value.charCodeAt(index).toString(16).padStart(4, '0');
+  }
+  return encoded;
 }
 
 export function downloadPdf(title: string, description: string, headers: string[], rows: unknown[][], filename: string) {
-  const wrap = (value: string, width: number) => {
-    const words = pdfSafe(value).split(/\s+/);
+  const canvas = document.createElement('canvas');
+  const scale = 3;
+  canvas.width = TEXT_WIDTH * scale;
+  canvas.height = LEADING * scale;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('PDF export needs browser canvas support.');
+  context.font = `${FONT_SIZE * scale}px Arial, sans-serif`;
+
+  const wrap = (value: string, indent = '') => {
     const lines: string[] = [];
-    let line = '';
-    for (const word of words) {
-      if (word.length > width) {
+    for (const paragraph of value.split(/\r\n?|\n/)) {
+      let line = '';
+      for (const word of paragraph.trim().split(/\s+/)) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (context.measureText(indent + candidate).width <= canvas.width) {
+          line = candidate;
+          continue;
+        }
         if (line) lines.push(line);
-        for (let offset = 0; offset < word.length; offset += width) lines.push(word.slice(offset, offset + width));
         line = '';
-      } else if (!line) line = word;
-      else if (`${line} ${word}`.length <= width) line += ` ${word}`;
-      else { lines.push(line); line = word; }
+        for (const character of word) {
+          if (line && context.measureText(indent + line + character).width > canvas.width) {
+            lines.push(line);
+            line = '';
+          }
+          line += character;
+        }
+      }
+      lines.push(line);
     }
-    if (line) lines.push(line);
-    return lines.length ? lines : [''];
+    return lines.map((line) => indent + line);
   };
 
-  const lines = [`PREMIUM RETAIL - ${pdfSafe(title)}`, pdfSafe(description), `Period: ${filename.match(/\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}/)?.[0]?.replace('-to-', ' through ') ?? 'Selected filters'}`, `Rows: ${rows.length}`, ''];
+  const period = filename.match(/\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}/)?.[0]?.replace('-to-', ' through ') ?? 'Selected filters';
+  const lines = [...wrap(`PREMIUM RETAIL - ${title}`), ...wrap(description), `Period: ${period}`, `Rows: ${rows.length}`, ''];
   rows.forEach((row, index) => {
     lines.push(`${index + 1}.`);
     row.forEach((value, column) => {
       const label = headers[column] ?? `Field ${column + 1}`;
-      wrap(`${label}: ${String(value ?? '')}`, 115).forEach((line, lineIndex) => lines.push(`${lineIndex ? '   ' : '   '}${line}`));
+      lines.push(...wrap(`${label}: ${String(value ?? '')}`, '   '));
     });
     lines.push('');
   });
 
   const pages: string[][] = [];
-  for (let offset = 0; offset < lines.length; offset += 46) pages.push(lines.slice(offset, offset + 46));
-  if (!pages.length) pages.push([]);
+  for (let offset = 0; offset < lines.length; offset += LINES_PER_PAGE) {
+    pages.push(lines.slice(offset, offset + LINES_PER_PAGE));
+  }
 
   const objects: string[] = [];
   const addObject = (value: string) => { objects.push(value); return objects.length; };
   const catalogId = addObject('');
   const pagesId = addObject('');
-  const fontId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  const fontId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
   const pageIds = pages.map((pageLines, pageIndex) => {
-    const contentLines = [...pageLines, '', `Page ${pageIndex + 1} of ${pages.length}`];
-    const text = `BT\n/F1 8 Tf\n36 555 Td\n11 TL\n${contentLines.map((line) => `(${pdfSafe(line).replace(/[\\()]/g, '\\$&')}) Tj\nT*`).join('\n')}\nET`;
-    const stream = `<< /Length ${text.length} >>\nstream\n${text}\nendstream`;
-    const contentId = addObject(stream);
-    return addObject(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${contentId} 0 R >>`);
+    const images: string[] = [];
+    const commands = [...pageLines, '', `Page ${pageIndex + 1} of ${pages.length}`].map((line, index) => {
+      const baseline = FIRST_BASELINE - index * LEADING;
+      if (/^[\x20-\x7E\xA0-\xFF]*$/.test(line)) {
+        return `BT /F1 ${FONT_SIZE} Tf 36 ${baseline} Td (${pdfLiteral(line)}) Tj ET`;
+      }
+
+      // Let the browser shape scripts outside Helvetica's encoding with its
+      // own font fallback. ActualText keeps the original line in the PDF.
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = '#000';
+      context.fillText(line, 0, (LEADING - 2.5) * scale);
+      const jpeg = atob(canvas.toDataURL('image/jpeg', 0.94).split(',')[1]);
+      const hex = Array.from(jpeg, (character) => character.charCodeAt(0).toString(16).padStart(2, '0')).join('') + '>';
+      const imageId = addObject(`<< /Type /XObject /Subtype /Image /Width ${canvas.width} /Height ${canvas.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter [/ASCIIHexDecode /DCTDecode] /Length ${hex.length} >>\nstream\n${hex}\nendstream`);
+      const name = `Line${index}`;
+      images.push(`/${name} ${imageId} 0 R`);
+      return [
+        `/Span << /ActualText <${utf16Hex(line)}> >> BDC`,
+        `q ${TEXT_WIDTH} 0 0 ${LEADING} 36 ${baseline - 2.5} cm /${name} Do Q`,
+        `q BT /F1 ${FONT_SIZE} Tf 3 Tr 36 ${baseline} Td ( ) Tj ET Q`,
+        'EMC',
+      ].join('\n');
+    });
+    const text = commands.join('\n');
+    const contentId = addObject(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`);
+    return addObject(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 842 595] /Resources << /Font << /F1 ${fontId} 0 R >> /XObject << ${images.join(' ')} >> >> /Contents ${contentId} 0 R >>`);
   });
 
-  objects[catalogId - 1] = `<< /Type /Catalog /Pages ${pagesId} 0 R >>`;
+  objects[catalogId - 1] = '<< /Type /Catalog /Pages ' + pagesId + ' 0 R >>';
   objects[pagesId - 1] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
   let pdfDocument = '%PDF-1.4\n';
   const offsets = [0];
