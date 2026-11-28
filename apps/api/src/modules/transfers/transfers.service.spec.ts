@@ -1,6 +1,49 @@
 import { LocationType, Role, StockState, TransferStatus } from '@prisma/client';
 import { TransfersService } from './transfers.service';
 
+describe('TransfersService approval', () => {
+  it.each([Role.CENTRAL_MANAGER, Role.SUB_WAREHOUSE_MANAGER])(
+    'requires a different approver for a transfer requested by a %s',
+    async (role) => {
+      const requester = { userId: 'requesting-manager', role, locationIds: ['warehouse'] };
+      const transfer = {
+        sourceLocationId: 'warehouse',
+        requestedByUserId: requester.userId,
+        status: TransferStatus.PENDING_APPROVAL,
+        lines: [{ id: 'line-1', variantId: 'variant-1', requestedQtyBase: 10, unitsPerCarton: 10, cartonRequired: true }],
+      };
+      const tx = {
+        $queryRaw: jest.fn().mockResolvedValue([]),
+        idempotencyRecord: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({}),
+        },
+        transfer: {
+          findUnique: jest.fn().mockResolvedValue(transfer),
+          update: jest.fn().mockImplementation(async ({ data }) => ({ ...transfer, ...data })),
+        },
+        transferLine: { update: jest.fn().mockResolvedValue({}) },
+      };
+      const prisma = {
+        $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
+        idempotencyRecord: { findUnique: jest.fn().mockResolvedValue(null) },
+      };
+      const service = new TransfersService(prisma as any, {} as any);
+      const dto = { lines: [{ variantId: 'variant-1', approvedQtyBase: 10 }] };
+
+      await expect(service.approveTransfer('transfer-1', dto, requester, 'requester-approval'))
+        .rejects.toThrow('The requester cannot approve their own transfer');
+      expect(tx.transferLine.update).not.toHaveBeenCalled();
+      expect(tx.transfer.update).not.toHaveBeenCalled();
+
+      const superAdmin = { userId: 'owner', role: Role.SUPER_ADMIN, locationIds: [] };
+      await expect(service.approveTransfer('transfer-1', dto, superAdmin, 'owner-approval'))
+        .resolves.toMatchObject({ status: TransferStatus.APPROVED, approvedByUserId: superAdmin.userId });
+    },
+  );
+});
+
 describe('TransfersService receipt reconciliation and idempotency', () => {
   it('finalizes a dispatched line while another line is pending and replays retries without duplicate movements', async () => {
     const firstLine = {

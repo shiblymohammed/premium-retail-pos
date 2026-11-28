@@ -268,6 +268,7 @@ export default function OperationsPage() {
   const [isCreatingBusy, setIsCreatingBusy] = useState(false);
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('ALL');
   const [locationFilter, setLocationFilter] = useState('ALL'); // selected location ID from the top bar
+  const [transferLocationFilter, setTransferLocationFilter] = useState('ALL');
   const [fromFilter, setFromFilter] = useState('ALL');
   const [toFilter, setToFilter] = useState('ALL');
   const [sortKey, setSortKey] = useState<SortKey>('newest');
@@ -332,7 +333,7 @@ export default function OperationsPage() {
       id: row.id,
       sourceLocationId: row.sourceLocationId,
       destLocationId: row.destLocationId,
-      requestedByUserId: row.requestedByUserId,
+      requestedByUserId: typeof row.requestedByUserId === 'string' ? row.requestedByUserId : '',
       requestedByName: row.requestedBy?.employee ? `${row.requestedBy.employee.firstName} ${row.requestedBy.employee.lastName}` : row.requestedBy?.email,
       transferCode: row.transferNumber,
       sourceLocation: row.sourceLocation?.name || row.sourceLocationId,
@@ -505,10 +506,17 @@ export default function OperationsPage() {
     return () => window.clearTimeout(t);
   }, [notice]);
 
+  const transferScope = apiRole === 'SUPER_ADMIN' ? transferLocationFilter : locationFilter;
   const scoped = useMemo(
-    () => transfers.filter((t) => locationFilter === 'ALL' || t.sourceLocationId === locationFilter || t.destLocationId === locationFilter),
-    [transfers, locationFilter],
+    () => transfers.filter((t) => transferScope === 'ALL' || t.sourceLocationId === transferScope || t.destLocationId === transferScope),
+    [transfers, transferScope],
   );
+
+  const canApproveTransfer = useCallback((transfer: StockTransfer) => (
+    canApproveTransfers && transfer.status === 'PENDING_APPROVAL'
+    && !!apiUserId && !!transfer.requestedByUserId && transfer.requestedByUserId !== apiUserId
+    && canActAt(transfer.sourceLocationId)
+  ), [canApproveTransfers, apiUserId, canActAt]);
 
   const transferActions = useMemo(() => new Map(scoped.map((transfer) => {
     const sourceAccess = canActAt(transfer.sourceLocationId);
@@ -516,8 +524,7 @@ export default function OperationsPage() {
     const transitUnits = unitsInTransit(transfer);
     const waitingUnits = pendingUnits(transfer);
     const canSubmit = canRequestTransfers && transfer.status === 'DRAFT' && (sourceAccess || destinationAccess);
-    const canApprove = canApproveTransfers && transfer.status === 'PENDING_APPROVAL'
-      && transfer.requestedByUserId !== apiUserId && sourceAccess;
+    const canApprove = canApproveTransfer(transfer);
     const awaitingPacking = packingStatuses.includes(transfer.status) && waitingUnits > 0;
     const canDispatch = canDispatchTransfers && sourceAccess && awaitingPacking
       && transfer.items.some((item) => item.approvedQtyBase - item.dispatchedQtyBase >= (item.cartonRequired ? item.unitsPerCarton : 1));
@@ -531,7 +538,7 @@ export default function OperationsPage() {
       paused: transfer.auditLocked && (canDispatch || canReceive),
       needsAction: canSubmit || canApprove || canPackNow || canReceiveNow,
     }] as const;
-  })), [scoped, canActAt, canRequestTransfers, canApproveTransfers, canDispatchTransfers, canReceiveTransfers, apiUserId]);
+  })), [scoped, canActAt, canRequestTransfers, canApproveTransfer, canDispatchTransfers, canReceiveTransfers]);
 
   const filteredTransfers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -681,6 +688,10 @@ export default function OperationsPage() {
 
   async function approveTransfer(t: StockTransfer) {
     setMenuFor(null);
+    if (!canApproveTransfer(t)) {
+      setNotice('This transfer needs approval from another authorized manager.');
+      return;
+    }
     try {
       await mutate(`/transfers/${t.id}/approve`, 'POST', { lines: t.items.map((item) => ({ variantId: item.variantId, approvedQtyBase: item.requestedQtyBase })) });
       setNotice('Transfer approved by the server.');
@@ -981,6 +992,15 @@ export default function OperationsPage() {
             ))}
           </div>
           <div className={styles.tableTools}>
+            {apiRole === 'SUPER_ADMIN' && <PillDropdown<string>
+              value={transferLocationFilter}
+              heading="Transfers involving"
+              ariaLabel="Filter transfers by location"
+              align="left"
+              icon={<Icon name="warehouse" size={14} />}
+              options={[{ value: 'ALL', label: 'All locations' }, ...locations.map((location) => ({ value: location.id, label: location.name }))]}
+              onChange={setTransferLocationFilter}
+            />}
             <label className={styles.search}>
               <Icon name="search" size={15} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search transfers or products…" aria-label="Search transfers" />
@@ -1153,7 +1173,7 @@ export default function OperationsPage() {
             <span><Icon name="truck" size={26} /></span>
             <strong>No transfers found</strong>
             <p>{filterStatus === 'PENDING' ? 'No matching transfers need your action.' : 'Try a different status or location filter.'}</p>
-            <button type="button" className={styles.ghostButton} onClick={() => { setFilterStatus('ALL'); setLocationFilter('ALL'); setFromFilter('ALL'); setToFilter('ALL'); setSearch(''); }}>Clear filters</button>
+            <button type="button" className={styles.ghostButton} onClick={() => { setFilterStatus('ALL'); setTransferLocationFilter('ALL'); if (apiRole !== 'SUPER_ADMIN') setLocationFilter('ALL'); setFromFilter('ALL'); setToFilter('ALL'); setSearch(''); }}>Clear filters</button>
           </div>
         )}
 
@@ -1266,7 +1286,7 @@ export default function OperationsPage() {
       {/* ---------- Receive modal ---------- */}
       {receivingTransfer && (
         <div className={styles.backdrop} onClick={() => { if (!isReceivingBusy) setReceivingTransfer(null); }}>
-          <div className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="receive-title" onClick={(e) => e.stopPropagation()}>
+          <div className={`${styles.modal} ${styles.receiptModal}`} role="dialog" aria-modal="true" aria-labelledby="receive-title" onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHead}>
               <span className={`${styles.modalIcon} ${styles.icon_transit}`}><Icon name="inbox" size={18} /></span>
               <div>
@@ -1277,7 +1297,7 @@ export default function OperationsPage() {
             </div>
             <form onSubmit={handleReceiveConfirm}>
               <div className={styles.modalBody}>
-                <div className={styles.manifest}>
+                <div className={styles.manifest} role="region" aria-label="Products to receive" tabIndex={0}>
                   {receivingTransfer.items.filter((item) => outstandingQuantity(item) > 0).map((item) => {
                     const expected = outstandingQuantity(item);
                     const quantities = receiptQuantities[item.variantId];
