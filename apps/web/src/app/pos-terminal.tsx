@@ -418,7 +418,6 @@ export default function PosTerminal() {
     return totals;
   }, [cart]);
   const basketQuantity = [...quantitiesByVariant.values()].reduce((total, quantity) => total + quantity, 0);
-  const basketUnits = new Set(cart.map((line) => line.baseUnit));
   const hasStockShortage = (line: CartLine) => {
     const stock = stockBalances[line.variantId];
     return stock !== undefined && (quantitiesByVariant.get(line.variantId) ?? 0) > Math.max(stock.quantityBaseUnits, 0);
@@ -1443,90 +1442,115 @@ export default function PosTerminal() {
 
         <aside className="basket-panel" aria-labelledby="pos-basket-title">
           <div className="basket-heading">
-            <div><h2 id="pos-basket-title" ref={basketHeading} tabIndex={-1}>Current basket</h2><small>{terminal.location.name}</small></div>
-            <div className="basket-heading-actions">
-              <span className="item-count">{basketQuantity} {basketUnits.size === 1 ? [...basketUnits][0] + (basketQuantity === 1 ? '' : 's') : 'base units'}</span>
-              <button ref={clearBasketButton} className="clear-basket-button" disabled={checkoutDisabledForClear} onClick={() => setClearBasketOpen(true)}>Clear basket</button>
+            <div>
+              <h2 id="pos-basket-title" ref={basketHeading} tabIndex={-1}>Current basket</h2>
+              <small>{terminal.location.name}</small>
             </div>
-          </div>
-          <div className="basket-body">
-          {cart.length ? (
-            <div className="basket-lines">
-              {cart.map((line) => {
-                const stock = stockBalances[line.variantId];
-                const quantity = baseQuantity(line);
-                const cartonFirst = line.unit === 'CARTON';
-                const key = cartKey(line);
-                const hasOtherUnit = cart.some((item) => item.variantId === line.variantId && item.unit !== line.unit);
-                const quantityLabel = `${line.baseUnit} quantity`;
-                const unitCount = (count: number) => `${count} ${line.baseUnit}${Math.abs(count) === 1 ? '' : 's'}`;
-                return (
-                  <div className="basket-line" key={key}>
-                    <div className="basket-line-main">
-                      <div className="basket-item-icon" aria-hidden="true">{line.productName.slice(0, 1).toUpperCase()}</div>
-                      <div className="basket-item-copy">
-                        <strong>{line.productName}</strong>
-                        <span>{line.variantName} · {line.sku}</span>
-                        <small>{formatMoney(line.sellingPrice * (cartonFirst ? line.unitsPerCarton : 1))} / {cartonFirst ? 'carton' : line.baseUnit}</small>
-                        <small className={hasStockShortage(line) ? 'stock-warning-text' : 'basket-stock'}>
-                          {stock ? `${stock.negativeAvailable ? 'Negative stock' : 'Available'}: ${unitCount(stock.quantityBaseUnits)}` : isOnline ? 'Checking store stock…' : 'Stock unavailable offline'}
-                        </small>
-                      </div>
-                      <button className="remove-button" disabled={busy || removingVariantId === key || saleRetryPending}
-                        aria-label={`Remove ${line.productName} (${cartonFirst ? 'carton' : line.baseUnit})`} onClick={() => void removeLine(line)}>
-                        {removingVariantId === key ? <Ellipsis size={16} className="inline-icon" aria-hidden="true" /> : <X size={16} className="inline-icon" aria-hidden="true" />}
-                      </button>
-                    </div>
-                    <div className="basket-quantity-fields">
-                      {line.unitsPerCarton > 1 && <label className="basket-selling-unit">
-                        Selling unit
-                        <select aria-label={`Selling unit for ${line.productName}`} disabled={busy || saleRetryPending || hasOtherUnit || !!removingVariantId} value={line.unit}
-                          onChange={(event) => changeSellingUnit(line, event.target.value as SaleUnit)}>
-                          <option value="BASE_UNIT">{line.baseUnit}</option>
-                          <option value="CARTON">Carton ({unitCount(line.unitsPerCarton)})</option>
-                        </select>
-                      </label>}
-                      <label>
-                        {cartonFirst ? 'Carton quantity' : quantityLabel}
-                        <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
-                          value={line.quantity} onChange={(event) => setQuantity(key, event.target.value)} />
-                      </label>
-                      <label>
-                        Line discount (%)
-                        <input type="number" min="0" max="100" step="0.01" value={lineDiscounts[cartKey(line)] || ''}
-                          disabled={busy || saleRetryPending || Number(billDiscount || 0) > 0}
-                          onChange={(event) => setLineDiscounts((current) => ({ ...current, [key]: event.target.value }))} />
-                      </label>
-                    </div>
-                    {line.unitsPerCarton > 1 && !hasOtherUnit && <button type="button" className="small-action-button secondary basket-unit-action"
-                      disabled={busy || saleRetryPending} onClick={() => addOtherSellingUnit(line)}>
-                      Add {cartonFirst ? line.baseUnit + 's' : 'cartons'}
-                    </button>}
-                    <div className="basket-line-summary">
-                      <small>{unitCount(quantity)} deducted from stock</small>
-                      <strong>{formatMoney(line.sellingPrice * quantity)}</strong>
-                    </div>
-                    {hasStockShortage(line) && <small className="basket-stock-warning">Quantity exceeds available stock.</small>}
-                  </div>
-                );
-              })}
-            </div>
-          ) : <div className="basket-empty"><div className="basket-empty-icon" aria-hidden="true"><ShoppingCart size="1em" className="inline-icon" aria-hidden="true" /></div><strong>Your basket is empty</strong><span>Scan an item or choose a product to get started.</span></div>}
-
-
-          </div>
-          <div className="basket-footer">
-            <div className="sale-totals"><div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div><div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div><div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div></div>
-            <label className="discount-input bill-discount-input">Bill discount (%)<input type="number" min="0" max="100" step="0.01" value={billDiscount} disabled={saleRetryPending || cart.length === 0 || Object.values(lineDiscounts).some((value) => Number(value) > 0)} onChange={(event) => setBillDiscount(event.target.value)} /><small>Your discount limit: {discountLimit.toFixed(2)}%</small></label>
-            {drawerBlocksCheckout && <div className="checkout-drawer-required">
-              <p role="status">{canOpenDrawer ? 'Enter your opening cash before completing a sale.' : 'Ask a supervisor with drawer access to open the register.'}</p>
-              {canOpenDrawer && <button type="button" className="admin-secondary" onClick={() => setDrawerOpen(true)}>Enter opening cash</button>}
+            {cart.length > 0 && <div className="basket-heading-actions">
+              <span className="item-count">{cart.length} {cart.length === 1 ? 'line' : 'lines'}</span>
+              <button ref={clearBasketButton} className="clear-basket-button" disabled={checkoutDisabledForClear}
+                onClick={() => setClearBasketOpen(true)}>Clear basket</button>
             </div>}
-            <button className="checkout-button" disabled={checkoutDisabled} onClick={() => setCheckoutOpen(true)}><span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span><span>F12 <ArrowRight size="1em" className="inline-icon" aria-hidden="true" /></span></button>
-            <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>F12</kbd> Checkout</span><span><kbd>Esc</kbd> Close</span></div>
-            {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
-            {auditBlocksCheckout && <p className="basket-stock-warning" role="status">Checkout is paused while this store’s stock count is open.</p>}
-            {stockBlocksCheckout && <p className="basket-stock-warning" role="status">Reduce the flagged quantities or restock to continue.</p>}
+          </div>
+          <div className="basket-layout">
+            <div className={cart.length ? 'basket-body basket-body--filled' : 'basket-body'}>
+              {cart.length ? (
+                <div className="basket-lines">
+                  {cart.map((line) => {
+                    const stock = stockBalances[line.variantId];
+                    const quantity = baseQuantity(line);
+                    const cartonFirst = line.unit === 'CARTON';
+                    const key = cartKey(line);
+                    const hasOtherUnit = cart.some((item) => item.variantId === line.variantId && item.unit !== line.unit);
+                    const quantityLabel = `${line.baseUnit} quantity`;
+                    const unitCount = (count: number) => `${count} ${line.baseUnit}${Math.abs(count) === 1 ? '' : 's'}`;
+                    return (
+                      <div className="basket-line" key={key}>
+                        <div className="basket-line-main">
+                          <div className="basket-item-icon" aria-hidden="true">{line.productName.slice(0, 1).toUpperCase()}</div>
+                          <div className="basket-item-copy">
+                            <strong>{line.productName}</strong>
+                            <span>{line.variantName} · {line.sku}</span>
+                            <small>{formatMoney(line.sellingPrice * (cartonFirst ? line.unitsPerCarton : 1))} / {cartonFirst ? 'carton' : line.baseUnit}</small>
+                            <small className={hasStockShortage(line) ? 'stock-warning-text' : 'basket-stock'}>
+                              {stock ? `${stock.negativeAvailable ? 'Negative stock' : 'Available'}: ${unitCount(stock.quantityBaseUnits)}` : isOnline ? 'Checking store stock…' : 'Stock unavailable offline'}
+                            </small>
+                          </div>
+                          <button className="remove-button" disabled={busy || removingVariantId === key || saleRetryPending}
+                            aria-label={`Remove ${line.productName} (${cartonFirst ? 'carton' : line.baseUnit})`} onClick={() => void removeLine(line)}>
+                            {removingVariantId === key ? <Ellipsis size={16} className="inline-icon" aria-hidden="true" /> : <X size={16} className="inline-icon" aria-hidden="true" />}
+                          </button>
+                        </div>
+                        <div className="basket-quantity-fields">
+                          {line.unitsPerCarton > 1 && <label className="basket-selling-unit">
+                            Selling unit
+                            <select aria-label={`Selling unit for ${line.productName}`} disabled={busy || saleRetryPending || hasOtherUnit || !!removingVariantId} value={line.unit}
+                              onChange={(event) => changeSellingUnit(line, event.target.value as SaleUnit)}>
+                              <option value="BASE_UNIT">{line.baseUnit}</option>
+                              <option value="CARTON">Carton ({unitCount(line.unitsPerCarton)})</option>
+                            </select>
+                          </label>}
+                          <label>
+                            {cartonFirst ? 'Carton quantity' : quantityLabel}
+                            <input type="number" inputMode="numeric" min="0" max="2147483647" step="1" disabled={busy || saleRetryPending}
+                              value={line.quantity} onChange={(event) => setQuantity(key, event.target.value)} />
+                          </label>
+                          <label>
+                            Line discount (%)
+                            <input type="number" min="0" max="100" step="0.01" value={lineDiscounts[cartKey(line)] || ''}
+                              disabled={busy || saleRetryPending || Number(billDiscount || 0) > 0}
+                              onChange={(event) => setLineDiscounts((current) => ({ ...current, [key]: event.target.value }))} />
+                          </label>
+                        </div>
+                        {line.unitsPerCarton > 1 && !hasOtherUnit && <button type="button" className="small-action-button secondary basket-unit-action"
+                          disabled={busy || saleRetryPending} onClick={() => addOtherSellingUnit(line)}>
+                          Add {cartonFirst ? line.baseUnit + 's' : 'cartons'}
+                        </button>}
+                        <div className="basket-line-summary">
+                          <small>{unitCount(quantity)} deducted from stock</small>
+                          <strong>{formatMoney(line.sellingPrice * quantity)}</strong>
+                        </div>
+                        {hasStockShortage(line) && <small className="basket-stock-warning">Quantity exceeds available stock.</small>}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <div className="basket-empty">
+                <div className="basket-empty-icon" aria-hidden="true"><ShoppingCart size={24} /></div>
+                <div>
+                  <strong>Your basket is empty</strong>
+                  <p>Scan a barcode, search for a product, or browse the catalogue to add an item.</p>
+                </div>
+              </div>}
+            </div>
+            <section className="basket-footer" aria-label="Sale summary">
+              <div className="sale-totals">
+                {cart.length > 0 && <div><span>Subtotal</span><strong>{formatMoney(saleTotals.gross)}</strong></div>}
+                {saleTotals.discount > 0 && <div><span>Discount</span><strong>−{formatMoney(saleTotals.discount)}</strong></div>}
+                <div className="sale-net"><span>Total due</span><strong>{formatMoney(saleTotals.net)}</strong></div>
+              </div>
+              {cart.length > 0 && <label className="discount-input bill-discount-input">
+                Bill discount (%)
+                <input type="number" min="0" max="100" step="0.01" value={billDiscount}
+                  disabled={saleRetryPending || Object.values(lineDiscounts).some((value) => Number(value) > 0)}
+                  onChange={(event) => setBillDiscount(event.target.value)} />
+                <small>Limit {discountLimit.toFixed(2)}%</small>
+              </label>}
+              {saleTotals.percent > discountLimit + 0.000001 && <p className="discount-warning">Discount exceeds your assigned limit.</p>}
+              {auditBlocksCheckout && <p className="basket-stock-warning" role="status">Checkout is paused while this store’s stock count is open.</p>}
+              {stockBlocksCheckout && <p className="basket-stock-warning" role="status">Reduce the flagged quantities or restock to continue.</p>}
+              {drawerBlocksCheckout && <div className="checkout-drawer-required">
+                <p role="status">{canOpenDrawer ? 'Open the cash drawer to complete sales.' : 'Ask a supervisor with drawer access to open the register.'}</p>
+                {canOpenDrawer && <button type="button" className="admin-secondary" onClick={() => setDrawerOpen(true)}>Enter opening cash</button>}
+              </div>}
+              {cart.length > 0 && <>
+                <button className="checkout-button" disabled={checkoutDisabled} onClick={() => setCheckoutOpen(true)}>
+                  <span>{saleRetryPending ? 'Retry same sale safely' : 'Complete sale'}</span>
+                  <span aria-hidden="true"><kbd>F12</kbd> <ArrowRight size={16} className="inline-icon" /></span>
+                </button>
+                <div className="keyboard-cues"><span><kbd>F2</kbd> Search</span><span><kbd>F4</kbd> Clear</span><span><kbd>Esc</kbd> Close</span></div>
+              </>}
+            </section>
           </div>
         </aside>
         </>}
