@@ -47,6 +47,12 @@ export class UsersController {
     return { data: PERMISSIONS };
   }
 
+  @Get('permission-audit')
+  @Roles(Role.SUPER_ADMIN)
+  async permissionAudit(@Query('cursor') cursor?: string) {
+    return { data: await this.usersService.listPermissionAudit(cursor) };
+  }
+
   @Post()
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @RestrictedPermission('staff.manage')

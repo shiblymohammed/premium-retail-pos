@@ -124,3 +124,74 @@
   font: inherit;
   resize: vertical;
 }
+
+.directoryHeader,
+.directoryToolbar,
+.directoryFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.directoryHeader,
+.directoryToolbar {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.directoryHeader h1,
+.directoryToolbar h2 {
+  margin: 0;
+}
+
+.directoryToolbar h2 {
+  font-size: 16px;
+}
+
+.directoryToolbar h2 span {
+  color: var(--retail-muted);
+}
+
+.directoryFilters :is(input, select) {
+  min-height: 36px;
+  min-width: 0;
+  max-width: min(100%, 260px);
+  padding: 6px 10px;
+  border: 1px solid var(--retail-edge-strong);
+  border-radius: 8px;
+  background: var(--retail-card);
+  color: var(--retail-ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.auditEntries {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.auditEntry {
+  padding: 12px;
+  border: 1px solid var(--retail-edge);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+
+.auditEntry header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.auditEntry :is(time, small) {
+  color: var(--retail-muted);
+  font-size: 12px;
+}
+
+.auditEntry :is(ul, p) {
+  margin: 6px 0 0;
+}

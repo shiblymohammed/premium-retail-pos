@@ -5,28 +5,22 @@ import { Feedback } from '@/components/ui/feedback';
 import {
   Ban,
   Check,
-  ChevronDown,
   Clipboard,
   ClipboardCheck,
   CreditCard,
-  FileText,
-  Info,
   KeyRound,
-  MapPin,
-  Package,
-  Pencil,
-  ShieldCheck,
   Store,
   TriangleAlert,
   UserRound,
   UsersRound,
   X,
-  Zap,
 } from 'lucide-react';
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
-import { QuickAccessCard, AdminModal } from '@/components/admin';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getStoredSession } from '@/lib/auth';
+import { AdminModal } from '@/components/admin';
 import { AdminActionMenu } from '@/components/admin/admin-action-menu';
+import { PermissionAudit, directPermissionLabels } from './permission-audit';
+import { permissionCategories } from '@/components/ui/permission-matrix';
 import { PermissionEditor } from './permission-editor';
 import styles from './permissions.module.css';
 
@@ -48,31 +42,14 @@ export interface UserRecord {
   canCancelSales: boolean;
   canProcessReturns: boolean;
   canCountStockAudits: boolean;
-  lastReason?: string;
-  lastUpdated?: string;
+  permissionOverrides?: Record<string, boolean> | null;
   locationScopes?: Array<{ locationId: string; location?: { name: string } }>;
-}
-
-export interface Authority {
-  role: string;
-  canCancelSales: boolean;
-  canProcessReturns: boolean;
-  permissionsInherited: boolean;
 }
 
 type PermissionProfile = {
   definitions: Record<string, string>;
   permissionOverrides: Record<string, boolean> | null;
 };
-
-const ROLE_OPTIONS = [
-  { value: 'ALL', label: 'All Roles' },
-  { value: 'STORE_MANAGER', label: 'Store Manager' },
-  { value: 'CASHIER', label: 'Cashier Station' },
-  { value: 'CENTRAL_MANAGER', label: 'Central Warehouse' },
-  { value: 'SUB_WAREHOUSE_MANAGER', label: 'Sub Warehouse' },
-  { value: 'STAFF', label: 'Floor Staff' },
-];
 
 const roleLabels: Record<string, string> = {
   ALL: 'All Roles',
@@ -85,13 +62,9 @@ const roleLabels: Record<string, string> = {
   ADMIN: 'Admin Director',
 };
 
-const CAPABILITY_OPTIONS = [
-  { value: 'ALL', label: 'All Capabilities' },
-  { value: 'CAN_CANCEL', label: 'Can Void / Cancel Sales' },
-  { value: 'CAN_RETURN', label: 'Can Process Returns' },
-  { value: 'CAN_AUDIT', label: 'Can Count Stock Audits' },
-  { value: 'RESTRICTED', label: 'No Overrides (Standard)' },
-];
+function isDirectPermission(key: string): key is keyof typeof directPermissionLabels {
+  return Object.prototype.hasOwnProperty.call(directPermissionLabels, key);
+}
 
 async function errorMessage(response: Response) {
   try {
@@ -103,18 +76,8 @@ async function errorMessage(response: Response) {
 }
 
 export default function SalesPermissionsAdmin() {
-  // Navigation Tabs (Staff Permissions Matrix vs Standard Templates)
-  const [activeTab, setActiveTab] = useState<'MATRIX' | 'TEMPLATES'>('MATRIX');
-
-  // Session & Authority
-  const [token, setToken] = useState<string>('');
-  const [actorEmail, setActorEmail] = useState<string>('');
-  const [authority, setAuthority] = useState<Authority>({
-    role: '',
-    canCancelSales: false,
-    canProcessReturns: false,
-    permissionsInherited: false,
-  });
+  const [token, setToken] = useState('');
+  const [definitions, setDefinitions] = useState<Record<string, string>>({});
 
   // Data
   const [users, setUsers] = useState<UserRecord[]>([]);
@@ -125,10 +88,8 @@ export default function SalesPermissionsAdmin() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
   const [locationFilter, setLocationFilter] = useState('ALL');
-  const [capabilityFilter, setCapabilityFilter] = useState('ALL');
-
-  // Dropdown Toggles
-  const [openDropdown, setOpenDropdown] = useState<'ROLE' | 'LOCATION' | 'CAPABILITY' | null>(null);
+  const [permissionFilter, setPermissionFilter] = useState('');
+  const [permissionState, setPermissionState] = useState('on');
 
   // Selected row for highlight
   const [selectedUserId, setSelectedUserId] = useState<string>('');
@@ -153,12 +114,15 @@ export default function SalesPermissionsAdmin() {
   const [profileError, setProfileError] = useState('');
   const [profileReload, setProfileReload] = useState(0);
 
-  const openEditModal = useCallback((user: UserRecord) => {
+  const [revokeOverrides, setRevokeOverrides] = useState(false);
+
+  const openEditModal = useCallback((user: UserRecord, revoke = false) => {
+    setRevokeOverrides(revoke);
     setError('');
     setEditingUser(user);
-    setModalCanCancel(user.canCancelSales);
-    setModalCanReturn(user.canProcessReturns);
-    setModalCanAudit(user.canCountStockAudits);
+    setModalCanCancel(!revoke && user.canCancelSales);
+    setModalCanReturn(!revoke && user.canProcessReturns);
+    setModalCanAudit(!revoke && user.canCountStockAudits);
     setModalReason('');
     setPermissionProfile(null);
     setOverrides({});
@@ -173,18 +137,6 @@ export default function SalesPermissionsAdmin() {
     const requestedUser = params.get('user');
     if (query) setSearch(query);
     const session = getStoredSession();
-    if (session?.user?.email) {
-      setActorEmail(session.user.email);
-    }
-    if (session?.user?.role) {
-      setAuthority({
-        role: session.user.role,
-        canCancelSales: true,
-        canProcessReturns: true,
-        permissionsInherited: true,
-      });
-    }
-
     if (!session?.accessToken) {
       setError('Sign in with an administrator account to load live permissions.');
       setLoading(false);
@@ -193,19 +145,19 @@ export default function SalesPermissionsAdmin() {
     setToken(session.accessToken);
     const headers = { Authorization: `Bearer ${session.accessToken}` };
     Promise.all([
-        fetch(`${API_BASE}/users/me/sales-permissions`, { headers, cache: 'no-store' }),
+        fetch(`${API_BASE}/users/permission-definitions`, { headers, cache: 'no-store' }),
         fetch(`${API_BASE}/users?isActive=true`, { headers, cache: 'no-store' }),
         fetch(`${API_BASE}/locations?isActive=true`, { headers, cache: 'no-store' }),
       ])
-        .then(async ([authRes, usersRes, locsRes]) => {
-          const failed = [authRes, usersRes, locsRes].find((response) => !response.ok);
+        .then(async ([definitionsRes, usersRes, locsRes]) => {
+          const failed = [definitionsRes, usersRes, locsRes].find((response) => !response.ok);
           if (failed) throw new Error(await errorMessage(failed));
-          const [authData, usersData, locsData] = await Promise.all([
-            authRes.json(),
+          const [definitionsData, usersData, locsData] = await Promise.all([
+            definitionsRes.json(),
             usersRes.json(),
             locsRes.json(),
           ]);
-          if (authData?.data) setAuthority(authData.data);
+          if (definitionsData?.data) setDefinitions(definitionsData.data);
           if (Array.isArray(usersData?.data)) {
             const eligible = usersData.data.filter(
               (u: UserRecord) => u.id !== session.user?.id && u.role !== 'SUPER_ADMIN',
@@ -234,25 +186,13 @@ export default function SalesPermissionsAdmin() {
       const { data } = await response.json() as { data: PermissionProfile };
       if (!controller.signal.aborted) {
         setPermissionProfile(data);
-        setOverrides(data.permissionOverrides ?? {});
+        setOverrides(revokeOverrides ? {} : data.permissionOverrides ?? {});
       }
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setProfileError(cause instanceof Error ? cause.message : 'Could not load individual permissions.');
     });
     return () => controller.abort();
-  }, [editingUserId, profileReload, token]);
-
-  // Global click to dismiss menus
-  useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('.custom-filter-dropdown-wrap')) {
-        setOpenDropdown(null);
-      }
-    };
-    window.addEventListener('click', handleGlobalClick);
-    return () => window.removeEventListener('click', handleGlobalClick);
-  }, []);
+  }, [editingUserId, profileReload, revokeOverrides, token]);
 
   const locationMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -278,48 +218,19 @@ export default function SalesPermissionsAdmin() {
         locationFilter === 'ALL' ||
         scopes.some((s) => s.locationId === locationFilter || locationMap.get(s.locationId) === locationFilter);
 
-      let capabilityMatch = true;
-      if (capabilityFilter === 'CAN_CANCEL') capabilityMatch = user.canCancelSales;
-      else if (capabilityFilter === 'CAN_RETURN') capabilityMatch = user.canProcessReturns;
-      else if (capabilityFilter === 'CAN_AUDIT') capabilityMatch = user.canCountStockAudits;
-      else if (capabilityFilter === 'RESTRICTED') capabilityMatch = !user.canCancelSales && !user.canProcessReturns && !user.canCountStockAudits;
-
-      return searchMatch && roleMatch && locationMatch && capabilityMatch;
+      const permission = isDirectPermission(permissionFilter) ? user[permissionFilter] : user.permissionOverrides?.[permissionFilter];
+      const state = permission === undefined ? 'default' : permission ? 'on' : 'off';
+      return searchMatch && roleMatch && locationMatch && (!permissionFilter || permissionState === state);
     });
-  }, [users, search, roleFilter, locationFilter, capabilityFilter, locationMap]);
-
-  // KPI Metrics for Quick Access
-  const kpis = useMemo(() => {
-    const total = users.length;
-    const managers = users.filter((u) => u.role === 'STORE_MANAGER');
-    const cashiers = users.filter((u) => u.role === 'CASHIER');
-    const canCancel = users.filter((u) => u.canCancelSales).length;
-    const canReturn = users.filter((u) => u.canProcessReturns).length;
-    const canAudit = users.filter((u) => u.canCountStockAudits).length;
-
-    return {
-      total,
-      managers: managers.length,
-      cashiers: cashiers.length,
-      canCancel,
-      canReturn,
-      canAudit,
-    };
-  }, [users]);
+  }, [users, search, roleFilter, locationFilter, permissionFilter, permissionState, locationMap]);
 
   const resetAllFilters = () => {
     setSearch('');
     setRoleFilter('ALL');
     setLocationFilter('ALL');
-    setCapabilityFilter('ALL');
+    setPermissionFilter('');
+    setPermissionState('on');
   };
-
-  function preparePreset(user: UserRecord, cancel: boolean, returns: boolean, count: boolean) {
-    openEditModal(user);
-    setModalCanCancel(cancel);
-    setModalCanReturn(returns);
-    setModalCanAudit(count);
-  }
 
   const salesChanged = !!editingUser && (modalCanCancel !== editingUser.canCancelSales || modalCanReturn !== editingUser.canProcessReturns);
   const stockChanged = !!editingUser && modalCanAudit !== editingUser.canCountStockAudits;
@@ -336,7 +247,7 @@ export default function SalesPermissionsAdmin() {
     setError('');
     const saved: string[] = [];
     const updateDirectory = (patch: Partial<UserRecord>) => {
-      const changes = { ...patch, lastReason: reason, lastUpdated: 'Today' };
+      const changes = patch;
       setUsers((previous) => previous.map((user) => user.id === editingUser.id ? { ...user, ...changes } : user));
       setEditingUser((user) => user?.id === editingUser.id ? { ...user, ...changes } : user);
     };
@@ -363,7 +274,10 @@ export default function SalesPermissionsAdmin() {
         updateDirectory(changes);
         saved.push('stock count permission');
       }
-      if (changedOverrides.length) await patchPermissions('permissions', overrides);
+      if (changedOverrides.length) {
+        await patchPermissions('permissions', overrides);
+        setUsers((previous) => previous.map((user) => user.id === editingUser.id ? { ...user, permissionOverrides: overrides } : user));
+      }
 
       setEditingUser(null);
       setNotice(`Updated permissions for ${editingUser.name || editingUser.email}.`);
@@ -390,491 +304,53 @@ export default function SalesPermissionsAdmin() {
         </div>
       )}
 
-      {/* Header: Title with Blue Badge, Section View Toggles, Info, and Primary Action Button */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '26px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            Sales Permissions & Overrides
-            <span
-              style={{
-                display: 'inline-grid',
-                placeItems: 'center',
-                width: '34px',
-                height: '34px',
-                borderRadius: '9px',
-                background: 'var(--retail-accent)',
-                color: '#ffffff',
-                fontSize: '18px',
-                boxShadow: '0 3px 8px rgba(26, 98, 234, 0.25)',
-              }}
-              title="OD-08 Security Invariant"
-            >
-              <KeyRound size="1em" className="inline-icon" aria-hidden="true" />
-            </span>
-          </h1>
-        </div>
+      <header className={styles.directoryHeader}>
+        <h1>Sales Permissions &amp; Overrides</h1>
+        <button type="button" className="admin-secondary" onClick={() => setIsAuditModalOpen(true)}>
+          <ClipboardCheck size={16} aria-hidden="true" /> Permission audit log
+        </button>
+      </header>
 
-        <div className="admin-heading-actions">
-          <div style={{ display: 'inline-flex', background: 'var(--retail-edge)', padding: '3px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
-            <button
-              type="button"
-              onClick={() => setActiveTab('MATRIX')}
-              style={{
-                border: 'none',
-                background: activeTab === 'MATRIX' ? 'var(--retail-card)' : 'transparent',
-                color: activeTab === 'MATRIX' ? 'var(--retail-accent)' : 'var(--retail-muted)',
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontWeight: 700,
-                fontSize: '13px',
-                cursor: 'pointer',
-                boxShadow: activeTab === 'MATRIX' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Staff Permissions Matrix
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('TEMPLATES')}
-              style={{
-                border: 'none',
-                background: activeTab === 'TEMPLATES' ? 'var(--retail-card)' : 'transparent',
-                color: activeTab === 'TEMPLATES' ? 'var(--retail-accent)' : 'var(--retail-muted)',
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontWeight: 700,
-                fontSize: '13px',
-                cursor: 'pointer',
-                boxShadow: activeTab === 'TEMPLATES' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Standard Role Profiles
-            </button>
-          </div>
-
-          {/* Directory Info Button */}
-          <button
-            type="button"
-            onClick={() => setIsAuditModalOpen(true)}
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '8px',
-              border: '1px solid var(--retail-edge-strong)',
-              background: 'var(--retail-card)',
-              color: 'var(--retail-muted)',
-              fontSize: '16px',
-              display: 'grid',
-              placeItems: 'center',
-              cursor: 'pointer',
-            }}
-            title="View Invariant OD-08 Audit Architecture"
-          >
-            <Info size="1em" className="inline-icon" aria-hidden="true" />
-          </button>
-
-        </div>
-      </div>
-
-      {/* SECTION 1: QUICK ACCESS (4 Folder-Tabbed Cards) */}
-      <details className="admin-shortcuts">
-        <summary>Permission shortcuts <ChevronDown size={15} aria-hidden="true" /></summary>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '16px' }}>
-          {/* Card 1: Store Managers */}
-          <QuickAccessCard
-            isActive={roleFilter === 'STORE_MANAGER'}
-            onClick={() => setRoleFilter(roleFilter === 'STORE_MANAGER' ? 'ALL' : 'STORE_MANAGER')}
-            title="Filter by Store Managers"
-            avatars={[
-              { text: 'AP', bg: 'light-dark(#047857, #8be0ad)' },
-              { text: 'SM', bg: '#0d9488' },
-            ]}
-            heading="Store Managers"
-            subheading={`${kpis.managers} Supervisors · Full Voids & Returns`}
-          />
-
-          {/* Card 2: Cashiers & POS */}
-          <QuickAccessCard
-            isActive={roleFilter === 'CASHIER'}
-            onClick={() => setRoleFilter(roleFilter === 'CASHIER' ? 'ALL' : 'CASHIER')}
-            title="Filter by Cashiers"
-            avatars={[
-              { text: 'RM', bg: '#d97706' },
-              { text: 'NS', bg: '#f59e0b' },
-              { text: 'MD', bg: '#b45309' },
-            ]}
-            heading="Cashiers & POS"
-            subheading={`${kpis.cashiers} Terminals · ${kpis.canReturn} Returns Allowed`}
-          />
-
-          {/* Card 3: Logistics & Audits */}
-          <QuickAccessCard
-            isActive={roleFilter === 'CENTRAL_MANAGER' || roleFilter === 'SUB_WAREHOUSE_MANAGER'}
-            onClick={() => setRoleFilter(roleFilter === 'CENTRAL_MANAGER' ? 'ALL' : 'CENTRAL_MANAGER')}
-            title="Filter by Warehouse Logistics"
-            avatars={[
-              { text: 'VS', bg: 'light-dark(#4f46e5, #bdb6ff)' },
-              { text: 'RK', bg: '#6366f1' },
-            ]}
-            heading="Warehouse Logistics"
-            subheading={`${kpis.canAudit} Authorized Stock Auditors`}
-          />
-
-          {/* Summary Card 4: OD-08 Security Invariant */}
-          <div
-            className="drive-folder-card"
-            onClick={() => setIsAuditModalOpen(true)}
-            title="View Security Invariant OD-08 Architecture"
-            style={{ borderLeft: '4px solid var(--retail-accent)' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px', color: 'var(--retail-accent)' }}><FileText size="1em" className="inline-icon" aria-hidden="true" /></span>
-                <strong style={{ fontSize: '13.5px', color: 'var(--retail-ink)' }}>OD-08 Invariant</strong>
-              </div>
-              <div
-                style={{
-                  width: '26px',
-                  height: '26px',
-                  borderRadius: '50%',
-                  background: 'var(--retail-accent)',
-                  color: '#fff',
-                  fontSize: '11px',
-                  fontWeight: 750,
-                  display: 'grid',
-                  placeItems: 'center',
-                }}
-              >
-                SA
-              </div>
-            </div>
-            <div style={{ marginTop: '16px' }}>
-              <small style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', display: 'block' }}>
-                GOVERNANCE
-              </small>
-              <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--retail-ink)', display: 'block', marginTop: '2px' }}>
-                Void Reason Logging · Immutable Records
-              </span>
-            </div>
+      <div>
+        <div className={styles.directoryToolbar}>
+          <h2>Staff permissions <span>({filteredUsers.length})</span></h2>
+          <div className={styles.directoryFilters}>
+            <input type="search" aria-label="Find staff" placeholder="Find staff by name or email" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <select aria-label="Filter by role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+              <option value="ALL">All roles</option>
+              {[...new Set(users.map((user) => user.role))].sort().map((role) => (
+                <option key={role} value={role}>{roleLabels[role] ?? role.replaceAll('_', ' ')}</option>
+              ))}
+            </select>
+            <select aria-label="Filter by location" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>
+              <option value="ALL">All locations</option>
+              {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+            </select>
+            <select aria-label="Filter by permission" value={permissionFilter} onChange={(event) => {
+              setPermissionFilter(event.target.value);
+              setPermissionState('on');
+            }}>
+              <option value="">All permissions</option>
+              <optgroup label="Sales and stock count access">
+                {Object.entries(directPermissionLabels).map(([key, label]) => <option value={key} key={key}>{label}</option>)}
+              </optgroup>
+              {Object.entries(permissionCategories).map(([prefix, title]) => {
+                const entries = Object.entries(definitions).filter(([key]) => key.startsWith(prefix + '.'));
+                return entries.length > 0 && <optgroup key={prefix} label={title}>
+                  {entries.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                </optgroup>;
+              })}
+            </select>
+            {permissionFilter && <select aria-label="Permission state" value={permissionState} onChange={(event) => setPermissionState(event.target.value)}>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+              {!isDirectPermission(permissionFilter) && <option value="default">Role default</option>}
+            </select>}
+            {(search || roleFilter !== 'ALL' || locationFilter !== 'ALL' || permissionFilter) && (
+              <button type="button" className="admin-secondary" onClick={resetAllFilters}>Reset filters</button>
+            )}
           </div>
         </div>
-      </details>
-
-      {/* VIEW TAB 1: PERMISSIONS MATRIX */}
-      {activeTab === 'MATRIX' && (
-        <div>
-          {/* Section 2 Toolbar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-            <h2 style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '0.08em', color: 'var(--retail-muted)', textTransform: 'uppercase', margin: 0 }}>
-              SALES PERMISSION DIRECTORY ({filteredUsers.length})
-            </h2>
-
-            {/* Filter Toolbar matching users, company, discount-limits */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center' }}>
-              <input
-                type="text"
-                placeholder="Filter staff by name, email..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: '18px',
-                  border: '1px solid light-dark(#cbd5e1, #34455a)',
-                  fontSize: '12.5px',
-                  outline: 'none',
-                  background: 'var(--retail-raised)',
-                  minWidth: '220px',
-                }}
-              />
-
-              {/* Custom Styled Role Dropdown */}
-              <div className="custom-filter-dropdown-wrap" style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  onClick={() => setOpenDropdown(openDropdown === 'ROLE' ? null : 'ROLE')}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    borderRadius: '20px',
-                    border: roleFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                    background: roleFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                    color: roleFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
-                    fontSize: '12.5px',
-                    fontWeight: 650,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                  }}
-                >
-                  <span><UserRound size="1em" className="inline-icon" aria-hidden="true" /></span>
-                  <span>{roleLabels[roleFilter] || 'All Roles'}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
-                </button>
-
-                {openDropdown === 'ROLE' && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 6px)',
-                      left: 0,
-                      width: '210px',
-                      background: 'var(--retail-card)',
-                      borderRadius: '12px',
-                      border: '1px solid var(--retail-edge-strong)',
-                      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
-                      padding: '6px',
-                      zIndex: 60,
-                    }}
-                  >
-                    <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                      FILTER BY ROLE
-                    </div>
-                    {ROLE_OPTIONS.map((opt) => {
-                      const isSelected = roleFilter === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => {
-                            setRoleFilter(opt.value);
-                            setOpenDropdown(null);
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '7px 10px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
-                            color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
-                            fontSize: '12px',
-                            fontWeight: isSelected ? 700 : 500,
-                            textAlign: 'left',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            cursor: 'pointer',
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'var(--retail-raised)';
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isSelected) e.currentTarget.style.background = 'transparent';
-                          }}
-                        >
-                          <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Custom Styled Location Dropdown */}
-              <div className="custom-filter-dropdown-wrap" style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  onClick={() => setOpenDropdown(openDropdown === 'LOCATION' ? null : 'LOCATION')}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    borderRadius: '20px',
-                    border: locationFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                    background: locationFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                    color: locationFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
-                    fontSize: '12.5px',
-                    fontWeight: 650,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                  }}
-                >
-                  <span><MapPin size="1em" className="inline-icon" aria-hidden="true" /></span>
-                  <span>{locationFilter === 'ALL' ? 'All Locations' : locationMap.get(locationFilter) || locationFilter}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
-                </button>
-
-                {openDropdown === 'LOCATION' && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 6px)',
-                      left: 0,
-                      width: '230px',
-                      background: 'var(--retail-card)',
-                      borderRadius: '12px',
-                      border: '1px solid var(--retail-edge-strong)',
-                      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
-                      padding: '6px',
-                      zIndex: 60,
-                    }}
-                  >
-                    <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                      FILTER BY STORE LOCATION
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLocationFilter('ALL');
-                        setOpenDropdown(null);
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '7px 10px',
-                        borderRadius: '8px',
-                        border: 'none',
-                        background: locationFilter === 'ALL' ? 'var(--retail-accent-soft)' : 'transparent',
-                        color: locationFilter === 'ALL' ? 'var(--retail-accent)' : 'var(--retail-ink)',
-                        fontSize: '12px',
-                        fontWeight: locationFilter === 'ALL' ? 700 : 500,
-                        textAlign: 'left',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <span>All Locations</span>
-                      {locationFilter === 'ALL' && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
-                    </button>
-                    {locations.map((loc) => (
-                      <button
-                        key={loc.id}
-                        type="button"
-                        onClick={() => {
-                          setLocationFilter(loc.id);
-                          setOpenDropdown(null);
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '7px 10px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: locationFilter === loc.id ? 'var(--retail-accent-soft)' : 'transparent',
-                          color: locationFilter === loc.id ? 'var(--retail-accent)' : 'var(--retail-ink)',
-                          fontSize: '12px',
-                          fontWeight: locationFilter === loc.id ? 700 : 500,
-                          textAlign: 'left',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span>{loc.name}</span>
-                        {locationFilter === loc.id && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Custom Styled Capability Dropdown */}
-              <div className="custom-filter-dropdown-wrap" style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  onClick={() => setOpenDropdown(openDropdown === 'CAPABILITY' ? null : 'CAPABILITY')}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    borderRadius: '20px',
-                    border: capabilityFilter !== 'ALL' ? '1px solid var(--retail-accent-line)' : '1px solid var(--retail-edge-strong)',
-                    background: capabilityFilter !== 'ALL' ? 'var(--retail-accent-soft)' : 'var(--retail-card)',
-                    color: capabilityFilter !== 'ALL' ? 'var(--retail-accent-strong)' : 'var(--retail-ink)',
-                    fontSize: '12.5px',
-                    fontWeight: 650,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                  }}
-                >
-                  <span><Zap size="1em" className="inline-icon" aria-hidden="true" /></span>
-                  <span>{CAPABILITY_OPTIONS.find((c) => c.value === capabilityFilter)?.label || 'All Capabilities'}</span>
-                  <span style={{ fontSize: '9px', color: '#94a3b8', marginLeft: '2px' }}><ChevronDown size="1em" className="inline-icon" aria-hidden="true" /></span>
-                </button>
-
-                {openDropdown === 'CAPABILITY' && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 6px)',
-                      left: 0,
-                      width: '230px',
-                      background: 'var(--retail-card)',
-                      borderRadius: '12px',
-                      border: '1px solid var(--retail-edge-strong)',
-                      boxShadow: '0 12px 30px rgba(0, 0, 0, 0.12)',
-                      padding: '6px',
-                      zIndex: 60,
-                    }}
-                  >
-                    <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                      FILTER BY PERMISSION
-                    </div>
-                    {CAPABILITY_OPTIONS.map((opt) => {
-                      const isSelected = capabilityFilter === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => {
-                            setCapabilityFilter(opt.value);
-                            setOpenDropdown(null);
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '7px 10px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: isSelected ? 'var(--retail-accent-soft)' : 'transparent',
-                            color: isSelected ? 'var(--retail-accent)' : 'var(--retail-ink)',
-                            fontSize: '12px',
-                            fontWeight: isSelected ? 700 : 500,
-                            textAlign: 'left',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <span>{opt.label}</span>
-                          {isSelected && <span style={{ color: 'var(--retail-accent)', fontWeight: 800 }}><Check size="1em" className="inline-icon" aria-hidden="true" /></span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Reset Filters Link */}
-              {(search || roleFilter !== 'ALL' || locationFilter !== 'ALL' || capabilityFilter !== 'ALL') && (
-                <button
-                  type="button"
-                  onClick={resetAllFilters}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--retail-accent)',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    textDecoration: 'underline',
-                  }}
-                >
-                  Reset Filters
-                </button>
-              )}
-            </div>
-          </div>
 
           {/* Structured File Table matching /admin/users & /admin/company */}
           <div
@@ -914,7 +390,7 @@ export default function SalesPermissionsAdmin() {
                       <td colSpan={7} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--retail-muted)' }}>
                         <div style={{ fontSize: '32px', marginBottom: '8px' }}><KeyRound size="1em" className="inline-icon" aria-hidden="true" /></div>
                         <strong>No staff accounts match your active filter</strong>
-                        <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try resetting the filters or provision a new user override.</p>
+                        <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Try changing or clearing the filters.</p>
                       </td>
                     </tr>
                   ) : (
@@ -1121,11 +597,7 @@ export default function SalesPermissionsAdmin() {
                               </button>
 
                               <AdminActionMenu label={`Permission actions for ${user.name || user.email}`}>
-                                <button type="button" onClick={() => openEditModal(user)}><Pencil size={15} aria-hidden="true" /> Change permissions</button>
-                                <button type="button" onClick={() => preparePreset(user, true, true, false)}><Zap size={15} aria-hidden="true" /> Grant voids and returns</button>
-                                <button type="button" onClick={() => preparePreset(user, false, true, false)}><Zap size={15} aria-hidden="true" /> Grant returns only</button>
-                                <button type="button" onClick={() => preparePreset(user, false, false, true)}><Package size={15} aria-hidden="true" /> Grant stock audit count</button>
-                                <button type="button" className="admin-action-danger" onClick={() => preparePreset(user, false, false, false)}><Ban size={15} aria-hidden="true" /> Revoke all overrides</button>
+                                <button type="button" className="admin-action-danger" onClick={() => openEditModal(user, true)}><Ban size={15} aria-hidden="true" /> Revoke all overrides</button>
                                 <button type="button" onClick={async () => {
                                   try {
                                     await navigator.clipboard.writeText(user.email);
@@ -1166,106 +638,11 @@ export default function SalesPermissionsAdmin() {
               </span>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* VIEW TAB 2: ROLE STANDARDS */}
-      {activeTab === 'TEMPLATES' && (
-        <div>
-          <div style={{ marginBottom: '18px', fontSize: '12.5px', fontWeight: 850, color: 'var(--retail-ink)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            ORGANIZATIONAL ROLE PERMISSION STANDARDS
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '18px', marginBottom: '30px' }}>
-            {/* Store Managers Standard */}
-            <div style={{ background: 'var(--retail-card)', borderRadius: '14px', border: '1px solid var(--retail-edge)', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: 'light-dark(#059669, #b5f5e1)', background: 'light-dark(#ecfdf5, #1e352a)', padding: '4px 10px', borderRadius: '20px', border: '1px solid light-dark(#a7f3d0, #31624b)' }}>
-                  MANAGEMENT TIER
-                </span>
-                <span style={{ fontSize: '18px', fontWeight: 850, color: 'light-dark(#059669, #b5f5e1)' }}>Store access</span>
-              </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: 'var(--retail-ink)' }}>Store Managers</h3>
-              <p style={{ fontSize: '13.5px', color: 'var(--retail-muted)', lineHeight: 1.5, margin: '0 0 16px' }}>
-                The workflow assigns customer returns to store managers. Cancelling a bill requires separate authorization. Review each account’s saved permissions in the directory.
-              </p>
-              <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
-                <strong>Workflow:</strong> Customer returns and stock counts at assigned stores.
-              </div>
-            </div>
-
-            {/* Cashiers Standard */}
-            <div style={{ background: 'var(--retail-card)', borderRadius: '14px', border: '1px solid var(--retail-edge)', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--retail-accent)', background: 'light-dark(#eff6ff, #1d2733)', padding: '4px 10px', borderRadius: '20px', border: '1px solid light-dark(#bfdbfe, #2e425b)' }}>
-                  OPERATIONAL TIER
-                </span>
-                <span style={{ fontSize: '18px', fontWeight: 850, color: 'var(--retail-accent)' }}>Role Controlled</span>
-              </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: 'var(--retail-ink)' }}>Cashier Terminal Stations</h3>
-              <p style={{ fontSize: '13.5px', color: 'var(--retail-muted)', lineHeight: 1.5, margin: '0 0 16px' }}>
-                Standard cashiers can execute checkouts. Senior cashiers or returns desk staff can be provisioned with returns handling privileges as needed.
-              </p>
-              <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
-                <strong>Workflow:</strong> Checkout. Sales controls require explicitly granted access.
-              </div>
-            </div>
-
-            {/* Warehouse Standard */}
-            <div style={{ background: 'var(--retail-card)', borderRadius: '14px', border: '1px solid var(--retail-edge)', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: 'light-dark(#4f46e5, #bdb6ff)', background: 'light-dark(#eef2ff, #1d2233)', padding: '4px 10px', borderRadius: '20px', border: '1px solid light-dark(#c7d2fe, #2d3659)' }}>
-                  LOGISTICS TIER
-                </span>
-                <span style={{ fontSize: '18px', fontWeight: 850, color: 'light-dark(#4f46e5, #bdb6ff)' }}>Stock Auditor</span>
-              </div>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: '0 0 8px', color: 'var(--retail-ink)' }}>Warehouse Logistics</h3>
-              <p style={{ fontSize: '13.5px', color: 'var(--retail-muted)', lineHeight: 1.5, margin: '0 0 16px' }}>
-                Warehouse and depot managers hold physical inventory counting authority. They cannot execute POS sales cancellations or register refunds.
-              </p>
-              <div style={{ fontSize: '12.5px', color: 'var(--retail-ink)', background: 'var(--retail-raised)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)', fontWeight: 550 }}>
-                <strong>Authorized:</strong> Stock Audit Count <Check size="1em" className="inline-icon" aria-hidden="true" /> · Sales POS (Restricted <X size="1em" className="inline-icon" aria-hidden="true" />)
-              </div>
-            </div>
-          </div>
-
-          {/* Deep Invariant Architecture Callout */}
-          <div
-            style={{
-              background: 'var(--retail-card)',
-              borderRadius: '14px',
-              border: '1px solid var(--retail-edge)',
-              padding: '24px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-              <span style={{ fontSize: '22px' }}><ShieldCheck size="1em" className="inline-icon" aria-hidden="true" /></span>
-              <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
-                OD-08 Security Invariant Architecture
-              </h2>
-            </div>
-            <div style={{ fontSize: '13.5px', color: 'var(--retail-ink)', lineHeight: 1.6, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginTop: '14px' }}>
-              <div>
-                <strong style={{ color: 'var(--retail-ink)', display: 'block', marginBottom: '4px', fontSize: '14px' }}>1. Scoped POS Enforcement</strong>
-                Permissions are validated cryptographically against JWT tokens and store location scopes upon invoice cancellation or return initiation.
-              </div>
-              <div>
-                <strong style={{ color: 'var(--retail-ink)', display: 'block', marginBottom: '4px', fontSize: '14px' }}>2. Mandatory Cancellation Reason</strong>
-                Every invoice void requires selecting a business cancellation code and entering an audit justification note recorded in the immutable ledger.
-              </div>
-              <div>
-                <strong style={{ color: 'var(--retail-ink)', display: 'block', marginBottom: '4px', fontSize: '14px' }}>3. Segregation of Stock Auditing</strong>
-                Stock audit count permissions remain strictly decoupled from cashier sales checkout, preventing unmonitored inventory adjustments.
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
 
       {editingUser && <AdminModal
         isOpen
-        title="Change permissions"
+        title={revokeOverrides ? 'Review override revocation' : 'Change permissions'}
         maxWidth="720px"
         subtitle={`${editingUser.name || editingUser.email} · ${roleLabels[editingUser.role] || editingUser.role}`}
         badgeIcon={<KeyRound size={20} aria-hidden="true" />}
@@ -1287,6 +664,7 @@ export default function SalesPermissionsAdmin() {
           setConfirmSave(true);
         }}>
           {error && <Feedback tone="error">{error}</Feedback>}
+          {revokeOverrides && <Feedback tone="info">Review the changes before saving. Sales and stock count switches are set to Off, and other permissions return to their role defaults.</Feedback>}
           {(salesChanged || stockChanged) && <label className={styles.reason}>
             <strong>Reason for changing access</strong>
             <textarea rows={3} value={modalReason} required disabled={!!savingUserId}
@@ -1310,118 +688,7 @@ export default function SalesPermissionsAdmin() {
         </form>
       </AdminModal>}
 
-      {/* MODAL: AUDIT TRAIL LOGS */}
-      {isAuditModalOpen && (
-        <div
-          className="admin-dialog-backdrop"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.55)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100,
-            padding: '20px',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsAuditModalOpen(false);
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--retail-card)',
-              borderRadius: '16px',
-              width: 'min(720px, 100%)',
-              maxHeight: '85vh',
-              overflowY: 'auto',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
-              padding: '26px',
-              position: 'relative',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '22px' }}><ClipboardCheck size="1em" className="inline-icon" aria-hidden="true" /></span>
-                <div>
-                  <h2 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
-                    Sales Permission Audit Trail (OD-08)
-                  </h2>
-                  <span style={{ fontSize: '12px', color: 'var(--retail-muted)' }}>
-                    Immutable historical ledger of sales void and return authorizations
-                  </span>
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={() => setIsAuditModalOpen(false)}
-                style={{ border: 'none', background: 'var(--retail-edge)', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '15px', fontWeight: 800, color: 'var(--retail-muted)' }}
-              >
-                <X size="1em" className="inline-icon" aria-hidden="true" />
-              </button>
-            </div>
-
-            <div style={{ background: 'var(--retail-raised)', borderRadius: '10px', padding: '12px 14px', border: '1px solid var(--retail-edge-strong)', marginBottom: '16px', fontSize: '12.5px', color: 'var(--retail-ink)', lineHeight: 1.5 }}>
-              Each time an administrator updates sales permissions, the system immutably logs the <strong>target account</strong>, <strong>administrator account ID</strong>, <strong>timestamp</strong>, and <strong>mandatory business reason</strong>.
-            </div>
-
-            {/* Audit Log Entries Table */}
-            <div style={{ border: '1px solid var(--retail-edge-strong)', borderRadius: '10px', overflow: 'hidden', marginBottom: '18px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 150px 110px 1fr', padding: '9px 12px', background: 'var(--retail-edge)', fontSize: '10.5px', fontWeight: 800, color: 'var(--retail-ink)', textTransform: 'uppercase' }}>
-                <div>Timestamp</div>
-                <div>Target Account</div>
-                <div>Privilege Delta</div>
-                <div>Justification Reason</div>
-              </div>
-
-              {Array.from([] as Array<{ time: string; target: string; delta: string; reason: string }>).map((entry, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '120px 150px 110px 1fr',
-                    padding: '11px 12px',
-                    borderTop: '1px solid var(--retail-edge)',
-                    fontSize: '12px',
-                    color: 'var(--retail-ink)',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div style={{ color: 'var(--retail-muted)', fontSize: '11.5px' }}>{entry.time}</div>
-                  <div style={{ fontWeight: 700 }}>{entry.target.split('@')[0]}</div>
-                  <div>
-                    <span style={{ padding: '2px 6px', borderRadius: '4px', background: 'light-dark(#eff6ff, #1d2733)', color: 'var(--retail-accent)', fontWeight: 750, fontSize: '11px' }}>
-                      {entry.delta}
-                    </span>
-                  </div>
-                  <div style={{ color: 'var(--retail-muted)', fontSize: '11.5px' }}>{entry.reason}</div>
-                </div>
-              ))}
-              <p style={{ margin: 0, padding: 18, color: 'var(--retail-muted)', fontSize: 13 }}>No permission changes have been recorded yet.</p>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => setIsAuditModalOpen(false)}
-                style={{
-                  padding: '8px 18px',
-                  borderRadius: '8px',
-                  background: 'var(--retail-accent)',
-                  color: '#ffffff',
-                  border: 'none',
-                  fontSize: '12.5px',
-                  fontWeight: 750,
-                  cursor: 'pointer',
-                }}
-              >
-                Close Audit Log
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {isAuditModalOpen && <PermissionAudit token={token} definitions={definitions} onClose={() => setIsAuditModalOpen(false)} />}
 
       {confirmSave && editingUser && <ConfirmAction title="Save access changes?" confirmLabel="Yes, save changes"
         cancelLabel="No, keep editing" onCancel={() => setConfirmSave(false)} onConfirm={() => void handleSaveModal()}>

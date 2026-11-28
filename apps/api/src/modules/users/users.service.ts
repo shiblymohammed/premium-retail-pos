@@ -72,6 +72,33 @@ export class UsersService {
     return user;
   }
 
+  async listPermissionAudit(cursor?: string) {
+    const pageSize = 30;
+    const events = await this.prisma.auditEvent.findMany({
+      where: {
+        targetEntity: 'User',
+        action: { in: ['SALES_PERMISSIONS_ASSIGNED', 'STOCK_AUDIT_PERMISSION_ASSIGNED', 'STAFF_PERMISSION_OVERRIDES_UPDATED'] },
+      },
+      select: {
+        id: true, action: true, targetId: true, createdAt: true, beforeValue: true, afterValue: true, reason: true,
+        actor: { select: { id: true, email: true } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+      take: pageSize + 1,
+    });
+    const page = events.slice(0, pageSize);
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(page.map((event) => event.targetId))] } },
+      select: { id: true, email: true },
+    });
+    const emails = new Map(users.map((user) => [user.id, user.email]));
+    return {
+      entries: page.map((event) => ({ ...event, targetEmail: emails.get(event.targetId) ?? null })),
+      nextCursor: events.length > pageSize ? page.at(-1)?.id : null,
+    };
+  }
+
   async setPermissionProfile(id: string, overrides: PermissionOverrides, actor: UserActor) {
     if (actor.role !== Role.SUPER_ADMIN || actor.userId === id) throw new ForbiddenException('Only a Super Admin can change staff permissions');
     validatePermissionOverrides(overrides);
@@ -408,6 +435,7 @@ export class UsersService {
         isActive: true,
         createdAt: true,
         lastLoginAt: true,
+        permissionOverrides: actor?.role === Role.SUPER_ADMIN,
         locationScopes: {
           ...(actor?.role === Role.ADMIN
             ? { where: { locationId: { in: actor.locationIds } } }
