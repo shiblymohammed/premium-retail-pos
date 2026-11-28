@@ -3,76 +3,110 @@
   gap: 16px;
 }
 
-.options {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.options legend {
-  margin-bottom: 8px;
-  padding: 0;
-  font-weight: 700;
-}
-
 .sectionTitle {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: 17px;
 }
 
 .sectionHint {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   color: var(--retail-muted);
   font-size: 13px;
 }
 
-.option {
+.groups {
+  display: grid;
+  gap: 16px;
+}
+
+.group {
+  min-width: 0;
+  margin: 0;
+  padding: 0 12px 4px;
+  border: 1px solid var(--retail-edge);
+  border-radius: 12px;
+}
+
+.group legend {
+  padding: 0 6px;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.permissionRow {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   gap: 8px 16px;
-  padding: 12px;
+  min-height: 47px;
+  padding: 7px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.permissionRow + .permissionRow {
+  border-top: 1px solid var(--retail-edge);
+}
+
+.permissionRow > span {
+  min-width: 0;
+  flex: 1 1 170px;
+  overflow-wrap: anywhere;
+}
+
+.permissionRow small {
+  display: block;
+  color: var(--retail-muted);
+  font-weight: 400;
+}
+
+.segments {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
   border: 1px solid var(--retail-edge);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--retail-raised);
+}
+
+.segments label {
+  position: relative;
   cursor: pointer;
 }
 
-.optionCopy {
-  display: grid;
-  min-width: 0;
-  flex: 1 1 180px;
-  gap: 3px;
-}
-
-.optionCopy small {
-  color: var(--retail-muted);
-}
-
-.optionControl {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.optionControl input {
+.segments input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   margin: 0;
+  opacity: 0;
+  cursor: inherit;
 }
 
-.state {
-  min-width: 2em;
+.segments span {
+  display: block;
+  min-width: 36px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  text-align: center;
   color: var(--retail-muted);
-  font-size: 13px;
-  font-weight: 650;
-  text-align: right;
 }
 
-.optionControl:has(input:checked) .state {
+.segments input:checked + span {
+  background: var(--retail-accent-soft);
   color: var(--retail-accent-strong);
+  box-shadow: inset 0 0 0 1px var(--retail-accent-line);
+}
+
+.segments input:focus-visible + span {
+  outline: 2px solid var(--retail-accent-strong);
+  outline-offset: 1px;
+}
+
+.group:disabled .segments {
+  opacity: .65;
 }
 
 .reason {

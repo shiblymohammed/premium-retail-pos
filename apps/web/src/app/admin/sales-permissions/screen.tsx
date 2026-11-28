@@ -27,7 +27,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 import { QuickAccessCard, AdminModal } from '@/components/admin';
 import { AdminActionMenu } from '@/components/admin/admin-action-menu';
-import { PermissionMatrix } from '@/components/ui/permission-matrix';
+import { PermissionEditor } from './permission-editor';
 import styles from './permissions.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
@@ -1266,7 +1266,7 @@ export default function SalesPermissionsAdmin() {
       {editingUser && <AdminModal
         isOpen
         title="Change permissions"
-        maxWidth="850px"
+        maxWidth="720px"
         subtitle={`${editingUser.name || editingUser.email} · ${roleLabels[editingUser.role] || editingUser.role}`}
         badgeIcon={<KeyRound size={20} aria-hidden="true" />}
         onClose={() => { if (!savingUserId && !confirmSave) setEditingUser(null); }}
@@ -1287,23 +1287,6 @@ export default function SalesPermissionsAdmin() {
           setConfirmSave(true);
         }}>
           {error && <Feedback tone="error">{error}</Feedback>}
-          <fieldset className={styles.options} disabled={!!savingUserId}>
-            <legend>Sales and stock counts</legend>
-            {[
-              { title: 'Cancel finalized bills', detail: 'Cancel a completed sale and record its refund.', checked: modalCanCancel, onChange: setModalCanCancel },
-              { title: 'Process customer returns', detail: 'Record returned items and their refunds.', checked: modalCanReturn, onChange: setModalCanReturn },
-              { title: 'Enter stock counts', detail: 'Submit physical quantities during a stock count.', checked: modalCanAudit, onChange: setModalCanAudit },
-            ].map(({ title, detail, checked, onChange }, index) => (
-              <label className={styles.option} key={title}>
-                <span className={styles.optionCopy}><strong>{title}</strong><small>{detail}</small></span>
-                <span className={styles.optionControl}>
-                  <span className={styles.state} aria-hidden="true">{checked ? 'On' : 'Off'}</span>
-                  <input type="checkbox" role="switch" aria-label={title} checked={checked} autoFocus={index === 0}
-                    className="admin-permission-switch" onChange={(event) => onChange(event.target.checked)} />
-                </span>
-              </label>
-            ))}
-          </fieldset>
           {(salesChanged || stockChanged) && <label className={styles.reason}>
             <strong>Reason for changing access</strong>
             <textarea rows={3} value={modalReason} required disabled={!!savingUserId}
@@ -1315,8 +1298,13 @@ export default function SalesPermissionsAdmin() {
             {profileError ? <Feedback tone="error" action={
               <button type="button" className="admin-secondary" onClick={() => setProfileReload((attempt) => attempt + 1)}>Retry</button>
             }>{profileError}</Feedback> : permissionProfile ? (
-              <PermissionMatrix definitions={permissionProfile.definitions} overrides={overrides} setOverrides={setOverrides}
-                role={editingUser.role} disabled={!!savingUserId} onOffLabels />
+              <PermissionEditor definitions={permissionProfile.definitions} overrides={overrides} setOverrides={setOverrides}
+                role={editingUser.role} disabled={!!savingUserId}
+                switches={[
+                  { key: 'sales.cancel', label: 'Cancel finalized bills', enabled: modalCanCancel, onChange: setModalCanCancel },
+                  { key: 'sales.return', label: 'Process customer returns', enabled: modalCanReturn, onChange: setModalCanReturn },
+                  { key: 'stock.count', label: 'Enter stock counts', enabled: modalCanAudit, onChange: setModalCanAudit },
+                ]} />
             ) : <p role="status">Loading per-person permissions…</p>}
           </section>
         </form>
