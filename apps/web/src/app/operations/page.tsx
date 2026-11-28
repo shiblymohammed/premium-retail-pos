@@ -887,10 +887,10 @@ export default function OperationsPage() {
     setNotice(`Exported ${list.length} transfer${list.length === 1 ? '' : 's'} to CSV.`);
   }
 
-  async function copyTracking(t: StockTransfer) {
+  async function copyTransferNumber(t: StockTransfer) {
     setMenuFor(null);
-    try { await navigator.clipboard.writeText(t.trackingNumber); setNotice(`Tracking number ${t.trackingNumber} copied.`); }
-    catch { setNotice(`Tracking number: ${t.trackingNumber}`); }
+    try { await navigator.clipboard.writeText(t.transferCode); setNotice(`Transfer number ${t.transferCode} copied.`); }
+    catch { setNotice(`Transfer number: ${t.transferCode}`); }
   }
 
   const statusTabs: Array<{ key: StatusFilter; label: string }> = [
@@ -1105,7 +1105,7 @@ export default function OperationsPage() {
                           {canPackNow && <button type="button" role="menuitem" onClick={() => openPacking(t)}><Icon name="send" size={15} /><span><b>Confirm packed quantities</b><small>Server checks available inventory</small></span></button>}
                           {canReceiveNow && <button type="button" role="menuitem" onClick={() => openReceive(t)}><Icon name="inbox" size={15} /><span><b>Receive stock</b><small>Check and add to inventory</small></span></button>}
                           {canApproveTransfers && !['RECEIVED', 'REJECTED', 'CANCELLED'].includes(t.status) && <button type="button" role="menuitem" onClick={() => { setMenuFor(null); setReasonAction({ title: `Cancel ${t.transferCode}?`, submit: (reason) => cancelTransfer(t, reason) }); }}><Icon name="x" size={15} /><span><b>Cancel transfer</b><small>Server records any in-transit reversal</small></span></button>}
-                          <button type="button" role="menuitem" onClick={() => copyTracking(t)}><Icon name="copy" size={15} /><span><b>Copy tracking number</b><small>{t.trackingNumber}</small></span></button>
+                          <button type="button" role="menuitem" onClick={() => copyTransferNumber(t)}><Icon name="copy" size={15} /><span><b>Copy transfer number</b><small>{t.transferCode}</small></span></button>
                           <div className={styles.menuDivider} />
                           <button type="button" role="menuitem" onClick={() => exportCsv([t])}><Icon name="download" size={15} /><span><b>Download as CSV</b><small>This transfer only</small></span></button>
                         </div>

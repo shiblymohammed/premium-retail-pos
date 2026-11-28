@@ -3,12 +3,13 @@ import styles from '@/app/staff-records/records.module.css';
 const categories = { sales: 'Sales', cash: 'Cash', stock: 'Inventory', products: 'Catalogue', transfers: 'Transfers',
   purchasing: 'Purchasing', customers: 'Customer accounts', staff: 'Team', attendance: 'Attendance', payroll: 'Payroll' };
 
-export function PermissionMatrix({ definitions, overrides, setOverrides, disabled, role }: {
+export function PermissionMatrix({ definitions, overrides, setOverrides, disabled, role, onOffLabels }: {
   definitions: Record<string, string>;
   overrides: Record<string, boolean>;
   setOverrides: (update: (current: Record<string, boolean>) => Record<string, boolean>) => void;
   disabled?: boolean;
   role?: string;
+  onOffLabels?: boolean;
 }) {
   return <div className={styles.grid}>{Object.entries(categories).map(([prefix, title]) => <fieldset className={styles.panel} key={prefix} disabled={disabled}>
     <legend>{title}</legend>
@@ -24,8 +25,8 @@ export function PermissionMatrix({ definitions, overrides, setOverrides, disable
           });
         }}>
         <option value="default">{key === 'products.prices' && role === 'ADMIN' ? 'Use role default (allow selling prices)' : 'Use role default'}</option>
-        <option value="allow">Allow</option>
-        <option value="deny">Deny</option>
+        <option value="allow">{onOffLabels ? 'On' : 'Allow'}</option>
+        <option value="deny">{onOffLabels ? 'Off' : 'Deny'}</option>
       </select></label>
     </div>)}
   </fieldset>)}</div>;

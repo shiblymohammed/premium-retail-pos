@@ -535,7 +535,7 @@ function UserDirectory() {
       )}
 
       {notice && <Feedback toast tone={notice.type} onDismiss={() => { setNotice(null); setPermissionReview(''); }}
-        action={permissionReview ? <Link href={`/admin/sales-permissions/access?user=${encodeURIComponent(permissionReview)}`}>Review full permissions</Link> : undefined}>
+        action={permissionReview ? <Link href={`/admin/sales-permissions?user=${encodeURIComponent(permissionReview)}`}>Review full permissions</Link> : undefined}>
         {notice.message}{permissionReview && ' Review the new account’s full permissions.'}
       </Feedback>}
       <header className="admin-page-header">

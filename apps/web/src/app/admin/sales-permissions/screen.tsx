@@ -23,11 +23,11 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import Link from 'next/link';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 import { QuickAccessCard, AdminModal } from '@/components/admin';
 import { AdminActionMenu } from '@/components/admin/admin-action-menu';
+import { PermissionMatrix } from '@/components/ui/permission-matrix';
 import styles from './permissions.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
@@ -59,6 +59,11 @@ export interface Authority {
   canProcessReturns: boolean;
   permissionsInherited: boolean;
 }
+
+type PermissionProfile = {
+  definitions: Record<string, string>;
+  permissionOverrides: Record<string, boolean> | null;
+};
 
 const ROLE_OPTIONS = [
   { value: 'ALL', label: 'All Roles' },
@@ -143,10 +148,29 @@ export default function SalesPermissionsAdmin() {
   const [modalCanReturn, setModalCanReturn] = useState(false);
   const [modalCanAudit, setModalCanAudit] = useState(false);
   const [modalReason, setModalReason] = useState('');
+  const [permissionProfile, setPermissionProfile] = useState<PermissionProfile | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
+  const [profileError, setProfileError] = useState('');
+  const [profileReload, setProfileReload] = useState(0);
+
+  const openEditModal = useCallback((user: UserRecord) => {
+    setError('');
+    setEditingUser(user);
+    setModalCanCancel(user.canCancelSales);
+    setModalCanReturn(user.canProcessReturns);
+    setModalCanAudit(user.canCountStockAudits);
+    setModalReason('');
+    setPermissionProfile(null);
+    setOverrides({});
+    setProfileError('');
+    setSelectedUserId(user.id);
+  }, []);
 
   // Initialize from Session or API
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search).get('q');
+    const params = new URLSearchParams(window.location.search);
+    const query = params.get('q');
+    const requestedUser = params.get('user');
     if (query) setSearch(query);
     const session = getStoredSession();
     if (session?.user?.email) {
@@ -183,9 +207,12 @@ export default function SalesPermissionsAdmin() {
           ]);
           if (authData?.data) setAuthority(authData.data);
           if (Array.isArray(usersData?.data)) {
-            setUsers(usersData.data.filter(
+            const eligible = usersData.data.filter(
               (u: UserRecord) => u.id !== session.user?.id && u.role !== 'SUPER_ADMIN',
-            ));
+            ) as UserRecord[];
+            setUsers(eligible);
+            const requested = eligible.find((user) => user.id === requestedUser);
+            if (requested) openEditModal(requested);
           }
           if (Array.isArray(locsData?.data)) setLocations(locsData.data);
         })
@@ -193,7 +220,27 @@ export default function SalesPermissionsAdmin() {
           setError(loadError instanceof Error ? loadError.message : 'Could not load permissions from the server.');
         })
         .finally(() => setLoading(false));
-  }, []);
+  }, [openEditModal]);
+
+  const editingUserId = editingUser?.id;
+  useEffect(() => {
+    if (!editingUserId || !token) return;
+    const controller = new AbortController();
+    setProfileError('');
+    void fetch(`${API_BASE}/users/${editingUserId}/permissions`, {
+      headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(await errorMessage(response));
+      const { data } = await response.json() as { data: PermissionProfile };
+      if (!controller.signal.aborted) {
+        setPermissionProfile(data);
+        setOverrides(data.permissionOverrides ?? {});
+      }
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setProfileError(cause instanceof Error ? cause.message : 'Could not load individual permissions.');
+    });
+    return () => controller.abort();
+  }, [editingUserId, profileReload, token]);
 
   // Global click to dismiss menus
   useEffect(() => {
@@ -267,17 +314,6 @@ export default function SalesPermissionsAdmin() {
     setCapabilityFilter('ALL');
   };
 
-  // Open Edit Permissions Modal
-  const openEditModal = (u: UserRecord) => {
-    setError('');
-    setEditingUser(u);
-    setModalCanCancel(u.canCancelSales);
-    setModalCanReturn(u.canProcessReturns);
-    setModalCanAudit(u.canCountStockAudits);
-    setModalReason('');
-    setSelectedUserId(u.id);
-  };
-
   function preparePreset(user: UserRecord, cancel: boolean, returns: boolean, count: boolean) {
     openEditModal(user);
     setModalCanCancel(cancel);
@@ -285,61 +321,57 @@ export default function SalesPermissionsAdmin() {
     setModalCanAudit(count);
   }
 
-  // Save Modal Permissions
+  const salesChanged = !!editingUser && (modalCanCancel !== editingUser.canCancelSales || modalCanReturn !== editingUser.canProcessReturns);
+  const stockChanged = !!editingUser && modalCanAudit !== editingUser.canCountStockAudits;
+  const changedOverrides = Object.keys(permissionProfile?.definitions ?? {}).filter((key) => overrides[key] !== permissionProfile?.permissionOverrides?.[key]);
+  const hasChanges = salesChanged || stockChanged || changedOverrides.length > 0;
+
   const handleSaveModal = async () => {
     setConfirmSave(false);
-    if (!editingUser || savingUserId) return;
+    if (!editingUser || !permissionProfile || !hasChanges || savingUserId) return;
     const reason = modalReason.trim();
+    if ((salesChanged || stockChanged) && !reason) return;
 
     setSavingUserId(editingUser.id);
     setError('');
-    let salesPermissionSaved = false;
+    const saved: string[] = [];
+    const updateDirectory = (patch: Partial<UserRecord>) => {
+      const changes = { ...patch, lastReason: reason, lastUpdated: 'Today' };
+      setUsers((previous) => previous.map((user) => user.id === editingUser.id ? { ...user, ...changes } : user));
+      setEditingUser((user) => user?.id === editingUser.id ? { ...user, ...changes } : user);
+    };
+    const patchPermissions = async (path: string, data: object) => {
+      const response = await fetch(`${API_BASE}/users/${editingUser.id}/${path}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error(await errorMessage(response));
+    };
 
     try {
       if (!token) throw new Error('No authenticated session. Sign in again and retry.');
-      const salesRes = await fetch(`${API_BASE}/users/${editingUser.id}/sales-permissions`, {
-          method: 'PATCH',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            canCancelSales: modalCanCancel,
-            canProcessReturns: modalCanReturn,
-            reason: reason || undefined,
-          }),
-        });
-        if (!salesRes.ok) throw new Error(await errorMessage(salesRes));
-        salesPermissionSaved = true;
+      if (salesChanged) {
+        const changes = { canCancelSales: modalCanCancel, canProcessReturns: modalCanReturn };
+        await patchPermissions('sales-permissions', { ...changes, reason });
+        updateDirectory(changes);
+        saved.push('sales permissions');
+      }
+      if (stockChanged) {
+        const changes = { canCountStockAudits: modalCanAudit };
+        await patchPermissions('stock-audit-permission', { ...changes, reason });
+        updateDirectory(changes);
+        saved.push('stock count permission');
+      }
+      if (changedOverrides.length) await patchPermissions('permissions', overrides);
 
-        const auditRes = await fetch(`${API_BASE}/users/${editingUser.id}/stock-audit-permission`, {
-          method: 'PATCH',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            canCountStockAudits: modalCanAudit,
-            reason: reason || undefined,
-          }),
-        });
-        if (!auditRes.ok) throw new Error(await errorMessage(auditRes));
-
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === editingUser.id
-            ? {
-                ...item,
-                canCancelSales: modalCanCancel,
-                canProcessReturns: modalCanReturn,
-                canCountStockAudits: modalCanAudit,
-                lastReason: reason || 'Permissions updated via admin console',
-                lastUpdated: 'Today',
-              }
-            : item,
-        ),
-      );
       setEditingUser(null);
-      setNotice(`Updated sales permissions for ${editingUser.name || editingUser.email}.`);
+      setNotice(`Updated permissions for ${editingUser.name || editingUser.email}.`);
     } catch (saveError: unknown) {
       const detail = saveError instanceof Error ? saveError.message : 'Request failed.';
-      setError(salesPermissionSaved
-        ? `Sales permissions were saved, but the stock-audit permission was not confirmed. Refresh the page to load the server state. ${detail}`
-        : `Permissions were not saved. ${detail}`);
+      setError(saved.length
+        ? `Saved: ${saved.join(', ')}. The remaining changes could not be confirmed. ${detail}`
+        : `Could not confirm the permission changes. ${detail}`);
     } finally {
       setSavingUserId('');
     }
@@ -383,7 +415,6 @@ export default function SalesPermissionsAdmin() {
         </div>
 
         <div className="admin-heading-actions">
-          <Link className="admin-secondary" href="/admin/sales-permissions/access">Per-person permissions</Link>
           <div style={{ display: 'inline-flex', background: 'var(--retail-edge)', padding: '3px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
             <button
               type="button"
@@ -1235,45 +1266,59 @@ export default function SalesPermissionsAdmin() {
       {editingUser && <AdminModal
         isOpen
         title="Change permissions"
+        maxWidth="850px"
         subtitle={`${editingUser.name || editingUser.email} · ${roleLabels[editingUser.role] || editingUser.role}`}
         badgeIcon={<KeyRound size={20} aria-hidden="true" />}
         onClose={() => { if (!savingUserId && !confirmSave) setEditingUser(null); }}
         footer={<>
           <button type="button" className="admin-secondary" disabled={!!savingUserId} onClick={() => setEditingUser(null)}>Cancel</button>
-          <button type="submit" form="sales-permission-form" className="admin-primary" disabled={!!savingUserId}>
+          <button type="submit" form="sales-permission-form" className="admin-primary" disabled={!!savingUserId || !permissionProfile || !hasChanges}>
             {savingUserId ? 'Saving…' : 'Save permissions'}
           </button>
         </>}
       >
         <form id="sales-permission-form" className={styles.form} onSubmit={(event) => {
           event.preventDefault();
-          if (savingUserId) return;
-          if (modalReason.trim()) setConfirmSave(true);
-          else setError('Enter a reason for changing access.');
+          if (savingUserId || !permissionProfile || !hasChanges) return;
+          if ((salesChanged || stockChanged) && !modalReason.trim()) {
+            setError('Enter a reason for changing sales or stock count access.');
+            return;
+          }
+          setConfirmSave(true);
         }}>
           {error && <Feedback tone="error">{error}</Feedback>}
           <fieldset className={styles.options} disabled={!!savingUserId}>
-            <legend>Individual permissions</legend>
+            <legend>Sales and stock counts</legend>
             {[
               { title: 'Cancel finalized bills', detail: 'Cancel a completed sale and record its refund.', checked: modalCanCancel, onChange: setModalCanCancel },
               { title: 'Process customer returns', detail: 'Record returned items and their refunds.', checked: modalCanReturn, onChange: setModalCanReturn },
               { title: 'Enter stock counts', detail: 'Submit physical quantities during a stock count.', checked: modalCanAudit, onChange: setModalCanAudit },
-            ].map(({ title, detail, checked, onChange }) => (
+            ].map(({ title, detail, checked, onChange }, index) => (
               <label className={styles.option} key={title}>
                 <span className={styles.optionCopy}><strong>{title}</strong><small>{detail}</small></span>
                 <span className={styles.optionControl}>
                   <span className={styles.state} aria-hidden="true">{checked ? 'On' : 'Off'}</span>
-                  <input type="checkbox" role="switch" aria-label={title} checked={checked}
+                  <input type="checkbox" role="switch" aria-label={title} checked={checked} autoFocus={index === 0}
                     className="admin-permission-switch" onChange={(event) => onChange(event.target.checked)} />
                 </span>
               </label>
             ))}
           </fieldset>
-          <label className={styles.reason}>
+          {(salesChanged || stockChanged) && <label className={styles.reason}>
             <strong>Reason for changing access</strong>
             <textarea rows={3} value={modalReason} required disabled={!!savingUserId}
               onChange={(event) => setModalReason(event.target.value)} />
-          </label>
+          </label>}
+          <section aria-labelledby="per-person-permissions">
+            <h4 id="per-person-permissions" className={styles.sectionTitle}>Per-person permissions</h4>
+            <p className={styles.sectionHint}>Set an action to On or Off for this person, or use their role default. Assigned locations still limit access.</p>
+            {profileError ? <Feedback tone="error" action={
+              <button type="button" className="admin-secondary" onClick={() => setProfileReload((attempt) => attempt + 1)}>Retry</button>
+            }>{profileError}</Feedback> : permissionProfile ? (
+              <PermissionMatrix definitions={permissionProfile.definitions} overrides={overrides} setOverrides={setOverrides}
+                role={editingUser.role} disabled={!!savingUserId} onOffLabels />
+            ) : <p role="status">Loading per-person permissions…</p>}
+          </section>
         </form>
       </AdminModal>}
 
@@ -1394,9 +1439,10 @@ export default function SalesPermissionsAdmin() {
         cancelLabel="No, keep editing" onCancel={() => setConfirmSave(false)} onConfirm={() => void handleSaveModal()}>
         <p>Update permissions for <strong>{editingUser.name || editingUser.email}</strong>?</p>
         <ul>
-          <li>Cancel bills: {modalCanCancel ? 'On' : 'Off'}</li>
-          <li>Process returns: {modalCanReturn ? 'On' : 'Off'}</li>
-          <li>Enter stock counts: {modalCanAudit ? 'On' : 'Off'}</li>
+          {modalCanCancel !== editingUser.canCancelSales && <li>Cancel bills: {modalCanCancel ? 'On' : 'Off'}</li>}
+          {modalCanReturn !== editingUser.canProcessReturns && <li>Process returns: {modalCanReturn ? 'On' : 'Off'}</li>}
+          {stockChanged && <li>Enter stock counts: {modalCanAudit ? 'On' : 'Off'}</li>}
+          {changedOverrides.map((key) => <li key={key}>{permissionProfile?.definitions[key]}: {overrides[key] === undefined ? 'Role default' : overrides[key] ? 'On' : 'Off'}</li>)}
         </ul>
       </ConfirmAction>}
     </div>
