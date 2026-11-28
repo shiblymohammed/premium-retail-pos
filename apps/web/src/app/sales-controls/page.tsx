@@ -30,9 +30,29 @@ import {
 } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { getStoredSession } from '@/lib/auth';
+import { LOCATION_KEY } from '@/components/layout/nav-data';
 import styles from './sales-controls.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+
+type ControlsOverview = {
+  recentBills: Array<{
+    id: string;
+    invoiceNumber: string;
+    status: string;
+    netTotal: string;
+    location: { name: string; company: { currency: string } };
+    _count: { returns: number };
+  }>;
+  totals: Array<{
+    currency: string;
+    returns: number;
+    cancelled: number;
+    returnedValue: string;
+    cancelledValue: string;
+    total: string;
+  }>;
+};
 
 type SalePermissions = {
   role: string;
@@ -153,9 +173,11 @@ export default function SalesControlsPage() {
   const [token, setToken] = useState<string>('');
   const [permissions, setPermissions] = useState<SalePermissions | null>(null);
 
-  // Invoices looked up from the server during this session, newest first
   const [companyBilling, setCompanyBilling] = useState<{ currency: string; invoicePrefix: string }>();
-  const [knownInvoices, setKnownInvoices] = useState<Invoice[]>([]);
+  const [locationScope, setLocationScope] = useState('');
+  const [overview, setOverview] = useState<ControlsOverview | null>(null);
+  const [overviewError, setOverviewError] = useState('');
+  const [overviewRevision, setOverviewRevision] = useState(0);
 
   // Invoice lookup state
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -187,7 +209,34 @@ export default function SalesControlsPage() {
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: code }).format(Number(amount) || 0);
   const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: invoice?.location.company.timezone });
 
-  /** Shows a bill and keeps the "recent bills" list in sync with any change to it. */
+  useEffect(() => {
+    const updateScope = () => {
+      const scope = window.localStorage.getItem(LOCATION_KEY) ?? '';
+      setLocationScope(['All retail locations', 'All locations'].includes(scope) ? '' : scope);
+    };
+    updateScope();
+    window.addEventListener('premium-retail-location-change', updateScope);
+    return () => window.removeEventListener('premium-retail-location-change', updateScope);
+  }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    setOverview(null);
+    setOverviewError('');
+    const params = new URLSearchParams(locationScope ? { location: locationScope } : {});
+    void fetch(`${API_BASE}/sales/controls/overview?${params}`, {
+      headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('Could not load returns, cancellations, and recent bills.');
+      const { data } = await response.json() as { data: ControlsOverview };
+      if (!controller.signal.aborted) setOverview(data);
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setOverviewError(cause instanceof Error ? cause.message : 'Could not load the returns overview.');
+    });
+    return () => controller.abort();
+  }, [token, locationScope, overviewRevision]);
+
   useEffect(() => {
     if (!token) return;
     const controller = new AbortController();
@@ -208,8 +257,6 @@ export default function SalesControlsPage() {
   function setInvoice(next: Invoice | null) {
     setRefundDrawerOpen(next?.refundDrawer?.open ?? false);
     setInvoiceState(next);
-    if (!next) return;
-    setKnownInvoices((list) => [next, ...list.filter((i) => i.invoiceNumber !== next.invoiceNumber)]);
   }
 
   // Sync with global auth session
@@ -375,6 +422,7 @@ export default function SalesControlsPage() {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.message || 'The server could not cancel this bill');
         }
+        setOverviewRevision((revision) => revision + 1);
         const refreshed = await fetch(`${API_BASE}/sales/invoice/${encodeURIComponent(invoice.invoiceNumber)}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
         if (refreshed.ok) setInvoice((await refreshed.json()).data as Invoice);
       }
@@ -415,6 +463,7 @@ export default function SalesControlsPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.message || 'The server could not record this return.');
       }
+      setOverviewRevision((revision) => revision + 1);
       const refreshed = await fetch(`${API_BASE}/sales/invoice/${encodeURIComponent(invoice.invoiceNumber)}`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
       if (refreshed.ok) setInvoice((await refreshed.json()).data as Invoice);
       setNotice('Return recorded by the server.');
@@ -426,13 +475,11 @@ export default function SalesControlsPage() {
   }
 
   // ---------- Derived figures for the summary cards ----------
-  const summary = useMemo(() => {
-    const returns = knownInvoices.flatMap((i) => i.returns);
-    const returnedValue = returns.reduce((s, r) => s + Number(r.refund?.amount || 0), 0);
-    const cancelled = knownInvoices.filter((i) => i.status === 'CANCELLED');
-    const cancelledValue = cancelled.reduce((s, i) => s + Number(i.netTotal), 0);
-    return { returns: returns.length, returnedValue, cancelled: cancelled.length, cancelledValue, total: returnedValue + cancelledValue, bills: knownInvoices.length };
-  }, [knownInvoices]);
+  const returnsCount = overview?.totals.reduce((total, group) => total + group.returns, 0);
+  const cancelledCount = overview?.totals.reduce((total, group) => total + group.cancelled, 0);
+  const summaryMoney = (key: 'returnedValue' | 'cancelledValue' | 'total') => overview
+    ? overview.totals.map((group) => currency(group[key], group.currency)).join(' · ') || currency(0)
+    : '—';
 
   const updateLine = (id: string, patch: Partial<ReturnLineSelection>) => setReturnLines((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
   const isFinal = invoice?.status === 'FINALIZED';
@@ -471,6 +518,7 @@ export default function SalesControlsPage() {
 
       {error && <Feedback tone="error" onDismiss={() => setError('')}>{error}</Feedback>}
       {notice && <Feedback tone="success" onDismiss={() => setNotice('')}>{notice}</Feedback>}
+      {overviewError && <Feedback tone="error" action={<button type="button" className={styles.ghostButton} onClick={() => setOverviewRevision((revision) => revision + 1)}>Retry</button>}>{overviewError}</Feedback>}
 
       {/* ---------- Summary cards ---------- */}
       <section className={styles.summaryGrid} aria-label="Returns and cancellations summary">
@@ -478,44 +526,44 @@ export default function SalesControlsPage() {
           <i className={styles.summaryIcon}><Icon name="return" size={18} /></i>
           <div className={styles.summaryMain}>
             <span className={styles.summaryLabel}>Returns recorded</span>
-            <strong className={styles.summaryValue}>{summary.returns}</strong>
+            <strong className={styles.summaryValue}>{returnsCount ?? '—'}</strong>
           </div>
           <div className={styles.summaryDetail}>
             <span className={styles.summaryDetailLabel}>Refunded</span>
-            <b className={`${styles.chip} ${styles.chipBlue}`}>{currency(summary.returnedValue)}</b>
+            <b className={`${styles.chip} ${styles.chipBlue}`}>{summaryMoney('returnedValue')}</b>
           </div>
         </article>
         <article className={`${styles.summaryCard} ${styles.summaryRed}`}>
           <i className={styles.summaryIcon}><Icon name="ban" size={18} /></i>
           <div className={styles.summaryMain}>
             <span className={styles.summaryLabel}>Bills cancelled</span>
-            <strong className={styles.summaryValue}>{summary.cancelled}</strong>
+            <strong className={styles.summaryValue}>{cancelledCount ?? '—'}</strong>
           </div>
           <div className={styles.summaryDetail}>
             <span className={styles.summaryDetailLabel}>Voided</span>
-            <b className={`${styles.chip} ${styles.chipRed}`}>{currency(summary.cancelledValue)}</b>
+            <b className={`${styles.chip} ${styles.chipRed}`}>{summaryMoney('cancelledValue')}</b>
           </div>
         </article>
         <article className={`${styles.summaryCard} ${styles.summaryHighlight}`}>
           <i className={styles.summaryIcon}><Icon name="rupee" size={18} /></i>
           <div className={styles.summaryMain}>
             <span className={styles.summaryLabel}>Total paid back</span>
-            <strong className={styles.summaryValue}>{currency(summary.total)}</strong>
+            <strong className={styles.summaryValue}>{summaryMoney('total')}</strong>
           </div>
           <div className={styles.summaryDetail}>
             <span className={styles.summaryDetailLabel}>Combined</span>
-            <b className={`${styles.chip} ${styles.chipPurple}`}>{summary.returns + summary.cancelled}</b>
+            <b className={`${styles.chip} ${styles.chipPurple}`}>{overview ? (returnsCount ?? 0) + (cancelledCount ?? 0) : '—'}</b>
           </div>
         </article>
         <article className={`${styles.summaryCard} ${styles.summaryGray}`}>
           <i className={styles.summaryIcon}><Icon name="receipt" size={18} /></i>
           <div className={styles.summaryMain}>
             <span className={styles.summaryLabel}>Bills on screen</span>
-            <strong className={styles.summaryValue}>{summary.bills}</strong>
+            <strong className={styles.summaryValue}>{overview?.recentBills.length ?? '—'}</strong>
           </div>
           <div className={styles.summaryDetail}>
             <span className={styles.summaryDetailLabel}>Status</span>
-            <b className={styles.chip}>{knownInvoices.filter((i) => i.status === 'FINALIZED').length} open</b>
+            <b className={styles.chip}>{overview ? `${overview.recentBills.filter((bill) => bill.status === 'FINALIZED').length} open` : '—'}</b>
           </div>
         </article>
       </section>
@@ -534,13 +582,15 @@ export default function SalesControlsPage() {
             <button type="submit" disabled={busy || !invoiceNumber.trim()} className={styles.primaryButton}><Icon name="search" size={16} /> Find bill</button>
           </form>
           <div className={styles.recentLabel}>Recent bills</div>
+          {!overview && !overviewError && <p role="status">Loading recent bills…</p>}
+          {overview?.recentBills.length === 0 && <p>No bills found for this location selection.</p>}
           <div className={styles.recentGrid}>
-            {knownInvoices.map((inv) => {
-              const hasReturns = inv.returns.length > 0;
+            {overview?.recentBills.map((inv) => {
+              const hasReturns = inv._count.returns > 0;
               const tone = inv.status === 'CANCELLED' ? styles.badgeRed : hasReturns ? styles.badgeAmber : styles.badgeGreen;
               return (
-                <button key={inv.invoiceNumber} type="button" className={`${styles.recent} ${invoice?.invoiceNumber === inv.invoiceNumber ? styles.recentOn : ''}`} onClick={() => setInvoice(inv)}>
-                  <span className={styles.recentTop}><b>{inv.invoiceNumber}</b><span className={`${styles.badge} ${tone}`}>{inv.status === 'CANCELLED' ? 'Cancelled' : hasReturns ? 'Part returned' : 'Paid'}</span></span>
+                <button key={inv.id} type="button" disabled={busy} className={`${styles.recent} ${invoice?.invoiceNumber === inv.invoiceNumber ? styles.recentOn : ''}`} onClick={() => void findInvoice(undefined, inv.invoiceNumber)}>
+                  <span className={styles.recentTop}><b>{inv.invoiceNumber}</b><span className={`${styles.badge} ${tone}`}>{inv.status === 'CANCELLED' ? 'Cancelled' : hasReturns ? 'Has returns' : 'Paid'}</span></span>
                   <span className={styles.recentMeta}>{inv.location.name} · {currency(inv.netTotal, inv.location.company.currency)}</span>
                 </button>
               );

@@ -17,7 +17,7 @@ export type SaleReturnRecord = {
     saleLineId: string;
     quantityBaseUnits: number;
     disposition: 'RESTOCKED' | 'QUARANTINED';
-    inspectionNotes: string | null;
+    inspectionNotes?: string | null;
     refundAmount: string;
   }>;
   refund?: { amount: string; method: string; transactionReference?: string | null } | null;

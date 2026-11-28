@@ -347,6 +347,51 @@ export class SalesService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   }
 
+  async getControlsOverview(actor: SaleActor, location?: string) {
+    const user = await this.requireSaleControlUser(actor);
+    const scope = user.role === Role.SUPER_ADMIN ? undefined : await this.prisma.userLocationScope.findMany({
+      where: { userId: actor.userId }, select: { locationId: true },
+    });
+    const locations = await this.prisma.location.findMany({
+      where: {
+        type: LocationType.RETAIL_STORE,
+        ...(scope && { id: { in: scope.map((entry) => entry.locationId) } }),
+        ...(location && { OR: [{ id: location }, { name: location }] }),
+      },
+      select: { id: true, company: { select: { currency: true } } },
+    });
+    const locationsByCurrency = new Map<string, string[]>();
+    for (const store of locations) {
+      const ids = locationsByCurrency.get(store.company.currency) ?? [];
+      ids.push(store.id);
+      locationsByCurrency.set(store.company.currency, ids);
+    }
+    const [recentBills, totals] = await this.prisma.$transaction(async (tx) => Promise.all([
+      tx.invoice.findMany({
+        where: { locationId: { in: locations.map((store) => store.id) } },
+        select: {
+          id: true, invoiceNumber: true, status: true, netTotal: true,
+          location: { select: { name: true, company: { select: { currency: true } } } },
+          _count: { select: { returns: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 8,
+      }),
+      Promise.all([...locationsByCurrency].map(async ([currency, ids]) => {
+        const invoice = { locationId: { in: ids } };
+        const [returns, cancelled, refunds] = await Promise.all([
+          tx.saleReturn.count({ where: { invoice } }),
+          tx.invoice.count({ where: { ...invoice, status: InvoiceStatus.CANCELLED } }),
+          tx.invoiceRefund.groupBy({ by: ['type'], where: { invoice }, _sum: { amount: true } }),
+        ]);
+        const returnedValue = refunds.find(({ type }) => type === RefundType.SALE_RETURN)?._sum.amount ?? new Prisma.Decimal(0);
+        const cancelledValue = refunds.find(({ type }) => type === RefundType.SALE_CANCELLATION)?._sum.amount ?? new Prisma.Decimal(0);
+        return { currency, returns, cancelled, returnedValue, cancelledValue, total: returnedValue.add(cancelledValue) };
+      })),
+    ]), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return { recentBills, totals };
+  }
+
   async findInvoiceForSaleControl(invoiceNumber: string, actor: SaleActor) {
     const invoice = await this.prisma.invoice.findUnique({
       where: { invoiceNumber: invoiceNumber.trim() },
@@ -359,14 +404,7 @@ export class SalesService {
       },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    const user = await this.prisma.user.findUnique({
-      where: { id: actor.userId },
-      select: { role: true, isActive: true, canCancelSales: true, canProcessReturns: true },
-    });
-    if (!user?.isActive) throw new ForbiddenException('An active account is required for sale controls');
-    if (user.role !== Role.SUPER_ADMIN && !user.canCancelSales && !user.canProcessReturns) {
-      throw new ForbiddenException('This account is not assigned sale cancellation or return permission');
-    }
+    const user = await this.requireSaleControlUser(actor);
     if (user.role !== Role.SUPER_ADMIN) {
       const scopes = await this.prisma.userLocationScope.findMany({ where: { userId: actor.userId }, select: { locationId: true } });
       if (!scopes.some((scope) => scope.locationId === invoice.locationId)) throw new ForbiddenException('You are not authorized for this invoice location');
@@ -421,6 +459,18 @@ export class SalesService {
         canProcessReturns: user.role === Role.SUPER_ADMIN || user.canProcessReturns,
       },
     };
+  }
+
+  private async requireSaleControlUser(actor: SaleActor) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: actor.userId },
+      select: { role: true, isActive: true, canCancelSales: true, canProcessReturns: true },
+    });
+    if (!user?.isActive) throw new ForbiddenException('An active account is required for sale controls');
+    if (user.role !== Role.SUPER_ADMIN && !user.canCancelSales && !user.canProcessReturns) {
+      throw new ForbiddenException('This account is not assigned sale cancellation or return permission');
+    }
+    return user;
   }
 
   async createSaleReturn(invoiceId: string, dto: CreateSaleReturnDto, actor: SaleActor, rawIdempotencyKey?: string) {

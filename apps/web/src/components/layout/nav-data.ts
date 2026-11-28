@@ -93,7 +93,7 @@ export const ALL_NAV_GROUPS: NavGroup[] = [
         label: 'My Attendance',
         href: '/attendance',
         icon: 'attendance',
-        roles: ['CASHIER', 'STAFF', 'INVENTORY'],
+        roles: [...ATTENDANCE_MANAGER_ROLES, 'WAREHOUSE_MANAGER', 'CASHIER', 'STAFF', 'INVENTORY'],
       },
       {
         label: 'Staff records',

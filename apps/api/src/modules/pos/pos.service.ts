@@ -112,6 +112,13 @@ export class PosService {
       select: {
         id: true, invoiceNumber: true, createdAt: true, grossTotal: true, discountTotal: true, netTotal: true,
         payment: { select: { method: true, amount: true, cashTenderedAmount: true, changeGivenAmount: true } },
+        returns: { select: {
+          returnNumber: true, processedAt: true,
+          refund: { select: { amount: true, method: true } },
+          lines: { select: {
+            id: true, saleLineId: true, quantityBaseUnits: true, disposition: true, refundAmount: true,
+          } },
+        } },
         lines: { select: {
           id: true, quantityBaseUnits: true, enteredUnit: true, conversionRatioUsed: true, unitPriceAtSale: true, lineTotal: true,
           variant: { select: { sku: true, name: true, product: { select: { name: true, baseUnit: true } } } },

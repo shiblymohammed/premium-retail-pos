@@ -1,5 +1,5 @@
 import { Permission } from '../../common/decorators/permission.decorator';
-import { Body, Controller, Get, Headers, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { CHECKOUT_ROLES } from '../pos/checkout-access';
 import { CurrentUser, RequestUser } from '../../common/decorators/current-user.decorator';
@@ -26,6 +26,11 @@ export class SalesController {
   @Get('invoice/:invoiceNumber')
   async findInvoiceForSaleControl(@Param('invoiceNumber') invoiceNumber: string, @CurrentUser() actor: RequestUser) {
     return { data: await this.sales.findInvoiceForSaleControl(invoiceNumber, actor) };
+  }
+
+  @Get('controls/overview')
+  async controlsOverview(@Query('location') location: string | undefined, @CurrentUser() actor: RequestUser) {
+    return { data: await this.sales.getControlsOverview(actor, location) };
   }
 
   @Post()

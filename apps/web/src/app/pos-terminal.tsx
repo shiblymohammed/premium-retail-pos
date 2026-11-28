@@ -5,7 +5,7 @@ import { downloadPdf } from '@/lib/report-download';
 import { useAccess } from '@/lib/permissions';
 import { AdminModal } from '@/components/admin/admin-modal';
 import { CashDrawer } from './cash-drawer';
-import { ReturnHistory, soldUnitPrice, type SaleReturnRecord } from '@/components/sales/return-history';
+import { countInUnit, ReturnHistory, soldUnitPrice, type SaleReturnRecord } from '@/components/sales/return-history';
 import { InfoHint } from '@/components/ui/info-hint';
 import {
   ArrowRight,
@@ -100,6 +100,7 @@ type SaleReceipt = {
   netTotal: string;
   payment?: { method: string; amount: string; cashTenderedAmount?: string | null; changeGivenAmount?: string | null };
   lines: Array<{ id: string; quantityBaseUnits: number; enteredUnit?: string; conversionRatioUsed?: number | null; unitPriceAtSale: string; lineTotal: string; variant: { sku: string; name: string; product: { name: string; baseUnit: string } } }>;
+  returns?: SaleReturnRecord[];
   createdAt: string;
 };
 
@@ -312,6 +313,7 @@ export default function PosTerminal() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Product[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [browseProducts, setBrowseProducts] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('All categories');
   const [catalogSort, setCatalogSort] = useState<'name' | 'price-low' | 'price-high'>('name');
   const [stockBalances, setStockBalances] = useState<Record<string, StockBalance>>({});
@@ -468,11 +470,19 @@ export default function PosTerminal() {
   }
 
   function downloadReceipt(receipt: SaleReceipt) {
+    const returns = (receipt.returns ?? []).flatMap((entry) => [
+      [`Return ${entry.returnNumber}`, entry.refund?.method ?? '', formatMoney(entry.refund?.amount ?? 0)],
+      ...(entry.lines ?? []).map((line) => {
+        const item = receipt.lines.find((sold) => sold.id === line.saleLineId);
+        const condition = line.disposition === 'QUARANTINED' ? 'Quarantined' : 'Returned to stock';
+        return [item?.variant.product.name ?? 'Returned item', `${countInUnit(line.quantityBaseUnits, item?.variant.product.baseUnit ?? 'unit')} · ${condition}`, formatMoney(line.refundAmount)];
+      }),
+    ]);
     downloadPdf(`Receipt ${receipt.invoiceNumber}`, `${terminal?.location.name ?? ''} · ${new Date(receipt.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })}`,
       ['Item', 'Quantity and unit price', 'Amount'],
       [...receipt.lines.map((line) => [
         `${line.variant.product.name} · ${line.variant.sku}`, receiptQuantity(line), formatMoney(line.lineTotal),
-      ]), ...receiptTotals(receipt).map(([label, total]) => [label, '', total])],
+      ]), ...receiptTotals(receipt).map(([label, total]) => [label, '', total]), ...returns],
       `receipt-${receipt.invoiceNumber}.pdf`);
   }
 
@@ -1314,10 +1324,11 @@ export default function PosTerminal() {
   const refundAtTerminal = saleControl?.location.id === terminal.location.id && canOpenDrawer;
   const refundNeedsDrawer = refundMethod === 'CASH' && saleControl?.refundDrawer?.requiredForCash &&
     !(refundAtTerminal ? cashDrawerId : saleControl.refundDrawer.open) && !saleControlRetryPending;
+  const showCatalog = browseProducts || !!query.trim();
 
   return (
     <main className="pos-shell">
-      <div className={`pos-content${canCreateSale ? '' : ' pos-utility-only'}`}>
+      <div className={`pos-content${canCreateSale ? (showCatalog ? ' pos-with-catalog' : ' pos-basket-only') : ' pos-utility-only'}`}>
         {!canCreateSale && <header><h1>Register tools</h1><p>{terminal.location.name}</p></header>}
         <div className="pos-history-actions">
           {canOpenDrawer && <CashDrawer key={terminal.location.id} api={API_BASE} token={token} locationId={terminal.location.id} timezone={terminal.location.timezone}
@@ -1354,8 +1365,9 @@ export default function PosTerminal() {
             <strong>{formatMoney(saleTotals.net)}</strong>
           </button>
         </div>
-        <section className="catalog-panel">
+        <div className="pos-search-panel">
           <div className="catalog-search-area">
+            <div className="pos-search-tools">
             <div className="search-wrap">
               <Search size={18} className="search-icon" aria-hidden="true" />
               <input
@@ -1370,6 +1382,16 @@ export default function PosTerminal() {
               {query && <button className="clear-search" type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={16} className="inline-icon" aria-hidden="true" /></button>}
               <kbd>ENTER</kbd>
             </div>
+            <button type="button" className="admin-secondary" aria-expanded={showCatalog}
+              onClick={() => {
+                const hide = browseProducts && !query.trim() && selectedCategory === 'All categories';
+                setBrowseProducts(!hide);
+                setQuery('');
+                setSelectedCategory('All categories');
+              }}>
+              {browseProducts && !query.trim() && selectedCategory === 'All categories' ? 'Hide products' : 'Show all products'}
+            </button>
+            </div>
             <div className="scanner-status"><span className="status-dot" /> Ready to scan · Enter a barcode or search</div>
           </div>
 
@@ -1377,7 +1399,9 @@ export default function PosTerminal() {
           {notice && !error && <div className="notice-line">{notice}</div>}
           {saleRetryPending && <div className="alert stock-error">The checkout response was interrupted. Retry the same sale to safely confirm its result; keep this terminal open.</div>}
           {stockError && <div className="alert stock-error">Stock refresh failed: {stockError}</div>}
+        </div>
 
+        {showCatalog && <section className="catalog-panel" aria-label="Products">
           <section className="catalog-browser">
             <div className="catalog-heading">
               <div><div className="eyebrow">SALES FLOOR</div><h1>Products <span>({results.length})</span></h1></div>
@@ -1415,7 +1439,7 @@ export default function PosTerminal() {
               </div>
             ) : catalogLoading ? <div className="catalog-loading">Updating catalogue…</div> : <div className="empty-state"><div className="empty-icon"><Search size="1em" className="inline-icon" aria-hidden="true" /></div><strong>{query ? 'No matching products' : 'No active products found'}</strong><span>{query ? 'Try another product name, SKU, or barcode.' : 'Products available to sell will appear here.'}</span></div>}
           </section>
-        </section>
+        </section>}
 
         <aside className="basket-panel" aria-labelledby="pos-basket-title">
           <div className="basket-heading">
@@ -1551,7 +1575,6 @@ export default function PosTerminal() {
         footer={<button type="button" className="admin-secondary" disabled={controlBusy} onClick={() => setReturnsOpen(false)}>Done</button>}>
         <section className="sale-controls checkout-returns">
             <div className="invoice-search"><input aria-label="Invoice number" value={invoiceSearch} onChange={(event) => setInvoiceSearch(event.target.value)} placeholder="Invoice number" disabled={saleControlRetryPending} /><button className="small-action-button" disabled={controlBusy || saleControlRetryPending || !invoiceSearch.trim()} onClick={() => void loadSaleControl()}>{controlBusy ? 'Loading…' : 'Find'}</button></div>
-            {controlError && <Feedback tone="error">{controlError}</Feedback>}
             {controlNotice && <Feedback tone="success">{controlNotice}</Feedback>}
             {saleControl && <div className="invoice-control-card">
               <div className="invoice-control-heading"><strong>{saleControl.invoiceNumber}</strong><span>{saleControl.status} · {saleControl.location.name}</span></div>
@@ -1594,6 +1617,9 @@ export default function PosTerminal() {
             </div>}
         </section>
       </AdminModal>}
+      {returnsOpen && !refundDrawerOpen && controlError && <div className="pos-return-toast">
+        <Feedback tone="error" onDismiss={() => setControlError('')}>{controlError}</Feedback>
+      </div>}
       {customerLookupOpen && <div className="checkout-modal-backdrop">
         <section className="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="lookup-title" onKeyDown={(event) => {
           if (event.key === 'Escape') { event.stopPropagation(); closeCustomerLookup(); }
@@ -1658,22 +1684,28 @@ export default function PosTerminal() {
       {receiptHistoryOpen && <div className="receipt-overlay">
         <section className="receipt-card receipt-history-card" role="dialog" aria-modal="true" aria-labelledby="receipt-history-title"
           onKeyDown={(event) => { if (event.key === 'Escape') setReceiptHistoryOpen(false); }}>
-          <h2 id="receipt-history-title">Receipt history</h2>
+          <header className="pos-receipt-header">
+            <h2 id="receipt-history-title">Receipt history</h2>
+            <button type="button" className="pos-receipt-close" aria-label="Close receipt history" onClick={() => setReceiptHistoryOpen(false)}><X size={18} aria-hidden="true" /></button>
+          </header>
           <p>{terminal.location.name} · Up to 25 matching finalized sales</p>
           <label className="discount-input">Invoice number<input autoFocus value={receiptQuery} onChange={(event) => setReceiptQuery(event.target.value)} /></label>
           {receiptHistoryError ? <Feedback tone="error">{receiptHistoryError}</Feedback> : receiptHistory === null ? <p role="status">Loading receipts…</p> :
             receiptHistory.length === 0 ? <p>No matching receipts.</p> : receiptHistory.map((receipt) => <div className="receipt-line" key={receipt.id}>
-              <span><b>{receipt.invoiceNumber}</b><small>{new Date(receipt.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })} · {formatMoney(receipt.netTotal)}</small></span>
+              <span><b>{receipt.invoiceNumber}</b><small>{new Date(receipt.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })} · {formatMoney(receipt.netTotal)}</small>
+                {!!receipt.returns?.length && <small>{receipt.returns.length} {receipt.returns.length === 1 ? 'return' : 'returns'} · {formatMoney(receipt.returns.reduce((total, entry) => total + Number(entry.refund?.amount ?? 0), 0))} refunded</small>}
+              </span>
               <button type="button" className="admin-secondary" onClick={() => { setReceiptHistoryOpen(false); setLastReceipt(receipt); }}>Open receipt</button>
             </div>)}
-          <button type="button" className="admin-secondary" onClick={() => setReceiptHistoryOpen(false)}>Close</button>
         </section>
       </div>}
       {lastReceipt && !offlineDrawerOpen && !drawerOpen && <div className="receipt-overlay">
         <section className="receipt-card receipt-history-card" role="dialog" aria-modal="true" aria-label="Sale receipt"
           onKeyDown={(event) => { if (event.key === 'Escape') setLastReceipt(null); }}>
-          <div className="eyebrow">{terminal.location.name}</div>
-          <h2>{lastReceipt.invoiceNumber}</h2>
+          <header className="pos-receipt-header">
+            <div><div className="eyebrow">{terminal.location.name}</div><h2>{lastReceipt.invoiceNumber}</h2></div>
+            <button type="button" className="pos-receipt-close" autoFocus aria-label="Close receipt" onClick={() => setLastReceipt(null)}><X size={18} aria-hidden="true" /></button>
+          </header>
           <p>{new Date(lastReceipt.createdAt).toLocaleString(undefined, { timeZone: terminal?.location.timezone })}</p>
           {lastReceipt.lines.map((line) => <div className="receipt-line" key={line.id}>
             <span>{line.variant.product.name} · {line.variant.name}
@@ -1686,10 +1718,13 @@ export default function PosTerminal() {
               <span>{label}</span><strong>{amount}</strong>
             </div>
           ))}
+          {!!lastReceipt.returns?.length && <section className="pos-receipt-returns" aria-label="Returns for this receipt">
+            <h3>Returns and refunds</h3>
+            <ReturnHistory returns={lastReceipt.returns} saleLines={lastReceipt.lines} money={formatMoney} timezone={terminal.location.timezone} />
+          </section>}
           <div className="receipt-actions">
             <button className="admin-secondary" type="button" onClick={() => window.print()}>Print receipt</button>
             <button className="admin-secondary" type="button" onClick={() => downloadReceipt(lastReceipt)}>Download PDF</button>
-            <button className="text-button" type="button" autoFocus onClick={() => setLastReceipt(null)}>Close</button>
           </div>
         </section>
       </div>}

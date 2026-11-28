@@ -293,8 +293,8 @@ export default function AttendancePage() {
     const attendance = HISTORY_LABEL[day.status];
     return `${date} · ${attendance}${day.status === 'late' ? ' · Late arrival' : ''}${day.clockIn !== '—' ? ` · ${day.clockIn} – ${day.clockOut}${day.clockOut === '—' ? ' (working)' : ''} (${day.hours})` : ''}`;
   };
-  const clockValue = clockNow ? new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(clockNow) : '—';
-  const longDate = clockNow ? new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(clockNow) : today.localDate;
+  const clockValue = clockNow ? new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: today.timezone }).format(clockNow) : '—';
+  const longDate = clockNow ? new Intl.DateTimeFormat('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: today.timezone }).format(clockNow) : today.localDate;
 
   return (
     <main className={`${styles.page} app-page`}>
@@ -320,7 +320,7 @@ export default function AttendancePage() {
 
             <div className={styles.shiftSummary}>
               {today.status === 'NOT_STARTED' && <>
-                <div><small>Local time</small><strong>{clockValue}</strong><p>{today.targetStartTime ? `Scheduled start ${today.targetStartTime}` : 'Clock in when you’re ready to start.'}</p></div>
+                <div><small>Company time · {today.timezone}</small><strong>{clockValue}</strong><p>{today.targetStartTime ? `Scheduled start ${today.targetStartTime}` : 'Clock in when you’re ready to start.'}</p></div>
                 <button className="admin-primary" type="button" disabled={busy} onClick={handlePunch}>
                   <ArrowUpRight size={18} /> {busy ? 'Saving…' : 'Clock in'}
                 </button>

@@ -90,7 +90,7 @@ export function CashDrawer({
       setOpening('');
       setCash('');
       setCard('');
-      await refresh();
+      setOpen(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not update the cash drawer.');
     } finally {
