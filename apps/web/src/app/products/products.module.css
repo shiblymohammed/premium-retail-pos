@@ -584,6 +584,8 @@ button.chip:hover { filter: brightness(0.95); }
   gap: 0.85rem;
 }
 
+.intakeFields { --ink: var(--retail-ink); --accent: var(--retail-accent); }
+
 .intakeLine {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   align-items: end;
@@ -739,3 +741,7 @@ button.chip:hover { filter: brightness(0.95); }
     font-size: 16px;
   }
 }
+
+.intakeOrder { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.intakeHint, .intakeRemaining { margin: 0; color: var(--retail-muted); font-size: 13px; }
+.intakeRemaining { grid-column: 1 / -1; }

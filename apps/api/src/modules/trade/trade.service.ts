@@ -9,7 +9,7 @@ export const PURCHASE_ORDER_ROLES: Role[] = [Role.SUPER_ADMIN, Role.ADMIN, Role.
 export const SUPPLIER_PAYMENT_ROLES: Role[] = [Role.SUPER_ADMIN, Role.ADMIN];
 
 const orderInclude = {
-  lines: { include: { variant: { select: { sku: true, product: { select: { name: true, baseUnit: true } } } } } },
+  lines: { include: { variant: { select: { sku: true, product: { select: { name: true, baseUnit: true, unitsPerCarton: true } } } } } },
   receipts: { select: { id: true, receiptNumber: true, confirmedAt: true, lines: { select: { variantId: true, quantityBaseUnits: true } } } },
   payments: { select: { id: true, amount: true, reference: true, createdAt: true, actor: { select: { email: true } } } },
 } satisfies Prisma.PurchaseOrderInclude;
@@ -39,15 +39,36 @@ export class TradeService {
     return normalized;
   }
 
-  async orders(locationId: string, actor: RequestUser) {
+  private requirePurchasingAccess(locationId: string, actor: RequestUser) {
     if (!can(actor, 'purchasing.orders', PURCHASE_ORDER_ROLES.includes(actor.role as Role)) &&
       !can(actor, 'purchasing.payments', SUPPLIER_PAYMENT_ROLES.includes(actor.role as Role))) {
       throw new ForbiddenException('Purchase order or supplier payment access is required');
     }
     this.scope(locationId, actor);
+  }
+
+  async orders(locationId: string, actor: RequestUser) {
+    this.requirePurchasingAccess(locationId, actor);
     return this.prisma.purchaseOrder.findMany({
       where: { locationId }, include: orderInclude,
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async receipts(locationId: string, actor: RequestUser, search?: string) {
+    this.requirePurchasingAccess(locationId, actor);
+    const number = typeof search === 'string' ? search.trim().slice(0, 100) : '';
+    return this.prisma.supplierReceipt.findMany({
+      where: { locationId, ...(number && { receiptNumber: { contains: number, mode: 'insensitive' } }) },
+      select: {
+        id: true, receiptNumber: true, supplierName: true, confirmedAt: true, notes: true,
+        purchaseOrder: { select: { id: true, number: true } },
+        lines: { select: { id: true, quantityBaseUnits: true, cartons: true, looseBaseUnits: true, unitsPerCarton: true,
+          variant: { select: { sku: true, product: { select: { name: true, baseUnit: true } } } },
+        } },
+      },
+      orderBy: [{ confirmedAt: 'desc' }, { id: 'desc' }],
+      take: 30,
     });
   }
 

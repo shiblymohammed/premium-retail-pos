@@ -5,9 +5,13 @@ import { useEffect, useState } from 'react';
 import { Feedback } from '@/components/ui/feedback';
 import { getStoredSession } from '@/lib/auth';
 import { tradeRequest } from './trade-api';
-import styles from '../staff-records/records.module.css';
+import styles from './trade.module.css';
+import { CreditCard, PackageCheck, ShoppingBag } from 'lucide-react';
+import { LOCATION_KEY } from '@/components/layout/nav-data';
 import { StockIntake, type StockLocation, type StockVariant } from '../products/stock-intake';
-import { PurchaseOrders, type Order } from './purchase-orders';
+import { PurchaseOrders } from './purchase-orders';
+import type { Order } from './purchase-data';
+import { GoodsReceipts } from './goods-receipts';
 import { CustomerCredit } from './customer-credit';
 
 export const dynamic = 'force-static';
@@ -19,7 +23,8 @@ export default function TradePage() {
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [catalogue, setCatalogue] = useState<StockVariant[]>([]);
   const [locationId, setLocationId] = useState('');
-  const [tab, setTab] = useState<'orders' | 'credit'>('orders');
+  const [tab, setTab] = useState<'orders' | 'receipts' | 'credit'>('orders');
+  const [receiptSearch, setReceiptSearch] = useState('');
   const [receiving, setReceiving] = useState<Order | null>(null);
   const [reload, setReload] = useState(0);
   const [error, setError] = useState('');
@@ -44,7 +49,16 @@ export default function TradePage() {
     const controller = new AbortController();
     void tradeRequest<StockLocation[]>('/locations', session.accessToken, controller.signal).then((locations) => {
       setLocations(locations);
-      setLocationId(locations[0]?.id ?? '');
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get('locationId');
+      const workspace = window.localStorage.getItem(LOCATION_KEY);
+      setLocationId(locations.find((location) => location.id === requested)?.id
+        ?? locations.find((location) => location.id === workspace || location.name === workspace)?.id
+        ?? locations[0]?.id ?? '');
+      if (params.get('tab') === 'receipts') {
+        setTab('receipts');
+        setReceiptSearch((params.get('receipt') ?? '').slice(0, 100));
+      }
       setToken(session.accessToken);
       setRole(session.user.role);
     }).catch((error) => { if (!controller.signal.aborted) setError(error.message); })
@@ -66,7 +80,7 @@ export default function TradePage() {
     if (role && canCredit && !canOrder && !canPay && tab !== 'credit') setMode('credit');
   }, [role, canCredit, canOrder, canPay, tab]);
 
-  function setMode(next: 'orders' | 'credit') {
+  function setMode(next: 'orders' | 'receipts' | 'credit') {
     setTab(next);
     setNotice('');
     if (next === 'credit' && location?.type !== 'RETAIL_STORE') {
@@ -75,17 +89,22 @@ export default function TradePage() {
   }
 
   return <main className={`app-page ${styles.page}`}>
-    <header className={styles.top}><div><h1>{canCredit ? 'Purchasing & customer credit' : 'Purchasing'}</h1>
-      <p className={styles.muted}>Track orders, receiving, and account activity by location.</p></div></header>
-    <div className={styles.fields}>
-      <label>Location<select aria-label="Location" value={locationId} disabled={!!receiving} onChange={(e) => { setLocationId(e.target.value); setNotice(''); }}>
+    <header className={styles.heading}>
+      <h1>{canCredit ? 'Purchasing & customer credit' : 'Purchasing'}</h1>
+      <p>Manage purchase orders, deliveries, and account activity by location.</p>
+    </header>
+    <div className={styles.toolbar}>
+      <div className={styles.views} role="group" aria-label="Purchasing and credit views">
+        {(canOrder || canPay) && <>
+          <button type="button" aria-pressed={tab === 'orders'} onClick={() => setMode('orders')}><ShoppingBag size={17} aria-hidden="true" /> Purchase orders</button>
+          <button type="button" aria-pressed={tab === 'receipts'} onClick={() => setMode('receipts')}><PackageCheck size={17} aria-hidden="true" /> Goods receipts</button>
+        </>}
+        {canCredit && <button type="button" aria-pressed={tab === 'credit'} onClick={() => setMode('credit')}><CreditCard size={17} aria-hidden="true" /> Customer credit</button>}
+      </div>
+      <label className={styles.field}>Location<select aria-label="Location" value={locationId} disabled={!!receiving} onChange={(event) => { setLocationId(event.target.value); setNotice(''); }}>
         {!filteredLocations.length && <option value="">No locations available</option>}
-        {filteredLocations.map((value) => <option key={value.id} value={value.id}>{value.name}</option>)}
+        {filteredLocations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
       </select></label>
-      {canCredit && (canOrder || canPay) && <div className={styles.fields} role="group" aria-label="Workspace">
-        <button type="button" className={tab === 'orders' ? 'admin-primary' : 'admin-secondary'} aria-pressed={tab === 'orders'} onClick={() => setMode('orders')}>Purchase orders</button>
-        <button type="button" className={tab === 'credit' ? 'admin-primary' : 'admin-secondary'} aria-pressed={tab === 'credit'} onClick={() => setMode('credit')}>Customer credit</button>
-      </div>}
     </div>
     {notice && <Feedback tone="success">{notice}</Feedback>}
     {error && <Feedback tone="error">{error}</Feedback>}
@@ -93,11 +112,12 @@ export default function TradePage() {
     {tab === 'orders' && canOrder && catalogueError && <Feedback tone="error" action={
       <button type="button" className="admin-secondary" onClick={() => setRetryCatalogue((value) => value + 1)}>Retry</button>
     }>{catalogueError}</Feedback>}
-    {token && location && tab === 'orders' && (canOrder || canPay) && <PurchaseOrders key={locationId} token={token} locationId={locationId} catalogue={catalogue}
+    {token && location && tab === 'orders' && (canOrder || canPay) && <PurchaseOrders key={locationId} token={token} locationId={locationId} locationName={location.name} catalogue={catalogue}
       canPay={canPay} canOrder={canOrder} reload={reload} onReceive={setReceiving} />}
+    {token && location && tab === 'receipts' && (canOrder || canPay) && <GoodsReceipts key={locationId} token={token} locationId={locationId} initialSearch={receiptSearch} />}
     {token && location?.type === 'RETAIL_STORE' && canCredit && tab === 'credit' && <CustomerCredit key={locationId} token={token} locationId={locationId} />}
     {location && receiving && <StockIntake mode="supplier" apiBase={API} token={token} locations={[location]} initialLocation={location.name}
-      variants={catalogue.filter((variant) => receiving.lines.some((line) => line.variantId === variant.variantId && receiving.receipts.flatMap((receipt) => receipt.lines).filter((item) => item.variantId === line.variantId).reduce((sum, item) => sum + item.quantityBaseUnits, 0) < line.quantity))}
+      variants={catalogue}
       purchaseOrder={receiving} onCancel={() => setReceiving(null)}
       onSaved={(message) => { setReceiving(null); setNotice(message); setReload((value) => value + 1); }} />}
   </main>;

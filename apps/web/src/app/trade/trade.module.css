@@ -1,0 +1,45 @@
+.page { display: grid; gap: 18px; }
+.heading h1, .sectionHeader h2, .orderHeader h3, .payments h3 { margin: 0; }
+.heading p, .orderHeader p { margin: 5px 0 0; color: var(--retail-muted); }
+.toolbar, .sectionHeader, .orderHeader {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+}
+.views {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 4px;
+  border: 1px solid var(--retail-edge); border-radius: 12px; background: var(--retail-raised);
+}
+.views button {
+  display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; border: 0;
+  border-radius: 8px; background: transparent; color: var(--retail-muted); font: inherit; font-weight: 650; cursor: pointer;
+}
+.views button[aria-pressed='true'] { background: var(--retail-card); color: var(--retail-accent-strong); box-shadow: var(--retail-shadow); }
+.field { display: grid; gap: 5px; min-width: 0; font-size: 13px; font-weight: 650; }
+.field :is(select, input) {
+  min-width: 0; padding: 8px 12px; min-height: 38px; border: 1px solid var(--retail-edge-strong);
+  border-radius: 8px; background: var(--retail-card); color: var(--retail-ink); font: inherit;
+}
+.surface {
+  display: grid; gap: 14px; padding: 18px; background: var(--retail-card);
+  border: 1px solid var(--retail-edge); border-radius: 14px; min-width: 0;
+}
+.orderForm, .orderFields { display: grid; gap: 12px; }
+.orderFields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.orderHeader { padding: 12px; border-radius: 10px; background: var(--retail-raised); }
+.orderHeader > div { flex: 1 1 180px; }
+.pending, .received { padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.pending { background: var(--retail-accent-soft); color: var(--retail-accent-strong); }
+.received { background: light-dark(#e3f4e9, #203d2c); color: light-dark(#21613c, #aee9c0); }
+.payments {
+  display: grid; gap: 10px; padding: 14px;
+  border: 1px solid var(--retail-edge); border-radius: 12px;
+}
+.paymentTotals {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); gap: 8px; margin: 0;
+}
+.paymentTotals > div { padding: 10px; border-radius: 9px; background: var(--retail-raised); }
+.paymentTotals dt, .muted { color: var(--retail-muted); font-size: 13px; }
+.paymentTotals dd { margin: 3px 0 0; font-weight: 750; }
+.receiptList { display: grid; gap: 8px; }
+.receipt { padding: 10px 12px; border: 1px solid var(--retail-edge); border-radius: 9px; overflow-wrap: anywhere; }
+.receipt summary { cursor: pointer; }
+.receipt summary :is(span, time) { margin-inline-start: 8px; color: var(--retail-muted); font-size: 13px; }

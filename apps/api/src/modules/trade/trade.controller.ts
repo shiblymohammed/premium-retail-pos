@@ -20,6 +20,11 @@ export class TradeController {
     return { data: await this.trade.orders(locationId, actor) };
   }
 
+  @Get('receipts')
+  async receipts(@CurrentUser() actor: RequestUser, @Query('locationId') locationId: string, @Query('search') search?: string) {
+    return { data: await this.trade.receipts(locationId, actor, search) };
+  }
+
   @Get('catalog')
   @Roles(...PURCHASE_ORDER_ROLES)
   @Permission('purchasing.orders')
