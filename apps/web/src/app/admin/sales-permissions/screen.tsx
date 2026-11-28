@@ -23,10 +23,12 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { clearStoredSession, getStoredSession, setStoredSession } from '@/lib/auth';
 import { QuickAccessCard, AdminModal } from '@/components/admin';
 import { AdminActionMenu } from '@/components/admin/admin-action-menu';
+import styles from './permissions.module.css';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
 
@@ -381,6 +383,7 @@ export default function SalesPermissionsAdmin() {
         </div>
 
         <div className="admin-heading-actions">
+          <Link className="admin-secondary" href="/admin/sales-permissions/access">Per-person permissions</Link>
           <div style={{ display: 'inline-flex', background: 'var(--retail-edge)', padding: '3px', borderRadius: '8px', border: '1px solid var(--retail-edge-strong)' }}>
             <button
               type="button"
@@ -1077,28 +1080,17 @@ export default function SalesPermissionsAdmin() {
                           {/* Col 7: Actions */}
                           <td data-column="Actions" style={{ padding: '13px 20px', textAlign: 'right' }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }} onClick={(e) => e.stopPropagation()}>
-                              {/* Edit Permissions Button */}
                               <button
                                 type="button"
+                                className="admin-secondary"
                                 onClick={() => openEditModal(user)}
-                                style={{
-                                  padding: '4px 10px',
-                                  borderRadius: '6px',
-                                  background: 'light-dark(#eff6ff, #1d2733)',
-                                  border: '1px solid light-dark(#bfdbfe, #2e425b)',
-                                  color: 'var(--retail-accent)',
-                                  fontSize: '12px',
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  transition: 'all 0.12s ease',
-                                }}
-                                title="Configure user permissions"
+                                aria-label={`Change permissions for ${user.name || user.email}`}
                               >
-                                Edit
+                                Change permissions
                               </button>
 
                               <AdminActionMenu label={`Permission actions for ${user.name || user.email}`}>
-                                <button type="button" onClick={() => openEditModal(user)}><Pencil size={15} aria-hidden="true" /> Configure permissions</button>
+                                <button type="button" onClick={() => openEditModal(user)}><Pencil size={15} aria-hidden="true" /> Change permissions</button>
                                 <button type="button" onClick={() => preparePreset(user, true, true, false)}><Zap size={15} aria-hidden="true" /> Grant voids and returns</button>
                                 <button type="button" onClick={() => preparePreset(user, false, true, false)}><Zap size={15} aria-hidden="true" /> Grant returns only</button>
                                 <button type="button" onClick={() => preparePreset(user, false, false, true)}><Package size={15} aria-hidden="true" /> Grant stock audit count</button>
@@ -1240,167 +1232,50 @@ export default function SalesPermissionsAdmin() {
         </div>
       )}
 
-      {/* MODAL: EDIT USER PERMISSIONS (Matching modal style of /admin/users, /admin/company, /admin/discount-limits) */}
-      {editingUser && (
-        <div
-          className="admin-dialog-backdrop"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.55)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100,
-            padding: '20px',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setEditingUser(null);
-          }}
-        >
-          <div
-            role="dialog" aria-modal="true" aria-labelledby="permission-editor-title"
-            onKeyDown={(event) => { if (event.key === 'Escape') setEditingUser(null); }}
-            style={{
-              background: 'var(--retail-card)',
-              borderRadius: '16px',
-              width: 'min(520px, 100%)',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.22)',
-              padding: 'clamp(14px, 3vw, 26px)',
-              maxHeight: 'calc(100dvh - 40px)',
-              overflowY: 'auto',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-              <div>
-                <h2 id="permission-editor-title" style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--retail-ink)' }}>
-                  Configure Staff Sales Permissions
-                </h2>
-                <div style={{ fontSize: '12.5px', color: 'var(--retail-muted)', marginTop: '2px' }}>
-                  {editingUser.name || editingUser.email} · {roleLabels[editingUser.role] || editingUser.role}
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Close"
-                autoFocus
-                onClick={() => setEditingUser(null)}
-                style={{ border: 'none', background: 'var(--retail-edge)', borderRadius: '8px', width: '30px', height: '30px', cursor: 'pointer', fontSize: '14px', color: 'var(--retail-muted)' }}
-              >
-                <X size="1em" className="inline-icon" aria-hidden="true" />
-              </button>
-            </div>
-
-            <form onSubmit={(event) => { event.preventDefault(); if (modalReason.trim()) setConfirmSave(true); else setError('Enter a reason for changing access.'); }} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {error && <Feedback tone="error">{error}</Feedback>}
-              {/* Permission Toggles List */}
-              <div style={{ background: 'var(--retail-raised)', padding: '16px', borderRadius: '12px', border: '1px solid var(--retail-edge-strong)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {/* Toggle 1: Cancel Sales */}
-                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  <div>
-                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Cancel finalized bills</strong>
-                    <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits cancelling receipts on POS terminals (Requires justification)</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={modalCanCancel}
-                    onChange={(e) => setModalCanCancel(e.target.checked)}
-                    role="switch"
-                    className="admin-permission-switch"
-                  />
-                </label>
-
-                <div style={{ height: '1px', background: 'var(--retail-edge)' }} />
-
-                {/* Toggle 2: Process Returns */}
-                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  <div>
-                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Process customer returns</strong>
-                    <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits accepting returned items and issuing credit vouchers</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={modalCanReturn}
-                    onChange={(e) => setModalCanReturn(e.target.checked)}
-                    role="switch"
-                    className="admin-permission-switch"
-                  />
-                </label>
-
-                <div style={{ height: '1px', background: 'var(--retail-edge)' }} />
-
-                {/* Toggle 3: Stock Audits */}
-                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
-                  <div>
-                    <strong style={{ fontSize: '13px', color: 'var(--retail-ink)', display: 'block' }}>Enter stock counts</strong>
-                    <span style={{ fontSize: '11.5px', color: 'var(--retail-muted)' }}>Permits counting inventory on /audits during stock reconciliation</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={modalCanAudit}
-                    onChange={(e) => setModalCanAudit(e.target.checked)}
-                    role="switch"
-                    className="admin-permission-switch"
-                  />
-                </label>
-              </div>
-
-              {/* Justification Reason Field */}
-              <div>
-                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 750, color: 'var(--retail-ink)', marginBottom: '6px' }}>
-                  Reason for changing access
-                </label>
-                <textarea
-                  rows={3}
-                  value={modalReason}
-                  onChange={(e) => setModalReason(e.target.value)}
-                  placeholder="Enter reason for granting or revoking these operational permissions..."
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid light-dark(#cbd5e1, #34455a)',
-                    fontSize: '13px',
-                    fontFamily: 'inherit',
-                    color: 'var(--retail-ink)',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                  required
-                />
-              </div>
-
-              {/* Form Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => setEditingUser(null)}
-                  style={{ padding: '9px 16px', borderRadius: '8px', background: 'var(--retail-edge)', border: 'none', color: 'var(--retail-muted)', fontSize: '13px', fontWeight: 650, cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingUserId === editingUser.id}
-                  style={{
-                    padding: '9px 20px',
-                    borderRadius: '8px',
-                    background: 'var(--retail-accent)',
-                    border: 'none',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 6px rgba(26, 98, 234, 0.28)',
-                  }}
-                >
-                  {savingUserId === editingUser.id ? 'Saving…' : 'Save Permissions'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {editingUser && <AdminModal
+        isOpen
+        title="Change permissions"
+        subtitle={`${editingUser.name || editingUser.email} · ${roleLabels[editingUser.role] || editingUser.role}`}
+        badgeIcon={<KeyRound size={20} aria-hidden="true" />}
+        onClose={() => { if (!savingUserId && !confirmSave) setEditingUser(null); }}
+        footer={<>
+          <button type="button" className="admin-secondary" disabled={!!savingUserId} onClick={() => setEditingUser(null)}>Cancel</button>
+          <button type="submit" form="sales-permission-form" className="admin-primary" disabled={!!savingUserId}>
+            {savingUserId ? 'Saving…' : 'Save permissions'}
+          </button>
+        </>}
+      >
+        <form id="sales-permission-form" className={styles.form} onSubmit={(event) => {
+          event.preventDefault();
+          if (savingUserId) return;
+          if (modalReason.trim()) setConfirmSave(true);
+          else setError('Enter a reason for changing access.');
+        }}>
+          {error && <Feedback tone="error">{error}</Feedback>}
+          <fieldset className={styles.options} disabled={!!savingUserId}>
+            <legend>Individual permissions</legend>
+            {[
+              { title: 'Cancel finalized bills', detail: 'Cancel a completed sale and record its refund.', checked: modalCanCancel, onChange: setModalCanCancel },
+              { title: 'Process customer returns', detail: 'Record returned items and their refunds.', checked: modalCanReturn, onChange: setModalCanReturn },
+              { title: 'Enter stock counts', detail: 'Submit physical quantities during a stock count.', checked: modalCanAudit, onChange: setModalCanAudit },
+            ].map(({ title, detail, checked, onChange }) => (
+              <label className={styles.option} key={title}>
+                <span className={styles.optionCopy}><strong>{title}</strong><small>{detail}</small></span>
+                <span className={styles.optionControl}>
+                  <span className={styles.state} aria-hidden="true">{checked ? 'On' : 'Off'}</span>
+                  <input type="checkbox" role="switch" aria-label={title} checked={checked}
+                    className="admin-permission-switch" onChange={(event) => onChange(event.target.checked)} />
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <label className={styles.reason}>
+            <strong>Reason for changing access</strong>
+            <textarea rows={3} value={modalReason} required disabled={!!savingUserId}
+              onChange={(event) => setModalReason(event.target.value)} />
+          </label>
+        </form>
+      </AdminModal>}
 
       {/* MODAL: AUDIT TRAIL LOGS */}
       {isAuditModalOpen && (

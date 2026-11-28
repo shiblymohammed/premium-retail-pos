@@ -31,18 +31,6 @@ const onOff = (v: boolean) => (v ? 'On' : 'Off');
 const countOn = (...v: boolean[]) => `${v.filter(Boolean).length} of ${v.length} on`;
 
 // ---------- Option lists (same values as before) ----------
-const CURRENCIES = [
-  { value: 'INR (₹)', label: 'INR - Indian Rupee (₹)' },
-  { value: 'USD ($)', label: 'USD - US Dollar ($)' },
-  { value: 'EUR (€)', label: 'EUR - Euro (€)' },
-  { value: 'AED (د.إ)', label: 'AED - UAE Dirham (د.إ)' },
-  { value: 'GBP (£)', label: 'GBP - British Pound (£)' },
-];
-const DATE_FORMATS = [
-  { value: 'DD-MMM-YYYY 12h', label: 'DD-MMM-YYYY', detail: 'e.g. 19-Nov-2026 10:45 AM' },
-  { value: 'YYYY-MM-DD 24h', label: 'ISO 8601, 24-hour', detail: 'e.g. 2026-11-19 10:45' },
-  { value: 'MM/DD/YYYY', label: 'US format', detail: 'e.g. 11/19/2026' },
-];
 const LOCK_TIMES = [
   { value: 2, label: '2 minutes', detail: 'Best for busy shared counters' },
   { value: 5, label: '5 minutes' },
@@ -57,14 +45,12 @@ const CARRIERS = [
   { value: 'Internal Fleet Van #02', label: 'Internal Fleet Van #02', detail: 'Own vehicle' },
 ];
 
-const labelOf = <T,>(list: { value: T; label: string }[], v: T) => list.find((o) => o.value === v)?.label ?? String(v);
 const short = (s: string, n = 34) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-const cashCurrency = (prefs: UserPreferences) => prefs.currencySymbol.split(' ')[0];
 const cashLabel = (currency: string, amount: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
 
 // ---------- Groups shown on the page, by role ----------
-export function getSettingGroups(role: string): SettingGroup[] {
+export function getSettingGroups(role: string, checkoutCurrency?: string): SettingGroup[] {
   const isCashier = role === 'CASHIER';
   const isStoreManager = role === 'STORE_MANAGER';
   const isWarehouse = role === 'CENTRAL_MANAGER' || role === 'WAREHOUSE_MANAGER' || role === 'SUB_WAREHOUSE_MANAGER';
@@ -86,7 +72,6 @@ export function getSettingGroups(role: string): SettingGroup[] {
     description: 'Applies to this computer or till only.',
     items: [
       { id: 'sound', icon: 'sound', title: 'Sounds & keyboard hints', description: 'Scan beep and the F1 / F8 / ESC shortcut bar', summary: (p) => `${p.soundFxEnabled ? `Sound ${p.scanBeepVolume}%` : 'Sound off'} · Hints ${onOff(p.showKeyboardHints).toLowerCase()}` },
-      { id: 'region', icon: 'globe', title: 'Currency & date format', description: 'How money and dates are shown on screen', summary: (p) => `${p.currencySymbol} · ${labelOf(DATE_FORMATS, p.dateFormat)}` },
       { id: 'autolock', icon: 'lock', title: 'Screen lock', description: 'Lock the screen when nobody is using it', summary: (p) => (p.autoLockMinutes ? `After ${p.autoLockMinutes} min` : 'Never') },
     ],
   };
@@ -100,7 +85,9 @@ export function getSettingGroups(role: string): SettingGroup[] {
       items: [
         { id: 'printer', icon: 'printer', title: 'Receipt printer & cash drawer', description: 'Paper width, auto-print and drawer opening', summary: (p) => `${p.printerWidth} · Auto-print ${onOff(p.autoPrintReceipt).toLowerCase()}` },
         { id: 'scanner', icon: 'scan', title: 'Scanner & receipt logo', description: 'Scanner type and what happens when you scan an item twice', summary: (p) => `${p.scannerMode === 'hardware' ? 'Handheld scanner' : 'Camera'} · ${p.incrementOnRescan ? 'Rescan adds +1' : 'Rescan adds a line'}` },
-        { id: 'fastcash', icon: 'grid', title: 'Quick cash buttons', description: 'Cash shortcuts on this device for the selected currency', summary: (p) => quickCashAmounts(cashCurrency(p), p).map((value) => cashLabel(cashCurrency(p), value)).join(' · ') },
+        { id: 'fastcash', icon: 'grid', title: 'Quick cash buttons', description: 'Cash shortcuts in your assigned store’s currency', summary: (p) => checkoutCurrency
+          ? quickCashAmounts(checkoutCurrency, p).map((value) => cashLabel(checkoutCurrency, value)).join(' · ')
+          : 'Open' },
       ],
     });
   }
@@ -154,7 +141,14 @@ export function getSettingGroups(role: string): SettingGroup[] {
 }
 
 // ---------- Panel content for each item ----------
-export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: string; role: string; prefs: UserPreferences; onUpdate: UpdatePref; onSaved: (msg: string) => void }) {
+export function SettingPanel({ id, role, prefs, checkoutCurrency, onUpdate, onSaved }: {
+  id: string;
+  role: string;
+  prefs: UserPreferences;
+  checkoutCurrency?: string | null;
+  onUpdate: UpdatePref;
+  onSaved: (msg: string) => void;
+}) {
   switch (id) {
     case 'password':
       return <PasswordPanel onSaved={onSaved} />;
@@ -173,13 +167,6 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
           )}
           <ToggleRow title="Keyboard shortcut bar" detail="Show the F1, F8 and ESC hints along the bottom of the screen." checked={prefs.showKeyboardHints} onChange={(v) => onUpdate('showKeyboardHints', v)} />
         </div>
-      );
-    case 'region':
-      return (
-        <>
-          <ChoiceList name="currency" label="Currency" options={CURRENCIES} value={prefs.currencySymbol} onChange={(v) => onUpdate('currencySymbol', v)} />
-          <ChoiceList name="date" label="Date & time format" options={DATE_FORMATS} value={prefs.dateFormat} onChange={(v) => onUpdate('dateFormat', v)} />
-        </>
       );
     case 'autolock':
       return (
@@ -217,10 +204,12 @@ export function SettingPanel({ id, role, prefs, onUpdate, onSaved }: { id: strin
           </div>
         </>
       );
-    case 'fastcash': {
-      const currency = cashCurrency(prefs);
-      return <FastCashPanel currency={currency} values={quickCashAmounts(currency, prefs)} onChange={(values) => onUpdate('fastCashByCurrency', { ...prefs.fastCashByCurrency, [currency]: values })} />;
-    }
+    case 'fastcash':
+      if (!checkoutCurrency) return <p role="status">{checkoutCurrency === null
+        ? 'Your assigned store’s currency is unavailable. Reload Settings to try again.'
+        : 'Loading your assigned store’s currency…'}</p>;
+      return <FastCashPanel currency={checkoutCurrency} values={quickCashAmounts(checkoutCurrency, prefs)}
+        onChange={(values) => onUpdate('fastCashByCurrency', { ...prefs.fastCashByCurrency, [checkoutCurrency]: values })} />;
     case 'attendance':
       return (
         <>

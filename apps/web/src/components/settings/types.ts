@@ -5,8 +5,6 @@ export interface UserPreferences {
   theme: 'light' | 'navy' | 'slate';
   soundFxEnabled: boolean;
   scanBeepVolume: number; // 0-100
-  currencySymbol: string;
-  dateFormat: string;
   autoLockMinutes: number; // 0 = never
   showKeyboardHints: boolean;
 
@@ -50,8 +48,6 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   theme: 'light',
   soundFxEnabled: true,
   scanBeepVolume: 80,
-  currencySymbol: 'INR (₹)',
-  dateFormat: 'DD-MMM-YYYY 12h',
   autoLockMinutes: 15,
   showKeyboardHints: true,
 

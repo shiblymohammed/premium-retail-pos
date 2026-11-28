@@ -22,6 +22,8 @@ import {
 } from '@/components/settings';
 import styles from '@/components/settings/settings.module.css';
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace(/\/+$/, '');
+
 const ROLE_LABEL: Record<string, string> = {
   SUPER_ADMIN: 'Super admin',
   ADMIN: 'Admin',
@@ -41,6 +43,7 @@ export default function SettingsPage() {
   const [pinSet, setPinSet] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [checkoutCurrency, setCheckoutCurrency] = useState<string | null>();
 
   useEffect(() => {
     const current = getStoredSession();
@@ -75,7 +78,21 @@ export default function SettingsPage() {
   }, [toast]);
 
   const role = session?.user?.role || 'STORE_MANAGER';
-  const groups = useMemo(() => getSettingGroups(role), [role]);
+  const token = session?.accessToken;
+  useEffect(() => {
+    if (role !== 'CASHIER' || !token) return;
+    const controller = new AbortController();
+    void fetch(`${API_BASE}/pos/terminal/context`, {
+      headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('Could not load the store currency');
+      const { data } = await response.json() as { data?: { location?: { currency?: string } } };
+      if (!controller.signal.aborted) setCheckoutCurrency(data?.location?.currency ?? null);
+    }).catch(() => { if (!controller.signal.aborted) setCheckoutCurrency(null); });
+    return () => controller.abort();
+  }, [role, token]);
+
+  const groups = useMemo(() => getSettingGroups(role, checkoutCurrency ?? undefined), [role, checkoutCurrency]);
   const allItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
   const openItem: SettingItem | undefined = allItems.find((i) => i.id === openId);
 
@@ -190,7 +207,7 @@ export default function SettingsPage() {
             </>
           ) : undefined}
         >
-          <SettingPanel id={openItem.id} role={role} prefs={prefs} onUpdate={updatePref} onSaved={formDone} />
+          <SettingPanel id={openItem.id} role={role} prefs={prefs} checkoutCurrency={checkoutCurrency} onUpdate={updatePref} onSaved={formDone} />
         </SettingsDrawer>
       )}
 

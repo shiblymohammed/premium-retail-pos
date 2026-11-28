@@ -6,7 +6,6 @@ import {
   ChevronDown,
   Clock,
   ExternalLink,
-  Globe,
   Info,
   KeyRound,
   LayoutGrid,
@@ -35,7 +34,6 @@ import styles from './settings.module.css';
 // ---------- Icons (simple 24px stroke icons, same style as the other pages) ----------
 const ICON_COMPONENTS: Partial<Record<string, LucideIcon>> = {
   sound: Volume2,
-  globe: Globe,
   lock: Lock,
   key: KeyRound,
   pin: MapPin,

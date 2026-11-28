@@ -1,0 +1,81 @@
+.form {
+  display: grid;
+  gap: 16px;
+}
+
+.options {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.options legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-weight: 700;
+}
+
+.option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px;
+  border: 1px solid var(--retail-edge);
+  border-radius: 10px;
+  background: var(--retail-raised);
+  cursor: pointer;
+}
+
+.optionCopy {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 180px;
+  gap: 3px;
+}
+
+.optionCopy small {
+  color: var(--retail-muted);
+}
+
+.optionControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.optionControl input {
+  margin: 0;
+}
+
+.state {
+  min-width: 2em;
+  color: var(--retail-muted);
+  font-size: 13px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.optionControl:has(input:checked) .state {
+  color: var(--retail-accent-strong);
+}
+
+.reason {
+  display: grid;
+  gap: 6px;
+}
+
+.reason textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--retail-edge-strong);
+  border-radius: 8px;
+  background: var(--retail-card);
+  color: var(--retail-ink);
+  font: inherit;
+  resize: vertical;
+}
